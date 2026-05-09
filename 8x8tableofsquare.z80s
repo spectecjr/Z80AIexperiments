@@ -108,9 +108,9 @@ stream_mult8x8_16_loop:
 
         LD   A,B            ; [4T]  compute |M1 - M2|
         SUB  C              ; [4T]  carry set if M1 < M2
-        JR   NC,m8x8_absok  ; [7T/12T]  branch if M1 >= M2 (not taken / taken)
+        JR   NC,stream_m8x8_absok ; [7T/12T]  branch if M1 >= M2 (not taken / taken)
         NEG                 ; [8T]  A = M2 - M1 = |M1 - M2|
-m8x8_absok: LD   C,A            ; [4T]  C = |M1 - M2|  (reuse; M2 no longer needed)
+stream_m8x8_absok: LD   C,A ; [4T]  C = |M1 - M2|  (reuse; M2 no longer needed)
         AND  A              ; [4T]  clear carry for a clean subtraction
 
         DEC  H              ; [4T]  subtract m8x8_square_table_low[|M1-M2|] from low byte
