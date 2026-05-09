@@ -1,0 +1,206 @@
+﻿;------------------------------------------------------------------
+; mult8x8_16 - 8x8 unsigned multiply via quarter table of squares
+;
+; Uses the identity: M1*M2 = (M1^2/2 + M2^2/2) - (M1-M2)^2/2
+; When both operands are odd, the half-squares are rounded down,
+; so 1 is added via carry before accumulating.
+;
+; Entry : B = M1, C = M2
+; Exit  : DE = 16-bit result
+; Trash : AF, HL, DE
+; Cycles: 159T (M1 >= M2) / 162T (M1 < M2)
+;
+; m8x8_square_table_low and m8x8_square_table_hgih must each be a 256-byte page-aligned table such that:
+;   m8x8_square_table_low[n] = LOW (n*n / 2)
+;   m8x8_square_table_hgih[n] = HIGH(n*n / 2)
+;
+; Based on "Fastest 6502 Multiply Yet" by Charles Putney, published
+; in Apple Assembly Line, vol 6 Issue 6 (March 1986).
+;
+; https://www.txbobsc.com/aal/1986/aal8603.html
+;
+; Ported by AI, then optimized by Simon Cooke to shave off
+; a few t-states (ahhhh.. still better than a robot ;-) ) 
+;
+;------------------------------------------------------------------
+
+mult8x8_16:
+        LD   H,m8x8_square_table_low / 256    ; [7T]  m8x8_square_table_low[M2]
+        LD   A,B            ; [4T]  A = M1
+        AND  C              ; [4T]  A = M1 AND M2
+        RRCA                ; [4T]  carry = bit 0: set iff both factors are odd
+
+        LD   L,C            ; [4T]
+        LD   A,(HL)         ; [7T]  A = m8x8_square_table_low[M2]  (carry preserved; LD doesn't touch flags)
+        LD   L,B            ; [4T]  m8x8_square_table_low[M1] + odd carry
+        ADC  A,(HL)         ; [7T]  A = m8x8_square_table_low[M2] + m8x8_square_table_low[M1] + carry
+        LD   E,A            ; [4T]  E = low byte of half-sum
+
+        INC  H              ; [4T]  m8x8_square_table_hgih[M2]
+        LD   L,C            ; [4T]
+        LD   A,(HL)         ; [7T]  A = m8x8_square_table_hgih[M2]
+        LD   L,B            ; [4T]  m8x8_square_table_hgih[M1] + carry from above
+        ADC  A,(HL)         ; [7T]  A = m8x8_square_table_hgih[M2] + m8x8_square_table_hgih[M1] + carry
+        LD   D,A            ; [4T]  DE = floor(M1^2/2) + floor(M2^2/2) [+1 if both odd]
+
+        LD   A,B            ; [4T]  compute |M1 - M2|
+        SUB  C              ; [4T]  carry set if M1 < M2
+        JR   NC,m8x8_absok  ; [7T/12T]  branch if M1 >= M2 (not taken / taken)
+        NEG                 ; [8T]  A = M2 - M1 = |M1 - M2|
+m8x8_absok: LD   C,A            ; [4T]  C = |M1 - M2|  (reuse; M2 no longer needed)
+        AND  A              ; [4T]  clear carry for a clean subtraction
+
+        DEC  H              ; [4T]  subtract m8x8_square_table_low[|M1-M2|] from low byte
+        LD   L,C            ; [4T]
+        LD   A,E            ; [4T]
+        SBC  A,(HL)         ; [7T]  A = sum_lo - m8x8_square_table_low[|M1-M2|]
+        LD   E,A            ; [4T]  save low byte; borrow propagates in carry
+
+        INC  H              ; [4T]  subtract m8x8_square_table_hgih[|M1-M2|] from high byte
+        LD   L,C            ; [4T]  C still holds |M1-M2|
+        LD   A,D            ; [4T]
+        SBC  A,(HL)         ; [7T]  A = sum_hi - m8x8_square_table_hgih[|M1-M2|] - borrow
+
+        LD   D,A            ; [4T]  D = high byte of product; E is already low part.
+        RET                 ; [10T]
+
+;------------------------------------------------------------
+
+;------------------------------------------------------------------
+; stream_mult8x8_16 - streaming 8x8 unsigned multiply via table of squares
+;
+; Entry : IX = address of input stream (M1, M2 pairs)
+;         IY = address of output stream (16-bit results)
+;         B  = number of operations to perform.
+; Trash : AF, BC', HL', DE'
+;
+; When you positively absolutey have to do a whole bunch of
+; multiplies in a row, this version saves a few t-states. 
+;------------------------------------------------------------------
+
+stream_mult8x8_16:
+        EXX                 ; [4T]
+        LD   H,m8x8_square_table_low / 256    ; [7T]  m8x8_square_table_low[M2]
+        DEFB 62             ; [7T]  LD A,xxx - consumes following EXX instruction, trashes A.
+                            ;       Saves 1 T-state vs doing an EXX followed by an EXX.
+stream_mult8x8_16_loop:
+        EXX                 ; [4T]
+        LD B,(IX)           ; [19T]
+        INC IX              ; [10T]
+        LD C,(IX)           ; [19T]
+        INC IX              ; [10T]
+        LD   A,B            ; [4T]  A = M1
+        AND  C              ; [4T]  A = M1 AND M2
+        RRCA                ; [4T]  carry = bit 0: set iff both factors are odd
+
+        LD   L,C            ; [4T]
+        LD   A,(HL)         ; [7T]  A = m8x8_square_table_low[M2]  (carry preserved; LD doesn't touch flags)
+        LD   L,B            ; [4T]  m8x8_square_table_low[M1] + odd carry
+        ADC  A,(HL)         ; [7T]  A = m8x8_square_table_low[M2] + m8x8_square_table_low[M1] + carry
+        LD   E,A            ; [4T]  E = low byte of half-sum
+
+        INC  H              ; [4T]  m8x8_square_table_hgih[M2]
+        LD   L,C            ; [4T]
+        LD   A,(HL)         ; [7T]  A = m8x8_square_table_hgih[M2]
+        LD   L,B            ; [4T]  m8x8_square_table_hgih[M1] + carry from above
+        ADC  A,(HL)         ; [7T]  A = m8x8_square_table_hgih[M2] + m8x8_square_table_hgih[M1] + carry
+        LD   D,A            ; [4T]  DE = floor(M1^2/2) + floor(M2^2/2) [+1 if both odd]
+
+        LD   A,B            ; [4T]  compute |M1 - M2|
+        SUB  C              ; [4T]  carry set if M1 < M2
+        JR   NC,m8x8_absok  ; [7T/12T]  branch if M1 >= M2 (not taken / taken)
+        NEG                 ; [8T]  A = M2 - M1 = |M1 - M2|
+m8x8_absok: LD   C,A            ; [4T]  C = |M1 - M2|  (reuse; M2 no longer needed)
+        AND  A              ; [4T]  clear carry for a clean subtraction
+
+        DEC  H              ; [4T]  subtract m8x8_square_table_low[|M1-M2|] from low byte
+        LD   L,C            ; [4T]
+        LD   A,E            ; [4T]
+        SBC  A,(HL)         ; [7T]  A = sum_lo - m8x8_square_table_low[|M1-M2|]
+        LD   (IY),A         ; [19T] save low byte; borrow propagates in carry
+        INC IY              ; [10T]
+
+        INC  H              ; [4T]  subtract m8x8_square_table_hgih[|M1-M2|] from high byte
+        LD   L,C            ; [4T]  C still holds |M1-M2|
+        LD   A,D            ; [4T]
+        SBC  A,(HL)         ; [7T]  A = sum_hi - m8x8_square_table_hgih[|M1-M2|] - borrow
+
+        LD (IY),A           ; [19T] D = high byte of product
+        INC IY              ; [10T]
+        EXX                 ; [4T]
+        DJNZ stream_mult8x8_16_loop ; [13T/8T] taken/not taken
+
+        RET                 ; [10T]
+
+;------------------------------------------------------------
+
+; This table MUST be 256-byte aligned.
+m8x8_square_table_low:
+        ALIGN 256
+        DEFB 0 % 256,0 % 256,2 % 256,4 % 256,8 % 256,12 % 256,18 % 256,24 % 256
+        DEFB 32 % 256,40 % 256,50 % 256,60 % 256,72 % 256,84 % 256,98 % 256,112 % 256
+        DEFB 128 % 256,144 % 256,162 % 256,180 % 256,200 % 256,220 % 256,242 % 256,264 % 256
+        DEFB 288 % 256,312 % 256,338 % 256,364 % 256,392 % 256,420 % 256,450 % 256,480 % 256
+        DEFB 512 % 256,544 % 256,578 % 256,612 % 256,648 % 256,684 % 256,722 % 256,760 % 256
+        DEFB 800 % 256,840 % 256,882 % 256,924 % 256,968 % 256,1012 % 256,1058 % 256,1104 % 256
+        DEFB 1152 % 256,1200 % 256,1250 % 256,1300 % 256,1352 % 256,1404 % 256,1458 % 256,1512 % 256
+        DEFB 1568 % 256,1624 % 256,1682 % 256,1740 % 256,1800 % 256,1860 % 256,1922 % 256,1984 % 256
+        DEFB 2048 % 256,2112 % 256,2178 % 256,2244 % 256,2312 % 256,2380 % 256,2450 % 256,2520 % 256
+        DEFB 2592 % 256,2664 % 256,2738 % 256,2812 % 256,2888 % 256,2964 % 256,3042 % 256,3120 % 256
+        DEFB 3200 % 256,3280 % 256,3362 % 256,3444 % 256,3528 % 256,3612 % 256,3698 % 256,3784 % 256
+        DEFB 3872 % 256,3960 % 256,4050 % 256,4140 % 256,4232 % 256,4324 % 256,4418 % 256,4512 % 256
+        DEFB 4608 % 256,4704 % 256,4802 % 256,4900 % 256,5000 % 256,5100 % 256,5202 % 256,5304 % 256
+        DEFB 5408 % 256,5512 % 256,5618 % 256,5724 % 256,5832 % 256,5940 % 256,6050 % 256,6160 % 256
+        DEFB 6272 % 256,6384 % 256,6498 % 256,6612 % 256,6728 % 256,6844 % 256,6962 % 256,7080 % 256
+        DEFB 7200 % 256,7320 % 256,7442 % 256,7564 % 256,7688 % 256,7812 % 256,7938 % 256,8064 % 256
+        DEFB 8192 % 256,8320 % 256,8450 % 256,8580 % 256,8712 % 256,8844 % 256,8978 % 256,9112 % 256
+        DEFB 9248 % 256,9384 % 256,9522 % 256,9660 % 256,9800 % 256,9940 % 256,10082 % 256,10224 % 256
+        DEFB 10368 % 256,10512 % 256,10658 % 256,10804 % 256,10952 % 256,11100 % 256,11250 % 256,11400 % 256
+        DEFB 11552 % 256,11704 % 256,11858 % 256,12012 % 256,12168 % 256,12324 % 256,12482 % 256,12640 % 256
+        DEFB 12800 % 256,12960 % 256,13122 % 256,13284 % 256,13448 % 256,13612 % 256,13778 % 256,13944 % 256
+        DEFB 14112 % 256,14280 % 256,14450 % 256,14620 % 256,14792 % 256,14964 % 256,15138 % 256,15312 % 256
+        DEFB 15488 % 256,15664 % 256,15842 % 256,16020 % 256,16200 % 256,16380 % 256,16562 % 256,16744 % 256
+        DEFB 16928 % 256,17112 % 256,17298 % 256,17484 % 256,17672 % 256,17860 % 256,18050 % 256,18240 % 256
+        DEFB 18432 % 256,18624 % 256,18818 % 256,19012 % 256,19208 % 256,19404 % 256,19602 % 256,19800 % 256
+        DEFB 20000 % 256,20200 % 256,20402 % 256,20604 % 256,20808 % 256,21012 % 256,21218 % 256,21424 % 256
+        DEFB 21632 % 256,21840 % 256,22050 % 256,22260 % 256,22472 % 256,22684 % 256,22898 % 256,23112 % 256
+        DEFB 23328 % 256,23544 % 256,23762 % 256,23980 % 256,24200 % 256,24420 % 256,24642 % 256,24864 % 256
+        DEFB 25088 % 256,25312 % 256,25538 % 256,25764 % 256,25992 % 256,26220 % 256,26450 % 256,26680 % 256
+        DEFB 26912 % 256,27144 % 256,27378 % 256,27612 % 256,27848 % 256,28084 % 256,28322 % 256,28560 % 256
+        DEFB 28800 % 256,29040 % 256,29282 % 256,29524 % 256,29768 % 256,30012 % 256,30258 % 256,30504 % 256
+        DEFB 30752 % 256,31000 % 256,31250 % 256,31500 % 256,31752 % 256,32004 % 256,32258 % 256,32512 % 256
+
+        ; This table MUST occur 256 bytes after the first one.
+m8x8_square_table_hgih:
+        DEFB 0 / 256,0 / 256,2 / 256,4 / 256,8 / 256,12 / 256,18 / 256,24 / 256
+        DEFB 32 / 256,40 / 256,50 / 256,60 / 256,72 / 256,84 / 256,98 / 256,112 / 256
+        DEFB 128 / 256,144 / 256,162 / 256,180 / 256,200 / 256,220 / 256,242 / 256,264 / 256
+        DEFB 288 / 256,312 / 256,338 / 256,364 / 256,392 / 256,420 / 256,450 / 256,480 / 256
+        DEFB 512 / 256,544 / 256,578 / 256,612 / 256,648 / 256,684 / 256,722 / 256,760 / 256
+        DEFB 800 / 256,840 / 256,882 / 256,924 / 256,968 / 256,1012 / 256,1058 / 256,1104 / 256
+        DEFB 1152 / 256,1200 / 256,1250 / 256,1300 / 256,1352 / 256,1404 / 256,1458 / 256,1512 / 256
+        DEFB 1568 / 256,1624 / 256,1682 / 256,1740 / 256,1800 / 256,1860 / 256,1922 / 256,1984 / 256
+        DEFB 2048 / 256,2112 / 256,2178 / 256,2244 / 256,2312 / 256,2380 / 256,2450 / 256,2520 / 256
+        DEFB 2592 / 256,2664 / 256,2738 / 256,2812 / 256,2888 / 256,2964 / 256,3042 / 256,3120 / 256
+        DEFB 3200 / 256,3280 / 256,3362 / 256,3444 / 256,3528 / 256,3612 / 256,3698 / 256,3784 / 256
+        DEFB 3872 / 256,3960 / 256,4050 / 256,4140 / 256,4232 / 256,4324 / 256,4418 / 256,4512 / 256
+        DEFB 4608 / 256,4704 / 256,4802 / 256,4900 / 256,5000 / 256,5100 / 256,5202 / 256,5304 / 256
+        DEFB 5408 / 256,5512 / 256,5618 / 256,5724 / 256,5832 / 256,5940 / 256,6050 / 256,6160 / 256
+        DEFB 6272 / 256,6384 / 256,6498 / 256,6612 / 256,6728 / 256,6844 / 256,6962 / 256,7080 / 256
+        DEFB 7200 / 256,7320 / 256,7442 / 256,7564 / 256,7688 / 256,7812 / 256,7938 / 256,8064 / 256
+        DEFB 8192 / 256,8320 / 256,8450 / 256,8580 / 256,8712 / 256,8844 / 256,8978 / 256,9112 / 256
+        DEFB 9248 / 256,9384 / 256,9522 / 256,9660 / 256,9800 / 256,9940 / 256,10082 / 256,10224 / 256
+        DEFB 10368 / 256,10512 / 256,10658 / 256,10804 / 256,10952 / 256,11100 / 256,11250 / 256,11400 / 256
+        DEFB 11552 / 256,11704 / 256,11858 / 256,12012 / 256,12168 / 256,12324 / 256,12482 / 256,12640 / 256
+        DEFB 12800 / 256,12960 / 256,13122 / 256,13284 / 256,13448 / 256,13612 / 256,13778 / 256,13944 / 256
+        DEFB 14112 / 256,14280 / 256,14450 / 256,14620 / 256,14792 / 256,14964 / 256,15138 / 256,15312 / 256
+        DEFB 15488 / 256,15664 / 256,15842 / 256,16020 / 256,16200 / 256,16380 / 256,16562 / 256,16744 / 256
+        DEFB 16928 / 256,17112 / 256,17298 / 256,17484 / 256,17672 / 256,17860 / 256,18050 / 256,18240 / 256
+        DEFB 18432 / 256,18624 / 256,18818 / 256,19012 / 256,19208 / 256,19404 / 256,19602 / 256,19800 / 256
+        DEFB 20000 / 256,20200 / 256,20402 / 256,20604 / 256,20808 / 256,21012 / 256,21218 / 256,21424 / 256
+        DEFB 21632 / 256,21840 / 256,22050 / 256,22260 / 256,22472 / 256,22684 / 256,22898 / 256,23112 / 256
+        DEFB 23328 / 256,23544 / 256,23762 / 256,23980 / 256,24200 / 256,24420 / 256,24642 / 256,24864 / 256
+        DEFB 25088 / 256,25312 / 256,25538 / 256,25764 / 256,25992 / 256,26220 / 256,26450 / 256,26680 / 256
+        DEFB 26912 / 256,27144 / 256,27378 / 256,27612 / 256,27848 / 256,28084 / 256,28322 / 256,28560 / 256
+        DEFB 28800 / 256,29040 / 256,29282 / 256,29524 / 256,29768 / 256,30012 / 256,30258 / 256,30504 / 256
+        DEFB 30752 / 256,31000 / 256,31250 / 256,31500 / 256,31752 / 256,32004 / 256,32258 / 256,32512 / 256

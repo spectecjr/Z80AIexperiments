@@ -1,0 +1,5 @@
+                ORG 32768
+start:
+                INCLUDE "8x8mult16.z80s"
+end:            equ $
+codelen:        equ end - start
