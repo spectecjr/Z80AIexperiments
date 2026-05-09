@@ -81,7 +81,7 @@ m8x8_absok: LD   C,A            ; [4T]  C = |M1 - M2|  (reuse; M2 no longer need
 stream_mult8x8_16:
         EXX                 ; [4T]
         LD   H,m8x8_square_table_low / 256    ; [7T]  m8x8_square_table_low[M2]
-        DEFB 62             ; [7T]  LD A,xxx - consumes following EXX instruction, trashes A.
+        DEFB 63             ; [7T]  LD A,xxx - consumes following EXX instruction, trashes A.
                             ;       Saves 1 T-state vs doing an EXX followed by an EXX.
 stream_mult8x8_16_loop:
         EXX                 ; [4T]
