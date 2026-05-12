@@ -8,7 +8,7 @@
 ; Entry : B = M1, C = M2
 ; Exit  : DE = 16-bit result
 ; Trash : AF, HL, DE
-; Cycles: 155T (M1 >= M2) / 152T (M1 < M2)
+; Cycles: 155T (M1 >= M2) / 158T (M1 < M2)
 ;
 ; m8x8_square_table_low and m8x8_square_table_hgih must each be a 256-byte page-aligned table such that:
 ;   m8x8_square_table_low[n] = LOW (n*n / 2)
