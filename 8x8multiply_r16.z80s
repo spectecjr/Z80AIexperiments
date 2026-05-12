@@ -8,7 +8,7 @@
 ; Entry : B = M1, C = M2
 ; Exit  : DE = 16-bit result
 ; Trash : AF, HL, DE
-; Cycles: 159T (M1 >= M2) / 162T (M1 < M2)
+; Cycles: 155T (M1 >= M2) / 148T (M1 < M2)
 ;
 ; m8x8_square_table_low and m8x8_square_table_hgih must each be a 256-byte page-aligned table such that:
 ;   m8x8_square_table_low[n] = LOW (n*n / 2)
@@ -21,6 +21,7 @@
 ;
 ; Ported by AI, then optimized by Simon Cooke to shave off
 ; a few t-states (ahhhh.. still better than a robot ;-) ) 
+; And a few more t-state shaved off by Anton Javorček. 
 ;
 ;------------------------------------------------------------------
 
@@ -47,13 +48,12 @@ mult8x8_16:
         SUB  C              ; [4T]  carry set if M1 < M2
         JR   NC,m8x8_absok  ; [7T/12T]  branch if M1 >= M2 (not taken / taken)
         NEG                 ; [8T]  A = M2 - M1 = |M1 - M2|
-m8x8_absok: LD   C,A            ; [4T]  C = |M1 - M2|  (reuse; M2 no longer needed)
-        AND  A              ; [4T]  clear carry for a clean subtraction
-
+m8x8_absok:
+        LD   C,A            ; [4T]  C = |M1 - M2|  (reuse; M2 no longer needed)
         DEC  H              ; [4T]  subtract m8x8_square_table_low[|M1-M2|] from low byte
         LD   L,C            ; [4T]
         LD   A,E            ; [4T]
-        SBC  A,(HL)         ; [7T]  A = sum_lo - m8x8_square_table_low[|M1-M2|]
+        SUB  A,(HL)         ; [7T]  A = sum_lo - m8x8_square_table_low[|M1-M2|]
         LD   E,A            ; [4T]  save low byte; borrow propagates in carry
 
         INC  H              ; [4T]  subtract m8x8_square_table_hgih[|M1-M2|] from high byte
@@ -110,9 +110,8 @@ stream_mult8x8_16_loop:
         SUB  C              ; [4T]  carry set if M1 < M2
         JR   NC,stream_m8x8_absok ; [7T/12T]  branch if M1 >= M2 (not taken / taken)
         NEG                 ; [8T]  A = M2 - M1 = |M1 - M2|
-stream_m8x8_absok: LD   C,A ; [4T]  C = |M1 - M2|  (reuse; M2 no longer needed)
-        AND  A              ; [4T]  clear carry for a clean subtraction
-
+stream_m8x8_absok:
+        LD   C,A ; [4T]  C = |M1 - M2|  (reuse; M2 no longer needed)
         DEC  H              ; [4T]  subtract m8x8_square_table_low[|M1-M2|] from low byte
         LD   L,C            ; [4T]
         LD   A,E            ; [4T]
@@ -123,7 +122,7 @@ stream_m8x8_absok: LD   C,A ; [4T]  C = |M1 - M2|  (reuse; M2 no longer needed)
         INC  H              ; [4T]  subtract m8x8_square_table_hgih[|M1-M2|] from high byte
         LD   L,C            ; [4T]  C still holds |M1-M2|
         LD   A,D            ; [4T]
-        SBC  A,(HL)         ; [7T]  A = sum_hi - m8x8_square_table_hgih[|M1-M2|] - borrow
+        SUB  A,(HL)         ; [7T]  A = sum_hi - m8x8_square_table_hgih[|M1-M2|] - borrow
 
         LD (IY),A           ; [19T] D = high byte of product
         INC IY              ; [10T]
