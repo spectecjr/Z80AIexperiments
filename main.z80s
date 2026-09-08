@@ -6,5 +6,7 @@ start:
                 INCLUDE "crc32.z80s"
                 INCLUDE "murmur3.z80s"
                 INCLUDE "tab64.z80s"
+                INCLUDE "mul8x8_qs.z80s"
+                INCLUDE "transform3d.z80s"
 end:            equ $
 codelen:        equ end - start

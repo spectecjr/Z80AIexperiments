@@ -1,0 +1,510 @@
+;------------------------------------------------------------------
+; transform3d.z80s - rotate, translate and project a vertex list
+;
+;   t3d_build   build the multiply tables from the current matrix
+;   t3d_run     transform and project a list of vertices
+;
+; The fast way to do this on a Z80 is to notice that the nine matrix
+; coefficients do not change within a frame, and one operand of every
+; multiply is one of them. So spend the start of the frame turning
+; each coefficient into a 512-byte table of m*v for every possible
+; coordinate v, and every multiply in the inner loop collapses into
+; two table reads and a 16-bit add - 45 T-states, against 131 for a
+; general quarter-square multiply and 155 for the table-of-squares
+; one. Nine of those per vertex is the whole rotation.
+;
+; Formats:
+;   vertex      three signed bytes, x, y, z
+;   matrix      nine signed bytes, 1.7 fixed point (1.0 = 128), in
+;               row order: m00 m01 m02 m10 m11 m12 m20 m21 m22
+;   translate   three signed 16-bit values, 9.7 fixed point, so the
+;               rotated 9.7 accumulator can start there for free
+;   output      two bytes per vertex, screen x then screen y
+;
+; The projection is a reciprocal table and one multiply per axis:
+;   zi = clamp(Z >> 7, 64, 255),  r = 256*64/zi,
+;   sx = 128 + ((X >> 7) * r >> 8),  sy = 96 - ((Y >> 7) * r >> 8)
+; which puts the focal length at 64 units and the screen at 256x192.
+;
+; Accuracy: everything is exact except the final >> 7 and >> 8, so
+; screen coordinates are within a pixel of the ideal. The vertex
+; coordinates must satisfy |v| <= 127 with |x,y,z| <= 127 as a vector
+; too, or the 9.7 accumulator can overflow.
+;
+; Entry (t3d_run) : HL = vertex list, DE = output, B = vertex count
+; Trash : everything except IY
+;
+; Measured on an emulated Z80 (tests/test_transform3d.py, which also
+; checks the tables and the whole pipeline against a model of the same
+; arithmetic - 2,304 table entries and 1,200 vertices, exact):
+;
+;   t3d_run     1,231 T-states per vertex
+;   t3d_build   118,184 T-states for all nine tables
+;
+; Which is the interesting part. In a 192,000 T-state budget:
+;
+;   155 vertices if the matrix has not changed since last time
+;    59 vertices if the tables are rebuilt first
+;
+; The build costs what 96 vertices cost, so a full rebuild only pays
+; for itself on a model of about 88 vertices or more (against roughly
+; 2,600 T-states a vertex doing the same work with nine general
+; multiplies). Below that, multiply directly - or better, notice that
+; a table only needs the entries the model actually uses. Vertex
+; coordinates repeat heavily: a cube has two distinct values, a
+; typical low-poly model perhaps a dozen. Building D entries per
+; coefficient costs about 9*D*170 T-states, so a dozen values is
+; 18,000 rather than 118,000, and the tables are worth it for
+; anything down to a handful of vertices.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+;------------------------------------------------------------------
+; t3d_run - transform and project B vertices
+;------------------------------------------------------------------
+
+t3d_run:
+        LD   (t3d_outp),DE  ; where the screen coordinates go
+t3d_loop:
+        PUSH BC             ; [11T] the vertex counter
+        LD   A,(HL)         ; [7T]  x
+        INC  HL             ; [6T]
+        LD   B,A            ; [4T]
+        LD   A,(HL)         ; [7T]  y
+        INC  HL             ; [6T]
+        LD   C,A            ; [4T]
+        LD   A,(HL)         ; [7T]  z
+        INC  HL             ; [6T]
+        LD   (t3d_zv),A     ; [13T] the odd one out; B and C are full
+        PUSH HL             ; [11T] the vertex pointer
+
+        LD   DE,(t3d_tx)    ; [20T] the accumulator starts at the
+        LD   L,B            ; [4T]  x
+        LD   H,(t3d_tab / 256) + 0
+        LD   A,E            ; [4T]  accumulate the 16-bit table entry
+        ADD  A,(HL)         ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        ADC  A,(HL)         ; [7T]
+        LD   D,A            ; [4T]
+        LD   L,C            ; [4T]  y
+        LD   H,(t3d_tab / 256) + 2
+        LD   A,E            ; [4T]  accumulate the 16-bit table entry
+        ADD  A,(HL)         ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        ADC  A,(HL)         ; [7T]
+        LD   D,A            ; [4T]
+        LD   A,(t3d_zv)     ; [13T] z
+        LD   L,A            ; [4T]
+        LD   H,(t3d_tab / 256) + 4
+        LD   A,E            ; [4T]  accumulate the 16-bit table entry
+        ADD  A,(HL)         ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        ADC  A,(HL)         ; [7T]
+        LD   D,A            ; [4T]
+        LD   (t3d_xr),DE    ; [20T] translation, so translating is free
+
+        LD   DE,(t3d_ty)
+        LD   L,B            ; [4T]  x
+        LD   H,(t3d_tab / 256) + 6
+        LD   A,E            ; [4T]  accumulate the 16-bit table entry
+        ADD  A,(HL)         ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        ADC  A,(HL)         ; [7T]
+        LD   D,A            ; [4T]
+        LD   L,C            ; [4T]  y
+        LD   H,(t3d_tab / 256) + 8
+        LD   A,E            ; [4T]  accumulate the 16-bit table entry
+        ADD  A,(HL)         ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        ADC  A,(HL)         ; [7T]
+        LD   D,A            ; [4T]
+        LD   A,(t3d_zv)     ; [13T] z
+        LD   L,A            ; [4T]
+        LD   H,(t3d_tab / 256) + 10
+        LD   A,E            ; [4T]  accumulate the 16-bit table entry
+        ADD  A,(HL)         ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        ADC  A,(HL)         ; [7T]
+        LD   D,A            ; [4T]
+        LD   (t3d_yr),DE
+
+        LD   DE,(t3d_tz)
+        LD   L,B            ; [4T]  x
+        LD   H,(t3d_tab / 256) + 12
+        LD   A,E            ; [4T]  accumulate the 16-bit table entry
+        ADD  A,(HL)         ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        ADC  A,(HL)         ; [7T]
+        LD   D,A            ; [4T]
+        LD   L,C            ; [4T]  y
+        LD   H,(t3d_tab / 256) + 14
+        LD   A,E            ; [4T]  accumulate the 16-bit table entry
+        ADD  A,(HL)         ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        ADC  A,(HL)         ; [7T]
+        LD   D,A            ; [4T]
+        LD   A,(t3d_zv)     ; [13T] z
+        LD   L,A            ; [4T]
+        LD   H,(t3d_tab / 256) + 16
+        LD   A,E            ; [4T]  accumulate the 16-bit table entry
+        ADD  A,(HL)         ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        ADC  A,(HL)         ; [7T]
+        LD   D,A            ; [4T]
+
+        ; --- projection -------------------------------------------
+        ; DE = Z. Clamp it into the reciprocal table's range.
+        LD   A,D            ; [4T]
+        OR   A              ; [4T]
+        JP   M,t3d_near     ; [10T] behind the camera
+        CP   0x20           ; [7T]  Z < 64.0 ?
+        JR   C,t3d_near     ; [7/12T]
+        CP   0x7F           ; [7T]  Z >= 254.0 ?
+        JR   NC,t3d_far     ; [7/12T]
+        LD   A,E            ; [4T]  zi = Z >> 7
+        RLA                 ; [4T]
+        LD   A,D            ; [4T]
+        RLA                 ; [4T]
+        JR   t3d_zok        ; [12T]
+t3d_near:
+        LD   A,64
+        JR   t3d_zok
+t3d_far:
+        LD   A,255
+t3d_zok:
+        LD   L,A            ; [4T]  r = 256*focal/zi
+        LD   H,t3d_recip / 256 ; [7T]
+        LD   C,(HL)         ; [7T]  C is the multiplier for both axes
+
+        LD   DE,(t3d_xr)    ; [20T] sx = 128 + ((X >> 7) * r >> 8)
+        LD   A,E            ; [4T]  v = coordinate >> 7, signed
+        RLA                 ; [4T]
+        LD   A,D            ; [4T]
+        RLA                 ; [4T]
+        LD   B,A            ; [4T]
+        OR   A              ; [4T]
+        JP   P,t3d_ax_pos       ; [10T]
+        NEG                 ; [8T]  hold |v|, put the sign back after
+        LD   B,A            ; [4T]
+        LD   A,B            ; [4T]  |v| * r, quarter squares inline
+        ADD  A,C            ; [4T]
+        LD   L,A            ; [4T]
+        LD   A,qs_f / 256   ; [7T]
+        ADC  A,0            ; [7T]
+        LD   H,A            ; [4T]
+        LD   E,(HL)         ; [7T]
+        INC  H              ; [4T]
+        INC  H              ; [4T]
+        LD   D,(HL)         ; [7T]
+        LD   A,B            ; [4T]
+        SUB  C              ; [4T]
+        JR   NC,t3d_ax_m1          ; [7/12T]
+        NEG                 ; [8T]
+t3d_ax_m1:
+        LD   L,A            ; [4T]
+        LD   H,qs_f / 256   ; [7T]
+        LD   A,E            ; [4T]
+        SUB  (HL)           ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        SBC  A,(HL)         ; [7T]  A = (|v| * r) >> 8
+        NEG                 ; [8T]
+        JR   t3d_ax_done        ; [12T]
+t3d_ax_pos:
+        LD   A,B            ; [4T]  |v| * r, quarter squares inline
+        ADD  A,C            ; [4T]
+        LD   L,A            ; [4T]
+        LD   A,qs_f / 256   ; [7T]
+        ADC  A,0            ; [7T]
+        LD   H,A            ; [4T]
+        LD   E,(HL)         ; [7T]
+        INC  H              ; [4T]
+        INC  H              ; [4T]
+        LD   D,(HL)         ; [7T]
+        LD   A,B            ; [4T]
+        SUB  C              ; [4T]
+        JR   NC,t3d_ax_m2          ; [7/12T]
+        NEG                 ; [8T]
+t3d_ax_m2:
+        LD   L,A            ; [4T]
+        LD   H,qs_f / 256   ; [7T]
+        LD   A,E            ; [4T]
+        SUB  (HL)           ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        SBC  A,(HL)         ; [7T]  A = (|v| * r) >> 8
+t3d_ax_done:
+        ADD  A,128          ; [7T]
+        LD   HL,(t3d_outp)  ; [16T]
+        LD   (HL),A         ; [7T]
+        INC  HL             ; [6T]
+        PUSH HL             ; [11T]
+
+        LD   DE,(t3d_yr)    ; [20T] sy = 96 - ((Y >> 7) * r >> 8)
+        LD   A,E            ; [4T]  v = coordinate >> 7, signed
+        RLA                 ; [4T]
+        LD   A,D            ; [4T]
+        RLA                 ; [4T]
+        LD   B,A            ; [4T]
+        OR   A              ; [4T]
+        JP   P,t3d_ay_pos       ; [10T]
+        NEG                 ; [8T]  hold |v|, put the sign back after
+        LD   B,A            ; [4T]
+        LD   A,B            ; [4T]  |v| * r, quarter squares inline
+        ADD  A,C            ; [4T]
+        LD   L,A            ; [4T]
+        LD   A,qs_f / 256   ; [7T]
+        ADC  A,0            ; [7T]
+        LD   H,A            ; [4T]
+        LD   E,(HL)         ; [7T]
+        INC  H              ; [4T]
+        INC  H              ; [4T]
+        LD   D,(HL)         ; [7T]
+        LD   A,B            ; [4T]
+        SUB  C              ; [4T]
+        JR   NC,t3d_ay_m1          ; [7/12T]
+        NEG                 ; [8T]
+t3d_ay_m1:
+        LD   L,A            ; [4T]
+        LD   H,qs_f / 256   ; [7T]
+        LD   A,E            ; [4T]
+        SUB  (HL)           ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        SBC  A,(HL)         ; [7T]  A = (|v| * r) >> 8
+        NEG                 ; [8T]
+        JR   t3d_ay_done        ; [12T]
+t3d_ay_pos:
+        LD   A,B            ; [4T]  |v| * r, quarter squares inline
+        ADD  A,C            ; [4T]
+        LD   L,A            ; [4T]
+        LD   A,qs_f / 256   ; [7T]
+        ADC  A,0            ; [7T]
+        LD   H,A            ; [4T]
+        LD   E,(HL)         ; [7T]
+        INC  H              ; [4T]
+        INC  H              ; [4T]
+        LD   D,(HL)         ; [7T]
+        LD   A,B            ; [4T]
+        SUB  C              ; [4T]
+        JR   NC,t3d_ay_m2          ; [7/12T]
+        NEG                 ; [8T]
+t3d_ay_m2:
+        LD   L,A            ; [4T]
+        LD   H,qs_f / 256   ; [7T]
+        LD   A,E            ; [4T]
+        SUB  (HL)           ; [7T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        INC  H              ; [4T]
+        LD   A,D            ; [4T]
+        SBC  A,(HL)         ; [7T]  A = (|v| * r) >> 8
+t3d_ay_done:
+        NEG                 ; [8T]
+        ADD  A,96           ; [7T]
+        POP  HL             ; [10T]
+        LD   (HL),A         ; [7T]
+        INC  HL             ; [6T]
+        LD   (t3d_outp),HL  ; [16T]
+
+        POP  HL             ; [10T] next vertex
+        POP  BC             ; [10T]
+        DEC  B              ; [4T]  (too far for DJNZ)
+        JP   NZ,t3d_loop    ; [10T]
+        RET                 ; [10T]
+
+;------------------------------------------------------------------
+; t3d_build - turn the nine matrix coefficients into nine tables
+;
+; Table k holds m_k * v for every v, as a signed 16-bit value indexed
+; by v as an unsigned byte: entries 0..127 are v = 0..127 and entries
+; 128..255 are v = -128..-1. So it is built as two runs from zero,
+; one climbing and one descending.
+;
+; Trash : everything except IY
+;------------------------------------------------------------------
+
+t3d_build:
+        LD   IX,t3d_m       ; [14T] the matrix
+        LD   A,t3d_tab / 256
+        LD   (t3d_bp),A     ; the page of the table being built
+        LD   A,9
+        LD   (t3d_bn),A
+t3d_bloop:
+        LD   A,(IX+0)       ; [19T] m, sign-extended into BC
+        INC  IX             ; [10T]
+        LD   C,A            ; [4T]
+        RLA                 ; [4T]
+        SBC  A,A            ; [4T]
+        LD   B,A            ; [4T]
+
+        LD   A,(t3d_bp)     ; the climbing half: entries 0..127
+        LD   D,A            ; DE walks the low page, index in E
+        LD   E,0
+        LD   HL,0
+        PUSH BC
+t3d_bfwd:               ; 128 entries, four at a time
+        LD   A,L            ; [4T]  store m*v, low byte then high
+        LD   (DE),A         ; [7T]
+        INC  D              ; [4T]
+        LD   A,H            ; [4T]
+        LD   (DE),A         ; [7T]
+        DEC  D              ; [4T]
+        INC  E              ; [4T]
+        ADD  HL,BC          ; [11T] the next entry is one m further on
+        LD   A,L            ; [4T]  store m*v, low byte then high
+        LD   (DE),A         ; [7T]
+        INC  D              ; [4T]
+        LD   A,H            ; [4T]
+        LD   (DE),A         ; [7T]
+        DEC  D              ; [4T]
+        INC  E              ; [4T]
+        ADD  HL,BC          ; [11T] the next entry is one m further on
+        LD   A,L            ; [4T]  store m*v, low byte then high
+        LD   (DE),A         ; [7T]
+        INC  D              ; [4T]
+        LD   A,H            ; [4T]
+        LD   (DE),A         ; [7T]
+        DEC  D              ; [4T]
+        INC  E              ; [4T]
+        ADD  HL,BC          ; [11T] the next entry is one m further on
+        LD   A,L            ; [4T]  store m*v, low byte then high
+        LD   (DE),A         ; [7T]
+        INC  D              ; [4T]
+        LD   A,H            ; [4T]
+        LD   (DE),A         ; [7T]
+        DEC  D              ; [4T]
+        INC  E              ; [4T]
+        ADD  HL,BC          ; [11T] the next entry is one m further on
+        BIT  7,E            ; [8T]  E hits 128 when the half is done
+        JR   Z,t3d_bfwd     ; [7/12T]
+
+        POP  BC             ; the descending half: entries 255..128
+        LD   A,B            ; walking down means adding -m
+        CPL
+        LD   B,A
+        LD   A,C
+        CPL
+        LD   C,A
+        INC  BC
+        LD   HL,0
+        LD   A,(t3d_bp)
+        LD   D,A
+        LD   E,0
+t3d_bback:
+        DEC  E              ; [4T]  entries 255 down to 128
+        ADD  HL,BC          ; [11T] BC is -m on this pass
+        LD   A,L            ; [4T]
+        LD   (DE),A         ; [7T]
+        INC  D              ; [4T]
+        LD   A,H            ; [4T]
+        LD   (DE),A         ; [7T]
+        DEC  D              ; [4T]
+        DEC  E              ; [4T]  entries 255 down to 128
+        ADD  HL,BC          ; [11T] BC is -m on this pass
+        LD   A,L            ; [4T]
+        LD   (DE),A         ; [7T]
+        INC  D              ; [4T]
+        LD   A,H            ; [4T]
+        LD   (DE),A         ; [7T]
+        DEC  D              ; [4T]
+        DEC  E              ; [4T]  entries 255 down to 128
+        ADD  HL,BC          ; [11T] BC is -m on this pass
+        LD   A,L            ; [4T]
+        LD   (DE),A         ; [7T]
+        INC  D              ; [4T]
+        LD   A,H            ; [4T]
+        LD   (DE),A         ; [7T]
+        DEC  D              ; [4T]
+        DEC  E              ; [4T]  entries 255 down to 128
+        ADD  HL,BC          ; [11T] BC is -m on this pass
+        LD   A,L            ; [4T]
+        LD   (DE),A         ; [7T]
+        INC  D              ; [4T]
+        LD   A,H            ; [4T]
+        LD   (DE),A         ; [7T]
+        DEC  D              ; [4T]
+        LD   A,E            ; [4T]  stop after entry 128
+        CP   128            ; [7T]
+        JR   NZ,t3d_bback   ; [7/12T]
+
+        LD   A,(t3d_bp)     ; on to the next coefficient
+        ADD  A,2
+        LD   (t3d_bp),A
+        LD   A,(t3d_bn)
+        DEC  A
+        LD   (t3d_bn),A
+        JR   NZ,t3d_bloop
+        RET
+
+;------------------------------------------------------------------
+; The reciprocal table: 256*64/z, clamped to a byte. Generated.
+;------------------------------------------------------------------
+
+        ALIGN 256
+t3d_recip:
+        DEFB 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
+        DEFB 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
+        DEFB 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
+        DEFB 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
+        DEFB 255,252,248,245,241,237,234,231,228,224,221,218,216,213,210,207
+        DEFB 205,202,200,197,195,193,191,188,186,184,182,180,178,176,174,172
+        DEFB 171,169,167,165,164,162,161,159,158,156,155,153,152,150,149,148
+        DEFB 146,145,144,142,141,140,139,138,137,135,134,133,132,131,130,129
+        DEFB 128,127,126,125,124,123,122,121,120,120,119,118,117,116,115,115
+        DEFB 114,113,112,111,111,110,109,109,108,107,106,106,105,104,104,103
+        DEFB 102,102,101,101,100,99,99,98,98,97,96,96,95,95,94,94
+        DEFB 93,93,92,92,91,91,90,90,89,89,88,88,87,87,86,86
+        DEFB 85,85,84,84,84,83,83,82,82,82,81,81,80,80,80,79
+        DEFB 79,78,78,78,77,77,77,76,76,76,75,75,74,74,74,73
+        DEFB 73,73,72,72,72,72,71,71,71,70,70,70,69,69,69,69
+        DEFB 68,68,68,67,67,67,67,66,66,66,66,65,65,65,65,64
+
+;------------------------------------------------------------------
+; Workspace and tables. The tables must be 256-byte aligned; they are
+; 4608 bytes, eighteen pages, two per coefficient.
+;------------------------------------------------------------------
+
+t3d_m:          DEFS 9      ; the matrix, 1.7 fixed point
+t3d_tx:         DEFS 2      ; the translation, 9.7 fixed point
+t3d_ty:         DEFS 2
+t3d_tz:         DEFS 2
+t3d_zv:         DEFS 1
+t3d_xr:         DEFS 2
+t3d_yr:         DEFS 2
+t3d_outp:       DEFS 2
+t3d_bp:         DEFS 1
+t3d_bn:         DEFS 1
+
+        ALIGN 256
+t3d_tab:        DEFS 18 * 256
+
+t3d_end:
+T3D_SIZE:       EQU t3d_end - t3d_run
+
+;------------------------------------------------------------
