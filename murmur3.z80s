@@ -1,0 +1,631 @@
+;------------------------------------------------------------------
+; murmur3.z80s - MurmurHash3 x64 128-bit, and the Kirsch-Mitzenmacher
+;                trick for turning one hash into thirteen indices
+;
+;   murmur3_64    HL = string, BC = length -> the hash, in memory
+;   mh3_km13      thirteen Bloom filter indices from that hash
+;   mh3_km13_mod  the same for a table size that is not a power of two
+;
+; This is Austin Appleby's MurmurHash3_x64_128, the variant everyone
+; means by "64-bit MurmurHash3": it produces two 64-bit halves, h1 and
+; h2. h1 on its own is the 64-bit hash (it is what mmh3.hash64 returns
+; first, and what Guava's murmur3_128 gives you as asLong), and the
+; pair is exactly what Kirsch-Mitzenmacher wants. Results match the
+; reference implementation bit for bit, seed included.
+;
+; Entry : HL = pointer to the string, BC = length in bytes (0..65535)
+;         (mh3_seed) = 32-bit seed, little-endian, zero unless set
+; Exit  : HL = mh3_h1, and the 128-bit hash is in memory as sixteen
+;         little-endian bytes: h1 at mh3_h1, h2 at mh3_h2 right after
+; Trash : AF, BC, DE, HL, IX, BC', and the workspace below
+;
+; A 64-bit result does not fit in the register file, so memory is the
+; only sensible place for it - and it has to live there anyway, since
+; every step of the algorithm reads and writes 8-byte quantities.
+;
+; This file needs 8x8multiply_r16.z80s to be assembled with it: the
+; 64x64 multiply is schoolbook over bytes and calls mult8x8_16 for the
+; 36 partial products that land inside the low 64 bits.
+;
+; Verified against the reference implementation on an emulated Z80
+; (tests/test_murmur3.py): every one of the 65,536 inputs to the 8x8
+; multiply it leans on, 2,000 random 64-bit multiplies, strings of
+; every length from 0 to 257 with assorted seeds, and both index
+; routines against the arithmetic they are meant to be doing. The
+; model the tests compare with is itself checked against the mmh3
+; package. No mismatches.
+;
+; Speed, measured the same way:
+;
+;   murmur3_64     61,064 T-states for an empty string
+;                  90,400 for one to eight bytes
+;                 126,400 for sixteen
+;                 + about 63,500 for each further 16-byte block,
+;                   settling at roughly 4,200 T-states per byte
+;   mh3_mul64      13,200 T-states
+;   mh3_km13        1,496 T-states for all thirteen indices
+;   mh3_km13_mod   83,082 T-states for all thirteen
+;
+; Nearly all of that is the 64-bit multiplies: four for every block,
+; two for a tail, and four more in the finalisation, so even the empty
+; string pays for four of them. If you have 2K of RAM to spare per
+; constant, a table of constant*byte turns each multiply into eight
+; lookups and eight shifted adds - about six times quicker. The four
+; constants are fixed, so those tables can be built once at start-up.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+;------------------------------------------------------------------
+; murmur3_64 - MurmurHash3 x64 128 of a block of memory
+;------------------------------------------------------------------
+
+murmur3_64:
+        LD   (mh3_ptr),HL   ; where we are in the string
+        LD   (mh3_len),BC   ; and how much of it is left
+        LD   (mh3_lenv),BC  ; the length is also mixed in at the end,
+        XOR  A              ; as a 64-bit value
+        LD   (mh3_lenv+2),A
+        LD   (mh3_lenv+3),A
+        LD   (mh3_lenv+4),A
+        LD   (mh3_lenv+5),A
+        LD   (mh3_lenv+6),A
+        LD   (mh3_lenv+7),A
+
+        ; h1 = h2 = seed, zero-extended to 64 bits
+        LD   HL,mh3_seed
+        LD   DE,mh3_h1
+        LD   BC,4
+        LDIR
+        LD   B,4
+mh3_zh1:
+        LD   (DE),A
+        INC  DE
+        DJNZ mh3_zh1        ; DE now points at mh3_h2
+        LD   HL,mh3_seed
+        LD   BC,4
+        LDIR
+        LD   B,4
+mh3_zh2:
+        LD   (DE),A
+        INC  DE
+        DJNZ mh3_zh2
+
+        ; --- body: one 16-byte block at a time ---------------------
+mh3_block:
+        LD   HL,(mh3_len)
+        LD   A,H
+        OR   A
+        JR   NZ,mh3_doblock
+        LD   A,L
+        CP   16
+        JP   C,mh3_tail
+mh3_doblock:
+        LD   HL,(mh3_ptr)   ; k1 and k2 are adjacent, so one LDIR
+        LD   DE,mh3_k1      ; loads both halves of the block
+        LD   BC,16
+        LDIR
+        LD   (mh3_ptr),HL
+        LD   HL,(mh3_len)
+        LD   DE,-16
+        ADD  HL,DE
+        LD   (mh3_len),HL
+
+        CALL mh3_mixk1      ; k1 *= c1; rotl 31; *= c2
+        LD   HL,mh3_h1      ; h1 ^= k1
+        LD   DE,mh3_k1
+        CALL mh3_xor64
+        LD   A,3            ; h1 = rotl(h1,27)
+        CALL mh3_rotbytes
+        CALL mh3_rotl1
+        CALL mh3_rotl1
+        CALL mh3_rotl1
+        LD   DE,mh3_h2      ; h1 += h2
+        CALL mh3_add64
+        CALL mh3_mul5       ; h1 = h1*5 + 0x52dce729
+        LD   DE,mh3_bc1
+        CALL mh3_add64
+
+        CALL mh3_mixk2      ; k2 *= c2; rotl 33; *= c1
+        LD   HL,mh3_h2      ; h2 ^= k2
+        LD   DE,mh3_k2
+        CALL mh3_xor64
+        LD   A,4            ; h2 = rotl(h2,31)
+        CALL mh3_rotbytes
+        CALL mh3_rotr1
+        LD   DE,mh3_h1      ; h2 += h1
+        CALL mh3_add64
+        CALL mh3_mul5       ; h2 = h2*5 + 0x38495ab5
+        LD   DE,mh3_bc2
+        CALL mh3_add64
+        JP   mh3_block
+
+        ; --- tail: whatever is left, 0 to 15 bytes -----------------
+mh3_tail:
+        LD   HL,mh3_k1      ; k1 and k2 start out zero, so the tail
+        LD   B,16           ; bytes land in exactly the right places
+        XOR  A
+mh3_ztail:
+        LD   (HL),A
+        INC  HL
+        DJNZ mh3_ztail
+        LD   BC,(mh3_len)
+        LD   A,C
+        OR   A
+        JR   Z,mh3_final    ; the length was a multiple of 16
+        LD   HL,(mh3_ptr)
+        LD   DE,mh3_k1
+        LD   B,0
+        LDIR                ; LDIR leaves A alone, so the tail length
+        CP   9              ; is still there
+        JR   C,mh3_tailk1
+        CALL mh3_mixk2      ; nine bytes or more: k2 gets mixed too
+        LD   HL,mh3_h2
+        LD   DE,mh3_k2
+        CALL mh3_xor64
+mh3_tailk1:
+        CALL mh3_mixk1
+        LD   HL,mh3_h1
+        LD   DE,mh3_k1
+        CALL mh3_xor64
+
+        ; --- finalisation ------------------------------------------
+mh3_final:
+        LD   HL,mh3_h1      ; h1 ^= len; h2 ^= len
+        LD   DE,mh3_lenv
+        CALL mh3_xor64
+        LD   HL,mh3_h2
+        LD   DE,mh3_lenv
+        CALL mh3_xor64
+        LD   HL,mh3_h1      ; h1 += h2; h2 += h1
+        LD   DE,mh3_h2
+        CALL mh3_add64
+        LD   HL,mh3_h2
+        LD   DE,mh3_h1
+        CALL mh3_add64
+        LD   HL,mh3_h1      ; the avalanche, on each half
+        CALL mh3_fmix64
+        LD   HL,mh3_h2
+        CALL mh3_fmix64
+        LD   HL,mh3_h1      ; h1 += h2; h2 += h1, again
+        LD   DE,mh3_h2
+        CALL mh3_add64
+        LD   HL,mh3_h2
+        LD   DE,mh3_h1
+        CALL mh3_add64
+        LD   HL,mh3_h1
+        RET
+
+;------------------------------------------------------------------
+; mh3_mixk1 / mh3_mixk2 - the two block-mixing steps
+;
+; k1 *= c1; k1 = rotl64(k1,31); k1 *= c2
+; k2 *= c2; k2 = rotl64(k2,33); k2 *= c1
+;
+; rotl 31 is a four-byte rotate and then one bit back the other way;
+; rotl 33 is a four-byte rotate and one bit forward. Going the short
+; way round costs one bit-rotate instead of seven.
+;------------------------------------------------------------------
+
+mh3_mixk1:
+        LD   HL,mh3_k1
+        LD   DE,mh3_c1
+        CALL mh3_mul64
+        LD   A,4
+        CALL mh3_rotbytes
+        CALL mh3_rotr1      ; rotl 32 then rotr 1 = rotl 31
+        LD   DE,mh3_c2
+        JP   mh3_mul64
+
+mh3_mixk2:
+        LD   HL,mh3_k2
+        LD   DE,mh3_c2
+        CALL mh3_mul64
+        LD   A,4
+        CALL mh3_rotbytes
+        CALL mh3_rotl1      ; rotl 32 then rotl 1 = rotl 33
+        LD   DE,mh3_c1
+        JP   mh3_mul64
+
+;------------------------------------------------------------------
+; mh3_fmix64 - the 64-bit avalanche
+;
+;   k ^= k >> 33; k *= 0xff51afd7ed558ccd
+;   k ^= k >> 33; k *= 0xc4ceb9fe1a85ec53
+;   k ^= k >> 33
+;
+; Entry : HL = pointer      Exit : HL preserved
+;------------------------------------------------------------------
+
+mh3_fmix64:
+        CALL mh3_xorshift33
+        LD   DE,mh3_f1
+        CALL mh3_mul64
+        CALL mh3_xorshift33
+        LD   DE,mh3_f2
+        CALL mh3_mul64
+mh3_xorshift33:
+        PUSH HL             ; k ^= k >> 33
+        LD   BC,4
+        ADD  HL,BC
+        LD   DE,mh3_tmp
+        LDIR                ; tmp = k >> 32
+        XOR  A
+        LD   B,4
+mh3_xs_zero:
+        LD   (DE),A
+        INC  DE
+        DJNZ mh3_xs_zero
+        LD   HL,mh3_tmp+7   ; and one more bit, from the top down
+        LD   B,8
+        OR   A
+mh3_xs_shift:
+        RR   (HL)
+        DEC  HL
+        DJNZ mh3_xs_shift
+        POP  HL
+        LD   DE,mh3_tmp
+        JP   mh3_xor64
+
+;------------------------------------------------------------------
+; The 64-bit primitives. All of them take HL = pointer to an 8-byte
+; little-endian value, leave HL alone, and trash AF, BC and DE.
+;------------------------------------------------------------------
+
+mh3_add64:                  ; (HL) += (DE)
+        PUSH HL
+        LD   B,8
+        OR   A              ; clear carry
+mh3_a_loop:
+        LD   A,(DE)
+        ADC  A,(HL)
+        LD   (HL),A
+        INC  HL
+        INC  DE
+        DJNZ mh3_a_loop
+        POP  HL
+        RET
+
+mh3_xor64:                  ; (HL) ^= (DE)
+        PUSH HL
+        LD   B,8
+mh3_x_loop:
+        LD   A,(DE)
+        XOR  (HL)
+        LD   (HL),A
+        INC  HL
+        INC  DE
+        DJNZ mh3_x_loop
+        POP  HL
+        RET
+
+mh3_mul5:                   ; (HL) *= 5, as (v<<2) + v
+        PUSH HL
+        LD   DE,mh3_tmp
+        LD   BC,8
+        PUSH HL
+        LDIR
+        POP  HL
+        CALL mh3_shl1
+        CALL mh3_shl1
+        LD   DE,mh3_tmp
+        CALL mh3_add64
+        POP  HL
+        RET
+
+mh3_shl1:                   ; (HL) <<= 1
+        PUSH HL
+        LD   B,8
+        OR   A              ; clear carry: a shift, not a rotate
+mh3_s_loop:
+        RL   (HL)
+        INC  HL
+        DJNZ mh3_s_loop
+        POP  HL
+        RET
+
+mh3_rotl1:                  ; (HL) = rotl(value, 1)
+        PUSH HL
+        LD   BC,7
+        ADD  HL,BC
+        LD   A,(HL)         ; the top byte's bit 7 wraps into bit 0
+        POP  HL
+        PUSH HL
+        RLA
+        LD   B,8
+mh3_rl_loop:
+        RL   (HL)
+        INC  HL
+        DJNZ mh3_rl_loop
+        POP  HL
+        RET
+
+mh3_rotr1:                  ; (HL) = rotr(value, 1)
+        PUSH HL
+        LD   A,(HL)         ; the bottom byte's bit 0 wraps into bit 63
+        LD   BC,7
+        ADD  HL,BC
+        RRA                 ; (the ADD's carry only lands in A's bit 7,
+        LD   B,8            ;  which is thrown away)
+mh3_rr_loop:
+        RR   (HL)
+        DEC  HL
+        DJNZ mh3_rr_loop
+        POP  HL
+        RET
+
+mh3_rotbytes:               ; (HL) = rotl(value, 8*A), A = 0..7
+        OR   A
+        RET  Z
+        PUSH HL
+        PUSH AF
+        LD   DE,mh3_rot     ; lay the value down twice, back to back,
+        LD   BC,8           ; and the rotation is just a copy from the
+        PUSH HL             ; right place in the middle
+        LDIR
+        POP  HL
+        LD   DE,mh3_rot+8
+        LD   BC,8
+        LDIR
+        POP  AF
+        NEG
+        ADD  A,8            ; source = mh3_rot + 8 - count
+        LD   L,A
+        LD   H,0
+        LD   DE,mh3_rot
+        ADD  HL,DE
+        POP  DE
+        PUSH DE
+        LD   BC,8
+        LDIR
+        POP  HL
+        RET
+
+;------------------------------------------------------------------
+; mh3_mul64 - 64x64 multiply, keeping the low 64 bits
+;
+; Entry : HL = pointer to a (8 bytes, little-endian), overwritten
+;         DE = pointer to b (8 bytes)
+; Exit  : HL preserved
+; Trash : AF, BC, DE, IX, BC'
+;
+; Schoolbook over bytes: a*b mod 2^64 is the sum of a[i]*b[j] shifted
+; up by i+j bytes, for every i+j <= 7 - thirty-six 8x8 products, each
+; one a call to this repo's table-of-squares multiply. The two bytes
+; above the result catch the carries out of the top product and are
+; then thrown away.
+;------------------------------------------------------------------
+
+mh3_mul64:
+        PUSH HL
+        LD   (mh3_pa),HL
+        LD   (mh3_pbj),DE
+        LD   HL,mh3_prod    ; clear the accumulator
+        LD   B,10
+        XOR  A
+mh3m_zero:
+        LD   (HL),A
+        INC  HL
+        DJNZ mh3m_zero
+        LD   HL,mh3_prod
+        LD   (mh3_pj),HL
+        LD   A,8
+        LD   (mh3_jcnt),A
+mh3m_outer:
+        LD   HL,(mh3_pbj)   ; b[j]
+        LD   A,(HL)
+        INC  HL
+        LD   (mh3_pbj),HL
+        OR   A
+        JR   Z,mh3m_skip    ; a zero byte contributes nothing
+        LD   B,A            ; B = b[j], which mult8x8_16 preserves
+        LD   IX,(mh3_pa)
+        LD   HL,(mh3_pj)
+        LD   A,(mh3_jcnt)   ; 8-j products left in this row
+        EXX
+        LD   B,A            ; the row counter lives in the shadow set,
+mh3m_inner:                 ; where the multiply cannot reach it
+        EXX
+        LD   C,(IX+0)       ; [19T] a[i]
+        INC  IX             ; [10T]
+        PUSH HL             ; [11T]
+        CALL mult8x8_16     ; [172T] DE = a[i]*b[j]
+        POP  HL             ; [10T]
+        LD   A,(HL)         ; [7T]  fold it in at prod[i+j]
+        ADD  A,E            ; [4T]
+        LD   (HL),A         ; [7T]
+        INC  HL             ; [6T]
+        LD   A,(HL)         ; [7T]
+        ADC  A,D            ; [4T]
+        LD   (HL),A         ; [7T]
+        JR   NC,mh3m_next   ; [7/12T]
+        PUSH HL             ; [11T] carry on up until it stops
+mh3m_prop:
+        INC  HL             ; [6T]
+        INC  (HL)           ; [11T]
+        JR   Z,mh3m_prop    ; [7/12T]
+        POP  HL             ; [10T]
+mh3m_next:
+        EXX                 ; [4T]
+        DJNZ mh3m_inner     ; [13/8T]
+        EXX
+mh3m_skip:
+        LD   HL,(mh3_pj)    ; the next row starts one byte higher
+        INC  HL
+        LD   (mh3_pj),HL
+        LD   A,(mh3_jcnt)
+        DEC  A
+        LD   (mh3_jcnt),A
+        JR   NZ,mh3m_outer
+        LD   HL,mh3_prod    ; and the low eight bytes are the answer
+        LD   DE,(mh3_pa)
+        LD   BC,8
+        LDIR
+        POP  HL
+        RET
+
+;------------------------------------------------------------------
+; mh3_km13 - Kirsch-Mitzenmacher: thirteen indices from one hash
+;
+; "Less hashing, same performance: Building a better Bloom filter"
+; (Kirsch and Mitzenmacher, 2006) showed that k independent hashes can
+; be replaced by two, with
+;
+;   g_i(x) = h1(x) + i*h2(x)   mod m,   i = 0 .. k-1
+;
+; without hurting the false positive rate. MurmurHash3 x64 hands us
+; h1 and h2 already, and each index is then just an addition: start at
+; h1 and add h2 thirteen times.
+;
+; With m a power of two the whole thing depends only on the low bits,
+; so working 16-bit gives exactly the answers 64-bit arithmetic would.
+;
+; Entry : HL = pointer to 13 words of output
+;         DE = mask, that is m-1, for m a power of two up to 65536
+; Exit  : the thirteen indices stored, HL past the end
+; Trash : AF, BC, DE, HL, IX, BC'
+;
+; A caveat worth knowing: if h2 happens to be 0 mod m the thirteen
+; indices come out identical, and the filter behaves as if k were 1.
+; It is rare (m/2^64 of hashes) but if it matters, force h2 odd with
+; SET 0,(mh3_h2) before calling - then the indices are distinct for
+; any m >= 16.
+;------------------------------------------------------------------
+
+mh3_km13:
+        PUSH HL
+        POP  IX             ; IX = where the indices go
+        LD   B,D            ; BC = mask
+        LD   C,E
+        LD   DE,(mh3_h2)    ; DE = step = the low 16 bits of h2
+        LD   HL,(mh3_h1)    ; HL = g   = the low 16 bits of h1
+        LD   A,13
+        EXX
+        LD   B,A            ; the counter, out of the way in the
+mh3_km_loop:                ; shadow set
+        EXX
+        LD   A,L            ; index = g AND mask
+        AND  C
+        LD   (IX+0),A
+        LD   A,H
+        AND  B
+        LD   (IX+1),A
+        INC  IX
+        INC  IX
+        ADD  HL,DE          ; g += h2
+        EXX
+        DJNZ mh3_km_loop
+        EXX
+        PUSH IX
+        POP  HL
+        RET
+
+;------------------------------------------------------------------
+; mh3_km13_mod - the same, for a table size that is not a power of two
+;
+; Here the modulus really does depend on all 64 bits, so g is kept as
+; a full 64-bit value and reduced by long division, most significant
+; bit first. About 40 times slower than the masked version - worth it
+; only if m has to be prime.
+;
+; Entry : HL = pointer to 13 words of output
+;         BC = m, the table size (2..65535)
+; Exit  : the thirteen indices stored, HL past the end
+; Trash : AF, BC, DE, HL, IX, IY, BC', DE', HL'
+;------------------------------------------------------------------
+
+mh3_km13_mod:
+        PUSH HL
+        POP  IX             ; IX = output
+        PUSH BC
+        LD   HL,mh3_h1      ; g = h1
+        LD   DE,mh3_g
+        LD   BC,8
+        LDIR
+        POP  BC
+        LD   A,13
+        LD   (mh3_kcnt),A
+mh3_kmm_loop:
+        PUSH BC
+        LD   IY,mh3_g+7     ; reduce g mod m, from the top byte down
+        LD   HL,0           ; HL = running remainder
+        LD   A,8
+mh3_kmm_byte:
+        LD   D,A            ; D = bytes left
+        LD   E,(IY+0)       ; E = the byte being fed in
+        LD   A,8
+mh3_kmm_bit:
+        RL   E              ; next bit of g into the carry
+        ADC  HL,HL          ; remainder = 2*remainder + bit
+        JR   C,mh3_kmm_sub  ; past 16 bits: the subtract must happen
+        SBC  HL,BC          ; (the carry is clear here)
+        JR   NC,mh3_kmm_ok
+        ADD  HL,BC          ; it did not fit: put it back
+        JR   mh3_kmm_ok
+mh3_kmm_sub:
+        OR   A              ; clear carry, then subtract m
+        SBC  HL,BC
+mh3_kmm_ok:
+        DEC  A
+        JR   NZ,mh3_kmm_bit
+        DEC  IY
+        LD   A,D
+        DEC  A
+        JR   NZ,mh3_kmm_byte
+        LD   (IX+0),L       ; store the index
+        LD   (IX+1),H
+        INC  IX
+        INC  IX
+        POP  BC
+        LD   A,(mh3_kcnt)   ; thirteen of them?
+        DEC  A
+        LD   (mh3_kcnt),A
+        JR   Z,mh3_kmm_done
+        LD   HL,mh3_g       ; g += h2
+        LD   DE,mh3_h2
+        PUSH BC
+        CALL mh3_add64
+        POP  BC
+        JR   mh3_kmm_loop
+mh3_kmm_done:
+        PUSH IX
+        POP  HL
+        RET
+
+;------------------------------------------------------------------
+; The constants, little-endian
+;------------------------------------------------------------------
+
+mh3_c1:         DEFB 0xd5,0x53,0x42,0x11,0x91,0x7b,0xc3,0x87 ; 0x87c37b91114253d5
+mh3_c2:         DEFB 0x7f,0x93,0x45,0x27,0x43,0xad,0xf5,0x4c ; 0x4cf5ad432745937f
+mh3_f1:         DEFB 0xcd,0x8c,0x55,0xed,0xd7,0xaf,0x51,0xff ; 0xff51afd7ed558ccd
+mh3_f2:         DEFB 0x53,0xec,0x85,0x1a,0xfe,0xb9,0xce,0xc4 ; 0xc4ceb9fe1a85ec53
+mh3_bc1:        DEFB 0x29,0xe7,0xdc,0x52,0,0,0,0             ; 0x52dce729
+mh3_bc2:        DEFB 0xb5,0x5a,0x49,0x38,0,0,0,0             ; 0x38495ab5
+
+;------------------------------------------------------------------
+; Workspace - 82 bytes, must be in RAM
+;------------------------------------------------------------------
+
+mh3_seed:       DEFB 0,0,0,0    ; 32-bit seed, set it before hashing
+mh3_h1:         DEFS 8          ; the hash: h1 first, h2 straight after
+mh3_h2:         DEFS 8
+mh3_k1:         DEFS 8          ; the block being mixed in; k2 must
+mh3_k2:         DEFS 8          ; follow k1 so one LDIR loads both
+mh3_prod:       DEFS 10         ; multiply accumulator, plus two bytes
+mh3_tmp:        DEFS 8          ; for the carries out of the top
+mh3_rot:        DEFS 16         ; the value laid down twice, for rotates
+mh3_g:          DEFS 8          ; h1 + i*h2, for the modulo version
+mh3_lenv:       DEFS 8          ; the length, as a 64-bit value
+mh3_ptr:        DEFS 2
+mh3_len:        DEFS 2
+mh3_pa:         DEFS 2
+mh3_pbj:        DEFS 2
+mh3_pj:         DEFS 2
+mh3_jcnt:       DEFS 1
+mh3_kcnt:       DEFS 1
+
+mh3_end:
+MH3_SIZE:       EQU mh3_end - murmur3_64
+
+;------------------------------------------------------------

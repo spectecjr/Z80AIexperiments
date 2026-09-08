@@ -24,11 +24,29 @@ BATCH = 2048            # pairs per emulator entry
 FRAME = 100000          # the emulator's tick counter wraps at this
 
 
-def assemble(harness="harness.asm"):
+def zeus_shim(builddir):
+    """Rewrite the Zeus-syntax multiply so sjasmplus can assemble it.
+
+    8x8multiply_r16.z80s is written for Zeus, which spells modulo "\\"
+    and accepts "SUB A,(HL)" for the one-operand SUB (sjasmplus reads
+    that as two instructions). murmur3.z80s calls into the file, so the
+    tests need a copy sjasmplus will take; nothing else changes.
+    """
+    src = open(os.path.join(ROOT, "8x8multiply_r16.z80s"),
+               encoding="utf-8-sig").read()
+    src = src.replace(" \\ 256", " % 256").replace("SUB  A,(HL)", "SUB  (HL)")
+    os.makedirs(builddir, exist_ok=True)
+    out = os.path.join(builddir, "mult8x8_sjasm.z80s")
+    open(out, "w").write(src)
+    return builddir
+
+
+def assemble(harness="harness.asm", incdirs=()):
     binf = "/tmp/%s.bin" % harness.replace(".asm", "")
     symf = "/tmp/%s.sym" % harness.replace(".asm", "")
-    r = subprocess.run([SJASM, "--sym=" + symf, "--raw=" + binf, "-I" + ROOT,
-                        os.path.join(HERE, harness)],
+    cmd = [SJASM, "--sym=" + symf, "--raw=" + binf, "-I" + ROOT]
+    cmd += ["-I" + d for d in incdirs]
+    r = subprocess.run(cmd + [os.path.join(HERE, harness)],
                        capture_output=True, text=True)
     if r.returncode:
         sys.exit(r.stdout + r.stderr)
@@ -41,10 +59,10 @@ def assemble(harness="harness.asm"):
 
 
 class Bench:
-    def __init__(self, harness="harness.asm", opsize=2):
+    def __init__(self, harness="harness.asm", opsize=2, incdirs=()):
         self.opsize = opsize            # bytes per operand (2 or 4)
         self.batchsize = BATCH if opsize == 2 else BATCH // 2
-        code, self.syms = assemble(harness)
+        code, self.syms = assemble(harness, incdirs)
         self.m = z80.Z80Machine()
         self.m.set_memory_block(ORG, code)
         self.m.set_memory_block(RETADDR, bytes([0x76]))     # HALT
@@ -76,6 +94,9 @@ class Bench:
 
     def poke(self, addr, data):
         self.m.set_memory_block(addr, bytes(data))
+
+    def peek(self, addr, n):
+        return bytes(self.view[MEMOFF + addr:MEMOFF + addr + n])
 
     def poke32(self, a, b):
         """Put a pair of float32 operands in memory; returns their addresses."""

@@ -4,5 +4,6 @@ start:
                 INCLUDE "float16.z80s"
                 INCLUDE "float32.z80s"
                 INCLUDE "crc32.z80s"
+                INCLUDE "murmur3.z80s"
 end:            equ $
 codelen:        equ end - start
