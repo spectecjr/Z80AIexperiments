@@ -43,17 +43,23 @@
 ; per operation, no mismatches.
 ;
 ; Timings, T-states from the first instruction to the RET inclusive
-; (add the caller's 17T CALL), measured over 52,500 sampled operand
-; pairs per operation:
+; (a caller pays that plus 17T for its own CALL), measured with
+; tests/timing.py over 5,194,304 calls per operation - all 65536
+; values of each operand against 32 probes, plus a million random
+; pairs:
 ;
-;                 fast exit    typical     worst seen
-;   f16_add            77       ~1075           1730
-;   f16_sub            92       ~1090           1733
-;   f16_mul            96       ~1735           2540
-;   f16_div            94       ~2050           2930
+;                 finite operands            operand that is
+;              min    mean     max      zero/Inf/NaN (fast exit)
+;   f16_add    645    1073    1764             77 - 149
+;   f16_sub    660    1088    1779             92 - 164
+;   f16_mul   1538    1760    2612             96 - 170
+;   f16_div   1894    2075    2943             94 - 153
 ;
-; "fast exit" is a zero/Inf/NaN operand, which never reaches the
-; arithmetic; "typical" is the mean over finite operands.
+; The worst cases are the ones that shift the most: near-total
+; cancellation in the adder (0.000976 - 0.000977 costs 1764T), and
+; subnormal operands in the multiplier and divider, which have to be
+; normalised on the way in and denormalised again on the way out
+; (6e-08 / 32.0 costs 2943T).
 ;
 ; How it works: a value is carried through the routines as
 ;
@@ -573,19 +579,12 @@ f16u_sub:
 
 f16_srj:
         LD   A,B            ; [4T]
+        CP   8              ; [7T]  short shift? straight to the bit loop
+        JR   C,f16s_bits    ; [7/12T]
         CP   16             ; [7T]
-        JR   C,f16s_u16     ; [7/12T]
-        LD   A,H            ; [4T]  everything is shifted out; all that
-        OR   L              ; [4T]  survives is whether it was nonzero
-        LD   HL,0           ; [10T]
-        RET  Z              ; [11/5T]
-        INC  L              ; [4T]
-        RET                 ; [10T]
-f16s_u16:
-        CP   8              ; [7T]  eight or more? then move a whole
-        JR   C,f16s_bits    ; [7/12T]  byte in one go rather than
-        LD   A,L            ; [4T]     bit by bit
-        LD   L,H            ; [4T]
+        JR   NC,f16s_all    ; [7/12T]
+        LD   A,L            ; [4T]  8..15: move a whole byte in one go
+        LD   L,H            ; [4T]  rather than a bit at a time
         LD   H,0            ; [7T]
         OR   A              ; [4T]  did the dropped byte hold anything?
         JR   Z,f16s_seeded  ; [7/12T]
@@ -601,6 +600,13 @@ f16s_seeded:
         DEC  B              ; [4T]
         JR   NZ,f16s_loop   ; [7/12T]
         JR   f16s_jam       ; [12T]
+f16s_all:
+        LD   A,H            ; [4T]  16 or more: everything is shifted
+        OR   L              ; [4T]  out, and all that survives is
+        LD   HL,0           ; [10T] whether it was nonzero
+        RET  Z              ; [11/5T]
+        INC  L              ; [4T]
+        RET                 ; [10T]
 f16s_bits:
         XOR  A              ; [4T]  A counts the 1 bits shifted out
 f16s_loop:

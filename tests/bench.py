@@ -48,6 +48,7 @@ class Bench:
         self.m.set_memory_block(RETADDR, bytes([0x76]))     # HALT
         self.m.set_memory_block(0xFEFE, bytes([RETADDR & 0xFF, RETADDR >> 8]))
         self.view = self.m.get_state_view()
+        self.m.set_breakpoint(RETADDR)      # so timing runs stop on return
 
     def call(self, entry, hl, de):
         m = self.m
@@ -61,6 +62,30 @@ class Bench:
         if not m.halted:
             raise RuntimeError("routine did not return (runaway loop?)")
         return m.hl
+
+    def fast_timed_call(self, entry, hl, de):
+        """T-states for one call, using a breakpoint on the return address.
+
+        Same answer as timed_call, roughly forty times quicker, because
+        the emulator is entered once instead of once per instruction.
+        The tick counter wraps every FRAME ticks, hence the fixup.
+        """
+        m = self.m
+        before = m.frame_tick
+        m.sp = 0xFEFE
+        m.hl = hl
+        m.de = de
+        m.pc = entry
+        m.halted = False
+        for _ in range(10):
+            m.ticks_to_stop = FRAME
+            m.run()
+            if m.pc == RETADDR:
+                break
+        else:
+            raise RuntimeError("routine did not return (runaway loop?)")
+        used = m.frame_tick - before
+        return m.hl, used + FRAME if used < 0 else used
 
     def timed_call(self, entry, hl, de):
         """Same, but single-stepped so the T-states can be totalled.

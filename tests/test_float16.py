@@ -78,12 +78,12 @@ def main():
                  for _ in range(nrandom)]
         total_bad += check(bench, op, pairs, "random pairs")
 
-        # timings, single-stepped for exact T-states
+        # a rough timing sample; tests/timing.py does this properly
         entry = bench.syms[OPS[op][0]]
         sample = [(random.randrange(65536), random.randrange(65536))
                   for _ in range(2000)] + list(itertools.product(INTERESTING,
                                                                 INTERESTING))
-        times = [bench.timed_call(entry, a, b)[1] for a, b in sample]
+        times = [bench.fast_timed_call(entry, a, b)[1] for a, b in sample]
         worst = max(range(len(times)), key=lambda i: times[i])
         print("  %-28s min %4dT  mean %5.0fT  max %4dT  (worst: %r %s %r)"
               % ("T-states", min(times), sum(times) / len(times), max(times),
