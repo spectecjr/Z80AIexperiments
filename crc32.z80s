@@ -1,0 +1,314 @@
+;------------------------------------------------------------------
+; crc32.z80s - CRC-32 (IEEE 802.3), the one used by zlib, PNG, gzip,
+;              Ethernet and ZIP
+;
+; Reflected algorithm, polynomial 0xEDB88320 (the reversed form of
+; 0x04C11DB7), initial value 0xFFFFFFFF, final XOR 0xFFFFFFFF. The
+; answers match zlib's crc32() byte for byte.
+;
+; One-shot:
+;
+;   crc32       HL = data, BC = length -> DE:HL = the CRC
+;   crc32_bits  the same, without the 1K of tables
+;
+; Or in pieces, for data that arrives a block at a time:
+;
+;   crc32_start   reset the accumulator
+;   crc32_update  HL = data, BC = length; folds the block in
+;   crc32_final   DE:HL = the finished CRC
+;
+; A length of zero is a no-op, as it should be - crc32 of nothing is
+; 0x00000000. The accumulator is four bytes of RAM (crc32_acc) so the
+; caller can save and restore it to interleave several streams.
+;
+; Entry : HL = pointer to the data, BC = byte count
+; Exit  : DE:HL = the CRC - DE = bits 31..16, HL = bits 15..0
+; Trash : AF, BC, DE, HL, BC', DE', HL'.  AF', IX and IY are untouched.
+;
+; Speed, measured on an emulated Z80 (see tests/test_crc32.py):
+;
+;   crc32       117.0 T-states per byte, and 1024 bytes of tables
+;   crc32_bits  718.1 T-states per byte, and no tables at all
+;
+; All of the code is 180 bytes; crc32_update_bits is 71 of those, so
+; dropping the table-driven routine and its tables leaves a CRC-32 in
+; a little over a hundred bytes.
+;
+; Both are verified against zlib's crc32 over the published check
+; vectors, every length from 0 to 39 plus the page boundaries either
+; side of 256, 512, 1024 and 4096, 400 random blocks, and 200 streams
+; split into several calls - 727 cases over 645KB, no mismatches.
+;
+; The table-driven loop keeps the running CRC and the table pointer in
+; the shadow registers, which leaves the main set free for the data
+; pointer and a two-level DJNZ counter, so the only per-byte overhead
+; outside the four table reads is a pair of EXX.
+;
+; The four tables are the four bytes of the usual 256-entry CRC table,
+; split into one page each so that a lookup is LD L,index / LD H,page
+; / LD A,(HL) with INC H stepping to the next byte - the same trick
+; the table-of-squares multiply in this repo uses. They must stay
+; page-aligned and in this order.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+CRC32_POLY:     EQU 0xEDB88320  ; the reflected polynomial
+
+;------------------------------------------------------------------
+; crc32 - CRC-32 of one block, table driven
+;
+; Entry : HL = data, BC = length      Exit : DE:HL = CRC
+;------------------------------------------------------------------
+
+crc32:
+        PUSH HL             ; [11T]
+        CALL crc32_start    ; [17T]
+        POP  HL             ; [10T]
+        CALL crc32_update   ; [17T]
+        JR   crc32_final    ; [12T]
+
+crc32_bits:
+        PUSH HL
+        CALL crc32_start
+        POP  HL
+        CALL crc32_update_bits
+        JR   crc32_final
+
+;------------------------------------------------------------------
+; crc32_start / crc32_final - bracket a run of crc32_update calls
+;------------------------------------------------------------------
+
+crc32_start:
+        LD   HL,0xFFFF      ; [10T] the CRC starts out all ones
+        LD   (crc32_acc),HL ; [16T]
+        LD   (crc32_acc+2),HL ; [16T]
+        RET                 ; [10T]
+
+crc32_final:
+        LD   HL,(crc32_acc) ; [16T] and is complemented at the end
+        LD   A,L            ; [4T]
+        CPL                 ; [4T]
+        LD   L,A            ; [4T]
+        LD   A,H            ; [4T]
+        CPL                 ; [4T]
+        LD   H,A            ; [4T]
+        LD   DE,(crc32_acc+2) ; [20T]
+        LD   A,E            ; [4T]
+        CPL                 ; [4T]
+        LD   E,A            ; [4T]
+        LD   A,D            ; [4T]
+        CPL                 ; [4T]
+        LD   D,A            ; [4T]
+        RET                 ; [10T]
+
+;------------------------------------------------------------------
+; crc32_update - fold a block into the accumulator, table driven
+;
+; Entry : HL = data, BC = length (0 does nothing)
+; Trash : AF, BC, DE, HL, BC', DE', HL'
+;
+; 117 T-states per byte, plus about 90T of setup per call.
+;------------------------------------------------------------------
+
+crc32_update:
+        LD   A,B            ; [4T]  nothing to do?
+        OR   C              ; [4T]
+        RET  Z              ; [11/5T]
+        LD   A,B            ; [4T]  split the count into a page count
+        LD   B,C            ; [4T]  and a remainder, so the inner loop
+        LD   C,A            ; [4T]  can use DJNZ
+        LD   A,B            ; [4T]
+        OR   A              ; [4T]
+        JR   Z,crc32_u_go   ; [7/12T]  an exact number of pages
+        INC  C              ; [4T]  one short page, then C full ones
+crc32_u_go:
+        EXX                 ; [4T]
+        LD   DE,(crc32_acc) ; [20T] E = byte 0, D = byte 1
+        LD   BC,(crc32_acc+2) ; [20T] C = byte 2, B = byte 3
+        EXX                 ; [4T]
+crc32_u_loop:
+        LD   A,(HL)         ; [7T]  next data byte
+        INC  HL             ; [6T]
+        EXX                 ; [4T]
+        XOR  E              ; [4T]  index = (crc ^ byte) & 255
+        LD   L,A            ; [4T]
+        LD   H,crc32_tab0 / 256 ; [7T]
+        LD   A,(HL)         ; [7T]  crc = (crc >> 8) ^ table[index]
+        XOR  D              ; [4T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,(HL)         ; [7T]
+        XOR  C              ; [4T]
+        LD   D,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,(HL)         ; [7T]
+        XOR  B              ; [4T]
+        LD   C,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,(HL)         ; [7T]
+        LD   B,A            ; [4T]
+        EXX                 ; [4T]
+        DJNZ crc32_u_loop   ; [13/8T]
+        DEC  C              ; [4T]
+        JR   NZ,crc32_u_loop ; [12/7T]
+        EXX                 ; [4T]
+        LD   (crc32_acc),DE ; [20T]
+        LD   (crc32_acc+2),BC ; [20T]
+        EXX                 ; [4T]
+        RET                 ; [10T]
+
+;------------------------------------------------------------------
+; crc32_update_bits - the same thing without the tables
+;
+; Entry : HL = data, BC = length (0 does nothing)
+; Trash : AF, BC, DE, HL, BC', DE', HL'
+;
+; About six times slower than the table version, but it costs 1024
+; bytes less. Worth it when the CRC is checked once at load time.
+;------------------------------------------------------------------
+
+crc32_update_bits:
+        LD   A,B
+        OR   C
+        RET  Z
+        LD   A,B
+        LD   B,C
+        LD   C,A
+        LD   A,B
+        OR   A
+        JR   Z,crc32_b_go
+        INC  C
+crc32_b_go:
+        EXX
+        LD   HL,(crc32_acc)   ; HL = bytes 1,0
+        LD   DE,(crc32_acc+2) ; DE = bytes 3,2
+        EXX
+crc32_b_loop:
+        LD   A,(HL)         ; [7T]  next data byte
+        INC  HL             ; [6T]
+        EXX                 ; [4T]
+        XOR  L              ; [4T]  crc ^= byte
+        LD   L,A            ; [4T]
+        LD   B,8            ; [7T]  eight shifts, one per bit
+crc32_b_bit:
+        SRL  D              ; [8T]
+        RR   E              ; [8T]
+        RR   H              ; [8T]
+        RR   L              ; [8T]
+        JR   NC,crc32_b_next ; [7/12T]  bit was 0: nothing to fold in
+        LD   A,D            ; [4T]
+        XOR  CRC32_POLY >> 24 ; [7T]
+        LD   D,A            ; [4T]
+        LD   A,E            ; [4T]
+        XOR  (CRC32_POLY >> 16) & 255 ; [7T]
+        LD   E,A            ; [4T]
+        LD   A,H            ; [4T]
+        XOR  (CRC32_POLY >> 8) & 255 ; [7T]
+        LD   H,A            ; [4T]
+        LD   A,L            ; [4T]
+        XOR  CRC32_POLY & 255 ; [7T]
+        LD   L,A            ; [4T]
+crc32_b_next:
+        DJNZ crc32_b_bit    ; [13/8T]
+        EXX                 ; [4T]
+        DJNZ crc32_b_loop   ; [13/8T]
+        DEC  C              ; [4T]
+        JR   NZ,crc32_b_loop ; [12/7T]
+        EXX
+        LD   (crc32_acc),HL
+        LD   (crc32_acc+2),DE
+        EXX
+        RET
+
+;------------------------------------------------------------------
+; The tables: entry n is the CRC of the single byte n, split so that
+; each page holds one byte of the four. Generated by
+; tools/gen_crc32_tables.py - do not edit by hand.
+;
+; These MUST be 256-byte aligned and MUST stay in this order.
+;------------------------------------------------------------------
+
+        ALIGN 256
+crc32_tab0:
+        DEFB 0,150,44,186,25,143,53,163,50,164,30,136,43,189,7,145
+        DEFB 100,242,72,222,125,235,81,199,86,192,122,236,79,217,99,245
+        DEFB 200,94,228,114,209,71,253,107,250,108,214,64,227,117,207,89
+        DEFB 172,58,128,22,181,35,153,15,158,8,178,36,135,17,171,61
+        DEFB 144,6,188,42,137,31,165,51,162,52,142,24,187,45,151,1
+        DEFB 244,98,216,78,237,123,193,87,198,80,234,124,223,73,243,101
+        DEFB 88,206,116,226,65,215,109,251,106,252,70,208,115,229,95,201
+        DEFB 60,170,16,134,37,179,9,159,14,152,34,180,23,129,59,173
+        DEFB 32,182,12,154,57,175,21,131,18,132,62,168,11,157,39,177
+        DEFB 68,210,104,254,93,203,113,231,118,224,90,204,111,249,67,213
+        DEFB 232,126,196,82,241,103,221,75,218,76,246,96,195,85,239,121
+        DEFB 140,26,160,54,149,3,185,47,190,40,146,4,167,49,139,29
+        DEFB 176,38,156,10,169,63,133,19,130,20,174,56,155,13,183,33
+        DEFB 212,66,248,110,205,91,225,119,230,112,202,92,255,105,211,69
+        DEFB 120,238,84,194,97,247,77,219,74,220,102,240,83,197,127,233
+        DEFB 28,138,48,166,5,147,41,191,46,184,2,148,55,161,27,141
+
+crc32_tab1:
+        DEFB 0,48,97,81,196,244,165,149,136,184,233,217,76,124,45,29
+        DEFB 16,32,113,65,212,228,181,133,152,168,249,201,92,108,61,13
+        DEFB 32,16,65,113,228,212,133,181,168,152,201,249,108,92,13,61
+        DEFB 48,0,81,97,244,196,149,165,184,136,217,233,124,76,29,45
+        DEFB 65,113,32,16,133,181,228,212,201,249,168,152,13,61,108,92
+        DEFB 81,97,48,0,149,165,244,196,217,233,184,136,29,45,124,76
+        DEFB 97,81,0,48,165,149,196,244,233,217,136,184,45,29,76,124
+        DEFB 113,65,16,32,181,133,212,228,249,201,152,168,61,13,92,108
+        DEFB 131,179,226,210,71,119,38,22,11,59,106,90,207,255,174,158
+        DEFB 147,163,242,194,87,103,54,6,27,43,122,74,223,239,190,142
+        DEFB 163,147,194,242,103,87,6,54,43,27,74,122,239,223,142,190
+        DEFB 179,131,210,226,119,71,22,38,59,11,90,106,255,207,158,174
+        DEFB 194,242,163,147,6,54,103,87,74,122,43,27,142,190,239,223
+        DEFB 210,226,179,131,22,38,119,71,90,106,59,11,158,174,255,207
+        DEFB 226,210,131,179,38,22,71,119,106,90,11,59,174,158,207,255
+        DEFB 242,194,147,163,54,6,87,103,122,74,27,43,190,142,223,239
+
+crc32_tab2:
+        DEFB 0,7,14,9,109,106,99,100,219,220,213,210,182,177,184,191
+        DEFB 183,176,185,190,218,221,212,211,108,107,98,101,1,6,15,8
+        DEFB 110,105,96,103,3,4,13,10,181,178,187,188,216,223,214,209
+        DEFB 217,222,215,208,180,179,186,189,2,5,12,11,111,104,97,102
+        DEFB 220,219,210,213,177,182,191,184,7,0,9,14,106,109,100,99
+        DEFB 107,108,101,98,6,1,8,15,176,183,190,185,221,218,211,212
+        DEFB 178,181,188,187,223,216,209,214,105,110,103,96,4,3,10,13
+        DEFB 5,2,11,12,104,111,102,97,222,217,208,215,179,180,189,186
+        DEFB 184,191,182,177,213,210,219,220,99,100,109,106,14,9,0,7
+        DEFB 15,8,1,6,98,101,108,107,212,211,218,221,185,190,183,176
+        DEFB 214,209,216,223,187,188,181,178,13,10,3,4,96,103,110,105
+        DEFB 97,102,111,104,12,11,2,5,186,189,180,179,215,208,217,222
+        DEFB 100,99,106,109,9,14,7,0,191,184,177,182,210,213,220,219
+        DEFB 211,212,221,218,190,185,176,183,8,15,6,1,101,98,107,108
+        DEFB 10,13,4,3,103,96,105,110,209,214,223,216,188,187,178,181
+        DEFB 189,186,179,180,208,215,222,217,102,97,104,111,11,12,5,2
+
+crc32_tab3:
+        DEFB 0,119,238,153,7,112,233,158,14,121,224,151,9,126,231,144
+        DEFB 29,106,243,132,26,109,244,131,19,100,253,138,20,99,250,141
+        DEFB 59,76,213,162,60,75,210,165,53,66,219,172,50,69,220,171
+        DEFB 38,81,200,191,33,86,207,184,40,95,198,177,47,88,193,182
+        DEFB 118,1,152,239,113,6,159,232,120,15,150,225,127,8,145,230
+        DEFB 107,28,133,242,108,27,130,245,101,18,139,252,98,21,140,251
+        DEFB 77,58,163,212,74,61,164,211,67,52,173,218,68,51,170,221
+        DEFB 80,39,190,201,87,32,185,206,94,41,176,199,89,46,183,192
+        DEFB 237,154,3,116,234,157,4,115,227,148,13,122,228,147,10,125
+        DEFB 240,135,30,105,247,128,25,110,254,137,16,103,249,142,23,96
+        DEFB 214,161,56,79,209,166,63,72,216,175,54,65,223,168,49,70
+        DEFB 203,188,37,82,204,187,34,85,197,178,43,92,194,181,44,91
+        DEFB 155,236,117,2,156,235,114,5,149,226,123,12,146,229,124,11
+        DEFB 134,241,104,31,129,246,111,24,136,255,102,17,143,248,97,22
+        DEFB 160,215,78,57,167,208,73,62,174,217,64,55,169,222,71,48
+        DEFB 189,202,83,36,186,205,84,35,179,196,93,42,180,195,90,45
+
+;------------------------------------------------------------------
+; The running CRC. Four bytes, must be in RAM.
+;------------------------------------------------------------------
+
+crc32_acc:      DEFS 4
+
+crc32_end:
+CRC32_SIZE:     EQU crc32_end - crc32
+
+;------------------------------------------------------------

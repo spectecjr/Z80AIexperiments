@@ -24,11 +24,11 @@ BATCH = 2048            # pairs per emulator entry
 FRAME = 100000          # the emulator's tick counter wraps at this
 
 
-def assemble():
-    binf = "/tmp/f16_bench.bin"
-    symf = "/tmp/f16_bench.sym"
+def assemble(harness="harness.asm"):
+    binf = "/tmp/%s.bin" % harness.replace(".asm", "")
+    symf = "/tmp/%s.sym" % harness.replace(".asm", "")
     r = subprocess.run([SJASM, "--sym=" + symf, "--raw=" + binf, "-I" + ROOT,
-                        os.path.join(HERE, "harness.asm")],
+                        os.path.join(HERE, harness)],
                        capture_output=True, text=True)
     if r.returncode:
         sys.exit(r.stdout + r.stderr)
@@ -41,8 +41,10 @@ def assemble():
 
 
 class Bench:
-    def __init__(self):
-        code, self.syms = assemble()
+    def __init__(self, harness="harness.asm", opsize=2):
+        self.opsize = opsize            # bytes per operand (2 or 4)
+        self.batchsize = BATCH if opsize == 2 else BATCH // 2
+        code, self.syms = assemble(harness)
         self.m = z80.Z80Machine()
         self.m.set_memory_block(ORG, code)
         self.m.set_memory_block(RETADDR, bytes([0x76]))     # HALT
@@ -57,11 +59,39 @@ class Bench:
         m.de = de
         m.pc = entry
         m.halted = False
-        m.ticks_to_stop = 100000
-        m.run()
-        if not m.halted:
+        for _ in range(400):       # generous: a long CRC run is millions of T
+            m.ticks_to_stop = FRAME // 2   # so a run never spans a full wrap
+            m.run()
+            if m.pc == RETADDR:
+                break
+        else:
             raise RuntimeError("routine did not return (runaway loop?)")
         return m.hl
+
+    def call_regs(self, entry, hl=0, de=0, bc=0):
+        """Call a routine with HL/DE/BC set; returns (DE:HL, T-states)."""
+        m = self.m
+        m.bc = bc
+        return self.fast_timed_call(entry, hl, de)[1], (m.de << 16) | m.hl
+
+    def poke(self, addr, data):
+        self.m.set_memory_block(addr, bytes(data))
+
+    def poke32(self, a, b):
+        """Put a pair of float32 operands in memory; returns their addresses."""
+        self.m.set_memory_block(0x9800, a.to_bytes(4, "little")
+                                        + b.to_bytes(4, "little"))
+        return 0x9800, 0x9804
+
+    def call32(self, entry, a, b):
+        pa, pb = self.poke32(a, b)
+        self.call(entry, pa, pb)
+        return (self.m.de << 16) | self.m.hl
+
+    def fast_timed_call32(self, entry, a, b):
+        pa, pb = self.poke32(a, b)
+        _, t = self.fast_timed_call(entry, pa, pb)
+        return (self.m.de << 16) | self.m.hl, t
 
     def fast_timed_call(self, entry, hl, de):
         """T-states for one call, using a breakpoint on the return address.
@@ -71,21 +101,24 @@ class Bench:
         The tick counter wraps every FRAME ticks, hence the fixup.
         """
         m = self.m
-        before = m.frame_tick
         m.sp = 0xFEFE
         m.hl = hl
         m.de = de
         m.pc = entry
         m.halted = False
-        for _ in range(10):
-            m.ticks_to_stop = FRAME
+        total = 0
+        prev = m.frame_tick
+        for _ in range(400):       # generous: a long CRC run is millions of T
+            m.ticks_to_stop = FRAME // 2   # so a run never spans a full wrap
             m.run()
+            step = m.frame_tick - prev      # the counter wraps every FRAME,
+            total += step + FRAME if step < 0 else step   # but a single run
+            prev = m.frame_tick             # never spans more than one wrap
             if m.pc == RETADDR:
                 break
         else:
             raise RuntimeError("routine did not return (runaway loop?)")
-        used = m.frame_tick - before
-        return m.hl, used + FRAME if used < 0 else used
+        return m.hl, total
 
     def timed_call(self, entry, hl, de):
         """Same, but single-stepped so the T-states can be totalled.
@@ -122,11 +155,12 @@ class Bench:
         """
         m = self.m
         out = []
-        for base in range(0, len(pairs), BATCH):
-            chunk = pairs[base:base + BATCH]
+        n = self.opsize
+        for base in range(0, len(pairs), self.batchsize):
+            chunk = pairs[base:base + self.batchsize]
             buf = bytearray()
             for a, b in chunk:
-                buf += bytes([a & 0xFF, a >> 8, b & 0xFF, b >> 8])
+                buf += a.to_bytes(n, "little") + b.to_bytes(n, "little")
             m.set_memory_block(DRV_IN, bytes(buf))
             m.set_memory_block(self.syms["drv_count"],
                                bytes([len(chunk) & 0xFF, len(chunk) >> 8]))
@@ -143,8 +177,9 @@ class Bench:
             else:
                 raise RuntimeError("batch did not finish (runaway loop?)")
             raw = bytes(self.view[MEMOFF + DRV_OUT:
-                                  MEMOFF + DRV_OUT + 2 * len(chunk)])
-            out += [raw[i] | (raw[i + 1] << 8) for i in range(0, len(raw), 2)]
+                                  MEMOFF + DRV_OUT + n * len(chunk)])
+            out += [int.from_bytes(raw[i:i + n], "little")
+                    for i in range(0, len(raw), n)]
         return out
 
 
@@ -156,36 +191,55 @@ OPS = {
 }
 
 
-def bits(x):
-    return int(np.float16(x).view(np.uint16))
+# per width: exponent mask, fraction mask, numpy view type
+MASKS = {16: (0x7C00, 0x03FF, np.uint16, np.float16),
+         32: (0x7F800000, 0x007FFFFF, np.uint32, np.float32)}
+
+
+def bits(x, width=16):
+    _, _, uint, flt = MASKS[width]
+    return int(flt(x).view(uint))
 
 
 def as_f16(u):
     return np.uint16(u).view(np.float16)
 
 
-def reference(op, a, b):
+def as_f32(u):
+    return np.uint32(u).view(np.float32)
+
+
+def as_float(u, width=16):
+    _, _, uint, flt = MASKS[width]
+    return uint(u).view(flt)
+
+
+def reference(op, a, b, width=16):
     with np.errstate(all="ignore"):
-        return bits(OPS[op][1](as_f16(a), as_f16(b)))
+        return bits(OPS[op][1](as_float(a, width), as_float(b, width)), width)
 
 
-def isnan(u):
-    return (u & 0x7C00) == 0x7C00 and (u & 0x03FF) != 0
+def isnan(u, width=16):
+    expmask, fracmask, _, _ = MASKS[width]
+    return (u & expmask) == expmask and (u & fracmask) != 0
 
 
-def check(bench, op, pairs, label):
-    entry = bench.syms[OPS[op][0]]
+def check(bench, op, pairs, label, width=16):
+    entry = bench.syms[("f%d_" % width) + op]
     results = bench.batch(entry, pairs)
     bad = 0
+    digits = width // 4
     for (a, b), got in zip(pairs, results):
-        want = reference(op, a, b)
+        want = reference(op, a, b, width)
         # IEEE leaves the NaN payload to the implementation, so any NaN
         # answers for a NaN answer; everything else must match bit for bit.
-        if got == want or (isnan(got) and isnan(want)):
+        if got == want or (isnan(got, width) and isnan(want, width)):
             continue
         bad += 1
         if bad <= 10:
-            print("  MISMATCH %s(%04X,%04X) = %04X, want %04X   (%r %s %r = %r)"
-                  % (op, a, b, got, want, as_f16(a), op, as_f16(b), as_f16(want)))
+            print("  MISMATCH %s(%0*X,%0*X) = %0*X, want %0*X   (%r %s %r = %r)"
+                  % (op, digits, a, digits, b, digits, got, digits, want,
+                     as_float(a, width), op, as_float(b, width),
+                     as_float(want, width)))
     print("  %-28s %8d cases, %d mismatches" % (label, len(pairs), bad))
     return bad

@@ -1,0 +1,1055 @@
+;------------------------------------------------------------------
+; float32.z80s - IEEE 754 binary32 (single precision) arithmetic
+;
+; Public entry points:
+;
+;   f32_add   a + b
+;   f32_sub   a - b
+;   f32_mul   a * b
+;   f32_div   a / b
+;
+; Entry : HL = pointer to operand a, DE = pointer to operand b
+;         (4 bytes each, little-endian, exactly as C or the FPU
+;          would store them)
+; Exit  : DE:HL = the result - DE = bits 31..16, HL = bits 15..0,
+;         so LD (nn),HL / LD (nn+2),DE stores it back
+; Trash : AF, BC, DE, HL, BC', DE', HL', and the workspace below.
+;         AF', IX, IY, the interrupt state and the stack depth are
+;         left alone. Operands are never written to.
+;
+; Unlike float16.z80s this one needs a scratch workspace: 24-bit
+; significands do not fit in the register file. It is 19 bytes,
+; declared at the end of this file, and can be moved anywhere in RAM.
+; The whole library is 1245 bytes including it.
+;
+; Everything the standard asks for is implemented:
+;   - normals, subnormals (as operands and as results)
+;   - signed zeros, infinities, NaNs, and the invalid operations
+;     (Inf-Inf, 0*Inf, 0/0, Inf/Inf), which produce a quiet NaN
+;   - division by zero -> correctly signed infinity
+;   - round to nearest, ties to even, on every operation
+;   - gradual underflow, and overflow to infinity
+;
+; Left out: the five IEEE exception flags, the other three rounding
+; modes, and NaN payload propagation (any NaN produced is the
+; canonical quiet NaN 0x7FC00000, which IEEE 754 permits).
+;
+; Every result is bit-exact against IEEE 754. tests/test_float32.py
+; runs the code on an emulated Z80 and compares it with numpy. The
+; input space is far too large to sweep, so the cases come from
+; generators aimed at where soft float goes wrong - subnormals,
+; exponent boundaries, near-total cancellation, operands a few ulps
+; apart, and sparse significands, which are what produce exact results
+; and exact rounding ties - plus uniform random pairs: 2,502,400 cases
+; per operation, no mismatches.
+;
+; Timings, T-states from the first instruction to the RET inclusive
+; (a caller pays that plus 17T for its own CALL), measured with
+; tests/timing.py over 400,000 calls per operation:
+;
+;                 finite operands            operand that is
+;              min    mean     max      zero/Inf/NaN (fast exit)
+;   f32_add   2278    2836    4936            273 - 696
+;   f32_sub   2293    2850    4951            288 - 711
+;   f32_mul   4430    4854    7421            692 - 809
+;   f32_div   5295    5774    8570            692 - 815
+;
+; The worst cases are the ones that shift the most: near-total
+; cancellation in the adder, and subnormal operands in the multiplier
+; and divider, which are normalised on the way in and denormalised
+; again on the way out.
+;
+; The internal working format is the same idea as float16.z80s: a
+; value is carried as
+;
+;   value = S * 2^(E-153)       S = M<<3, M = the 24-bit significand
+;
+; three guard bits below the significand with the lowest acting as a
+; sticky bit, so one rounding-and-packing routine finishes all four
+; operations. Packing is again a single addition, because the hidden
+; bit of the significand carries into the exponent field exactly as
+; required. The exponent is kept 16-bit and signed, since binary32
+; exponents run out of a byte once subnormals are normalised.
+;
+; The multiplier and divider run their significands in both register
+; banks at once: the accumulator and the multiplicand/divisor live in
+; the main set, the multiplier/quotient in the shadow set, and the
+; carry flag - which EXX does not disturb - carries bits between them.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+F32_QNAN_HI:    EQU 0x7FC0      ; canonical quiet NaN, high half
+F32_INF_HI:     EQU 0x7F80      ; +infinity, high half
+
+;------------------------------------------------------------------
+; f32_sub / f32_add
+;
+; Entry : HL = ptr a, DE = ptr b        Exit : DE:HL = a -+ b
+;------------------------------------------------------------------
+
+f32_sub:
+        LD   A,0x80         ; subtract = add with b's sign flipped.
+        JR   f32_addsub     ; Flipping the sign of a NaN leaves a NaN,
+f32_add:                    ; and of a zero gives the signed-zero
+        XOR  A              ; rules IEEE wants for x-0 and 0-0.
+f32_addsub:
+        LD   (f32_wneg),A   ; the mask applied to b's sign throughout
+
+        ; --- classify a ---
+        CALL f32_exam       ; A = exponent, B = fraction flag, C = sign
+        CP   255
+        JP   Z,f32a_aspec   ; a is Inf or NaN
+        OR   B
+        LD   (f32_waz),A    ; zero when a is +-0
+        LD   A,C
+        LD   (f32_wsa),A
+
+        ; --- classify b ---
+        EX   DE,HL
+        CALL f32_exam
+        EX   DE,HL
+        CP   255
+        JP   Z,f32a_bspec   ; b is Inf or NaN
+        OR   B
+        LD   B,A            ; zero when b is +-0
+        LD   A,(f32_wneg)
+        XOR  C
+        LD   (f32_wsb),A    ; b's sign, with the subtract flip applied
+
+        ; --- zeros ---
+        LD   A,B
+        OR   A
+        JP   Z,f32a_bzero
+        LD   A,(f32_waz)
+        OR   A
+        JP   Z,f32a_azero
+
+        ; --- order the operands by magnitude -----------------------
+        ; Sorting on |x| (an unsigned compare of the low 31 bits)
+        ; puts the larger significand in HL, so the subtract below
+        ; can never borrow and the result takes the larger's sign.
+        CALL f32_cmpmag     ; carry set if |a| < |b|
+        LD   A,(f32_wsa)
+        JR   NC,f32a_sorted
+        EX   DE,HL
+        LD   A,(f32_wsb)
+f32a_sorted:
+        LD   (f32_wsgn),A   ; result sign = sign of the larger operand
+        LD   (f32_wpa),HL   ; larger
+        EX   DE,HL
+        LD   (f32_wpb),HL   ; smaller
+        LD   A,(f32_wsa)
+        LD   B,A
+        LD   A,(f32_wsb)
+        XOR  B
+        LD   (f32_wdif),A   ; bit 7 set when the signs differ
+
+        ; --- exponents, and how far to shift the smaller -----------
+        CALL f32_exam       ; HL still points at the smaller operand
+        OR   A
+        JR   NZ,f32a_es
+        INC  A              ; a subnormal reads as exponent 1
+f32a_es:
+        LD   (f32_wes),A
+        LD   HL,(f32_wpa)
+        CALL f32_exam
+        OR   A
+        JR   NZ,f32a_el
+        INC  A
+f32a_el:
+        LD   (f32_wexp),A   ; result exponent starts as the larger's
+        LD   B,A
+        XOR  A
+        LD   (f32_wexp+1),A ; ... as a 16-bit signed quantity
+        LD   A,B
+        LD   HL,f32_wes
+        SUB  (HL)
+        LD   B,A            ; B = exponent difference
+
+        ; --- align and stash the smaller significand ---------------
+        LD   HL,(f32_wpb)
+        PUSH BC
+        CALL f32_unpack_x8  ; DE:HL = S_small
+        POP  BC
+        LD   A,B
+        OR   A
+        CALL NZ,f32_srj     ; shift right B places, jamming the sticky
+        LD   (f32_wsig),HL
+        LD   (f32_wsig+2),DE
+
+        ; --- unpack the larger and combine -------------------------
+        LD   HL,(f32_wpa)
+        CALL f32_unpack_x8  ; DE:HL = S_large
+        LD   A,(f32_wdif)
+        OR   A
+        JP   M,f32a_dsign
+
+        ; --- like signs: add ---------------------------------------
+        LD   BC,(f32_wsig)
+        ADD  HL,BC
+        LD   BC,(f32_wsig+2)
+        EX   DE,HL
+        ADC  HL,BC
+        EX   DE,HL
+        BIT  3,D            ; carried past bit 26?
+        JR   Z,f32a_pack
+        LD   B,1            ; one bit of renormalisation
+        CALL f32_srj
+        LD   A,(f32_wexp)   ; ... and bump the exponent
+        INC  A
+        LD   (f32_wexp),A
+        JR   NZ,f32a_pack
+        LD   A,(f32_wexp+1)
+        INC  A
+        LD   (f32_wexp+1),A
+        JR   f32a_pack
+
+        ; --- unlike signs: subtract --------------------------------
+f32a_dsign:
+        LD   BC,(f32_wsig)
+        OR   A              ; clear carry
+        SBC  HL,BC
+        LD   BC,(f32_wsig+2)
+        EX   DE,HL
+        SBC  HL,BC
+        EX   DE,HL
+        LD   A,H            ; exact cancellation?
+        OR   L
+        OR   D
+        OR   E
+        JR   NZ,f32a_norm
+        LD   D,A            ; IEEE says the answer is +0
+        LD   E,A
+        LD   H,A
+        LD   L,A
+        RET
+f32a_norm:
+        LD   B,0            ; renormalise, counting the shifts
+f32a_nloop:
+        BIT  2,D            ; bit 26 set yet?
+        JR   NZ,f32a_ndone
+        ADD  HL,HL
+        RL   E
+        RL   D
+        INC  B
+        JR   f32a_nloop
+f32a_ndone:
+        LD   A,B
+        OR   A
+        JR   Z,f32a_pack
+        PUSH DE             ; exponent -= shifts
+        PUSH HL
+        LD   C,A
+        LD   B,0
+        LD   HL,(f32_wexp)
+        OR   A
+        SBC  HL,BC
+        LD   (f32_wexp),HL
+        POP  HL
+        POP  DE
+f32a_pack:
+        JP   f32_round_pack
+
+        ; --- Inf / NaN operands ------------------------------------
+f32a_aspec:
+        LD   A,B            ; a: a nonzero fraction means NaN
+        OR   A
+        JP   NZ,f32_nan
+        LD   A,C
+        LD   (f32_wsa),A    ; a = +-Inf; remember which
+        EX   DE,HL
+        CALL f32_exam
+        EX   DE,HL
+        CP   255
+        JP   NZ,f32_load    ; b is finite: Inf + finite = a
+        LD   A,B
+        OR   A
+        JP   NZ,f32_nan     ; b is NaN
+        LD   A,(f32_wneg)   ; Inf + Inf: same sign keeps the Inf,
+        XOR  C              ; opposite signs is the invalid case
+        LD   B,A
+        LD   A,(f32_wsa)
+        XOR  B
+        JP   NZ,f32_nan
+        JP   f32_load       ; HL still points at a
+f32a_bspec:
+        LD   A,B            ; a is finite, b is Inf or NaN
+        OR   A
+        JP   NZ,f32_nan
+        EX   DE,HL
+        CALL f32_load       ; finite + Inf = b (negated for a subtract)
+        LD   A,(f32_wneg)
+        XOR  D
+        LD   D,A
+        RET
+
+        ; --- zero operands -----------------------------------------
+f32a_bzero:
+        LD   A,(f32_waz)
+        OR   A
+        JP   NZ,f32_load    ; a + 0 = a
+        LD   A,(f32_wsa)    ; (+-0) + (+-0) is -0 only when both are
+        LD   B,A            ; negative; every other pairing gives +0
+        LD   A,(f32_wsb)
+        AND  B
+        AND  0x80
+        LD   D,A
+        LD   E,0
+        LD   HL,0
+        RET
+f32a_azero:
+        EX   DE,HL          ; 0 + b = b (negated for a subtract)
+        CALL f32_load
+        LD   A,(f32_wneg)
+        XOR  D
+        LD   D,A
+        RET
+
+;------------------------------------------------------------------
+; f32_mul
+;
+; Entry : HL = ptr a, DE = ptr b        Exit : DE:HL = a * b
+;------------------------------------------------------------------
+
+f32_mul:
+        CALL f32_pair       ; classify both, and work out the sign
+        LD   A,(f32_wca)
+        CP   3
+        JP   Z,f32_nan
+        LD   B,A
+        LD   A,(f32_wcb)
+        CP   3
+        JP   Z,f32_nan
+        LD   C,A
+        LD   A,B
+        CP   2
+        JR   Z,f32m_ainf
+        OR   A
+        JR   Z,f32m_azero
+        LD   A,C            ; a is finite and nonzero
+        CP   2
+        JP   Z,f32_retinf
+        OR   A
+        JP   Z,f32_retzero
+        JR   f32m_main
+f32m_ainf:
+        LD   A,C
+        OR   A
+        JP   Z,f32_nan      ; Inf * 0 is invalid
+        JP   f32_retinf
+f32m_azero:
+        LD   A,C
+        CP   2
+        JP   Z,f32_nan      ; 0 * Inf is invalid
+        JP   f32_retzero
+
+f32m_main:
+        LD   (f32_wpa),HL
+        LD   (f32_wpb),DE
+        CALL f32_unpack_nrm ; DE:HL = M_a, BC = exponent
+        LD   (f32_wexp),BC
+        LD   (f32_wsig),HL
+        LD   (f32_wsig+2),DE
+        LD   HL,(f32_wpb)
+        CALL f32_unpack_nrm ; DE:HL = M_b, BC = exponent
+        PUSH HL
+        PUSH DE
+        LD   HL,(f32_wexp)
+        ADD  HL,BC
+        LD   BC,-127
+        ADD  HL,BC          ; result exponent = E_a + E_b - 127
+        LD   (f32_wexp),HL
+        POP  DE
+        POP  HL
+
+        ; --- 24x24 -> 48 bit multiply ------------------------------
+        ; Shift-and-add, least significant bit first. The main set
+        ; holds the multiplicand and the running high half of the
+        ; product; the shadow set holds the multiplier, which the
+        ; product's low bits fill in from the top as it is consumed.
+        PUSH HL
+        PUSH DE
+        EXX
+        POP  DE
+        POP  HL             ; shadow DE:HL = M_b
+        LD   C,E            ; C:HL = the multiplier, 24 bits
+        LD   B,24           ; loop counter
+        EXX
+        LD   BC,(f32_wsig+2)
+        LD   B,C            ; B = M_a bits 23..16
+        LD   DE,(f32_wsig)  ; DE = M_a bits 15..0
+        LD   HL,0
+        LD   C,0            ; C:HL = product accumulator
+        EXX
+f32m_loop:
+        BIT  0,L            ; [8T]  next multiplier bit
+        EXX                 ; [4T]
+        JR   Z,f32m_noadd   ; [7/12T]
+        ADD  HL,DE          ; [11T] accumulate the multiplicand
+        LD   A,C            ; [4T]
+        ADC  A,B            ; [4T]
+        LD   C,A            ; [4T]  the carry out is the product's
+        JR   f32m_shift     ; [12T] bit 24, and the shift below is
+f32m_noadd:                 ;       what puts it back where it goes
+        OR   A              ; [4T]  no add, so nothing to carry in
+f32m_shift:
+        RR   C              ; [8T]  shift the accumulator down, its
+        RR   H              ; [8T]  low bit crossing into the
+        RR   L              ; [8T]  multiplier through the carry
+        EXX                 ; [4T]
+        RR   C              ; [8T]
+        RR   H              ; [8T]
+        RR   L              ; [8T]
+        DJNZ f32m_loop      ; [13/8T]
+
+        ; --- take the top 28 bits, jam the rest into a sticky bit ---
+        LD   A,C            ; the low 24 bits of the product are here
+        AND  0x0F
+        OR   H
+        OR   L
+        LD   B,A            ; anything below bit 20 of the product?
+        LD   A,C
+        RRCA
+        RRCA
+        RRCA
+        RRCA
+        AND  0x0F
+        LD   C,A            ; product bits 23..20
+        PUSH BC
+        EXX
+        LD   E,C            ; the high 24 bits of the product
+        LD   D,0
+        POP  BC
+        ADD  HL,HL
+        RL   E
+        RL   D
+        ADD  HL,HL
+        RL   E
+        RL   D
+        ADD  HL,HL
+        RL   E
+        RL   D
+        ADD  HL,HL
+        RL   E
+        RL   D               ; DE:HL = product >> 20
+        LD   A,L
+        OR   C
+        LD   L,A             ; put bits 23..20 back on the bottom
+        LD   A,B
+        OR   A
+        JR   Z,f32m_norm
+        SET  0,L             ; and jam everything below them
+f32m_norm:
+        BIT  3,D             ; product in [2^27,2^28)? then one more
+        JR   Z,f32m_pack     ; shift is needed to normalise it
+        LD   B,1
+        CALL f32_srj
+        LD   A,(f32_wexp)
+        INC  A
+        LD   (f32_wexp),A
+        JR   NZ,f32m_pack
+        LD   A,(f32_wexp+1)
+        INC  A
+        LD   (f32_wexp+1),A
+f32m_pack:
+        JP   f32_round_pack
+
+;------------------------------------------------------------------
+; f32_div
+;
+; Entry : HL = ptr a, DE = ptr b        Exit : DE:HL = a / b
+;------------------------------------------------------------------
+
+f32_div:
+        CALL f32_pair
+        LD   A,(f32_wca)
+        CP   3
+        JP   Z,f32_nan
+        LD   B,A
+        LD   A,(f32_wcb)
+        CP   3
+        JP   Z,f32_nan
+        LD   C,A
+        LD   A,B
+        CP   2
+        JR   Z,f32d_ainf
+        OR   A
+        JR   Z,f32d_azero
+        LD   A,C            ; a is finite and nonzero
+        CP   2
+        JP   Z,f32_retzero  ; finite / Inf = signed zero
+        OR   A
+        JP   Z,f32_retinf   ; finite / 0 = signed infinity
+        JR   f32d_main
+f32d_ainf:
+        LD   A,C
+        CP   2
+        JP   Z,f32_nan      ; Inf / Inf is invalid
+        JP   f32_retinf
+f32d_azero:
+        LD   A,C
+        OR   A
+        JP   Z,f32_nan      ; 0 / 0 is invalid
+        JP   f32_retzero
+
+f32d_main:
+        LD   (f32_wpa),HL
+        LD   (f32_wpb),DE
+        CALL f32_unpack_nrm ; DE:HL = M_a, BC = exponent
+        LD   (f32_wexp),BC
+        LD   (f32_wsig),HL
+        LD   (f32_wsig+2),DE
+        LD   HL,(f32_wpb)
+        CALL f32_unpack_nrm ; DE:HL = M_b, BC = exponent
+        PUSH HL
+        PUSH DE
+        LD   HL,(f32_wexp)
+        OR   A
+        SBC  HL,BC
+        LD   BC,127
+        ADD  HL,BC          ; result exponent = E_a - E_b + 127
+        LD   (f32_wexp),HL
+        POP  DE
+        POP  HL
+
+        ; --- 28 bit restoring division -----------------------------
+        ; M_a/M_b lies in (1/2,2), so the quotient of M_a*2^27 by M_b
+        ; needs 28 bits: one from the initial compare and 27 from the
+        ; loop. Whatever is left in the remainder becomes the sticky
+        ; bit. The quotient is built in the shadow set, a bit at a
+        ; time through the carry flag.
+        LD   B,E            ; B:DE = divisor
+        EX   DE,HL
+        LD   HL,(f32_wsig)
+        LD   A,(f32_wsig+2)
+        LD   C,A            ; C:HL = remainder, starting at M_a
+        EXX
+        LD   DE,0
+        LD   HL,0           ; DE:HL = quotient
+        LD   B,27
+        EXX
+        LD   A,C            ; first quotient bit: M_a >= M_b ?
+        OR   A
+        SBC  HL,DE
+        SBC  A,B
+        JR   C,f32d_first0
+        LD   C,A
+        EXX
+        INC  L
+        EXX
+        JR   f32d_go
+f32d_first0:
+        ADD  HL,DE          ; restore
+f32d_go:
+        EXX
+f32d_loop:
+        EXX                 ; [4T]  -> main set
+        ADD  HL,HL          ; [11T] remainder <<= 1
+        RL   C              ; [8T]
+        JR   C,f32d_force   ; [7/12T] bit 24 set: the subtract must fit
+        LD   A,C            ; [4T]
+        SBC  HL,DE          ; [15T] trial subtract (carry is clear)
+        SBC  A,B            ; [4T]
+        JR   C,f32d_restore ; [7/12T]
+        LD   C,A            ; [4T]
+        SCF                 ; [4T]  quotient bit 1
+        JR   f32d_bit       ; [12T]
+f32d_restore:
+        ADD  HL,DE          ; [11T] too big: put it back
+        OR   A              ; [4T]  quotient bit 0
+        JR   f32d_bit       ; [12T]
+f32d_force:
+        LD   A,C            ; [4T]
+        OR   A              ; [4T]  clear carry for the subtract
+        SBC  HL,DE          ; [15T]
+        SBC  A,B            ; [4T]
+        LD   C,A            ; [4T]
+        SCF                 ; [4T]
+f32d_bit:
+        EXX                 ; [4T]  -> shadow set
+        ADC  HL,HL          ; [15T] quotient <<= 1, bit in from carry
+        RL   E              ; [8T]
+        RL   D              ; [8T]
+        DJNZ f32d_loop      ; [13/8T]
+
+        ; --- normalise the quotient --------------------------------
+        EXX
+        LD   A,C            ; was the division exact?
+        OR   H
+        OR   L
+        LD   C,A
+        EXX
+        PUSH DE
+        PUSH HL
+        EXX
+        POP  HL
+        POP  DE             ; DE:HL = quotient, C = inexact flag
+        BIT  3,D            ; quotient >= 2^27 ?
+        JR   NZ,f32d_shq
+        LD   A,(f32_wexp)   ; no: it is a binade lower
+        SUB  1
+        LD   (f32_wexp),A
+        JR   NC,f32d_jam
+        LD   A,(f32_wexp+1)
+        DEC  A
+        LD   (f32_wexp+1),A
+        JR   f32d_jam
+f32d_shq:
+        SRL  D              ; yes: drop the extra bit into the sticky
+        RR   E
+        RR   H
+        RR   L
+        JR   NC,f32d_jam
+        LD   C,1
+f32d_jam:
+        LD   A,C
+        OR   A
+        JR   Z,f32d_pack
+        SET  0,L
+f32d_pack:
+        JP   f32_round_pack
+
+;------------------------------------------------------------------
+; Shared results
+;------------------------------------------------------------------
+
+f32_nan:
+        LD   DE,F32_QNAN_HI
+        LD   HL,0
+        RET
+f32_retinf:
+        LD   A,(f32_wsgn)
+        OR   F32_INF_HI / 256
+        LD   D,A
+        LD   E,F32_INF_HI & 255
+        LD   HL,0
+        RET
+f32_retzero:
+        LD   A,(f32_wsgn)
+        LD   D,A
+        LD   E,0
+        LD   HL,0
+        RET
+
+;------------------------------------------------------------------
+; f32_exam - look at a float32 without unpacking it
+;
+; Entry : HL = pointer
+; Exit  : A = biased exponent (0..255)
+;         B = zero if the 23-bit fraction is zero, nonzero otherwise
+;         C = sign byte (0x00 or 0x80)
+; Trash : AF, BC.  Preserves DE, HL.
+;------------------------------------------------------------------
+
+f32_exam:
+        PUSH HL
+        LD   A,(HL)         ; byte 0
+        INC  HL
+        LD   C,A
+        LD   A,(HL)         ; byte 1
+        INC  HL
+        OR   C
+        LD   C,A
+        LD   A,(HL)         ; byte 2: fraction top, exponent bottom bit
+        INC  HL
+        LD   B,A
+        AND  0x7F
+        OR   C
+        LD   C,A            ; C = fraction-is-nonzero indicator
+        LD   A,(HL)         ; byte 3: sign and exponent top 7 bits
+        ADD  A,A
+        BIT  7,B
+        JR   Z,f32e_done
+        INC  A              ; bring in the exponent's low bit
+f32e_done:
+        LD   B,C
+        PUSH AF
+        LD   A,(HL)
+        AND  0x80
+        LD   C,A
+        POP  AF
+        POP  HL
+        RET
+
+;------------------------------------------------------------------
+; f32_pair - classify both operands and settle the result sign
+;
+; Entry : HL = ptr a, DE = ptr b
+; Exit  : (f32_wca), (f32_wcb) = 0 zero, 1 finite, 2 infinity, 3 NaN
+;         (f32_wsgn) = sign_a XOR sign_b, which is the sign a product
+;         or quotient takes whatever the operands turn out to be
+; Trash : AF, BC.  Preserves DE, HL.
+;------------------------------------------------------------------
+
+f32_pair:
+        CALL f32_exam
+        CALL f32_class
+        LD   (f32_wca),A
+        LD   A,C
+        LD   (f32_wsgn),A
+        EX   DE,HL
+        CALL f32_exam
+        EX   DE,HL
+        CALL f32_class
+        LD   (f32_wcb),A
+        LD   A,(f32_wsgn)
+        XOR  C
+        AND  0x80
+        LD   (f32_wsgn),A
+        RET
+
+f32_class:
+        ; A = exponent, B = fraction flag -> A = class
+        CP   255
+        JR   Z,f32cl_big
+        OR   A
+        JR   NZ,f32cl_fin
+        LD   A,B
+        OR   A
+        RET  Z              ; exponent 0, fraction 0: a zero
+f32cl_fin:
+        LD   A,1
+        RET
+f32cl_big:
+        LD   A,B
+        OR   A
+        LD   A,2
+        RET  Z              ; exponent 255, fraction 0: an infinity
+        LD   A,3
+        RET
+
+;------------------------------------------------------------------
+; f32_load - fetch a float32 into registers
+;
+; Entry : HL = pointer      Exit : DE:HL = the value
+; Trash : AF
+;------------------------------------------------------------------
+
+f32_load:
+        INC  HL
+        INC  HL
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        DEC  HL
+        DEC  HL
+        DEC  HL
+        LD   A,(HL)
+        INC  HL
+        LD   H,(HL)
+        LD   L,A
+        RET
+
+;------------------------------------------------------------------
+; f32_cmpmag - compare magnitudes
+;
+; Entry : HL = ptr a, DE = ptr b
+; Exit  : carry set if |a| < |b|, Z set if |a| = |b|
+; Trash : AF, BC.  Preserves DE, HL.
+;------------------------------------------------------------------
+
+f32_cmpmag:
+        PUSH HL
+        PUSH DE
+        INC  HL
+        INC  HL
+        INC  HL
+        INC  DE
+        INC  DE
+        INC  DE
+        LD   A,(DE)
+        AND  0x7F           ; the sign takes no part in this
+        LD   C,A
+        LD   A,(HL)
+        AND  0x7F
+        CP   C
+        JR   NZ,f32c_done
+        DEC  HL
+        DEC  DE
+        LD   A,(DE)
+        LD   C,A
+        LD   A,(HL)
+        CP   C
+        JR   NZ,f32c_done
+        DEC  HL
+        DEC  DE
+        LD   A,(DE)
+        LD   C,A
+        LD   A,(HL)
+        CP   C
+        JR   NZ,f32c_done
+        DEC  HL
+        DEC  DE
+        LD   A,(DE)
+        LD   C,A
+        LD   A,(HL)
+        CP   C
+f32c_done:
+        POP  DE             ; POP does not disturb the flags
+        POP  HL
+        RET
+
+;------------------------------------------------------------------
+; f32_unpack - split a finite float32 into significand and exponent
+;
+; Entry : HL = pointer to a finite float32
+; Exit  : DE:HL = 24-bit significand, hidden bit restored
+;         A = internal exponent (subnormals read as 1, which is what
+;             makes their value come out of the same formula the
+;             normals use)
+; Trash : AF, BC, DE, HL
+;
+; f32_unpack_x8  also scales by 8, giving the adder its guard bits
+; f32_unpack_nrm also left-normalises a subnormal, decrementing the
+;                exponent to match, and returns it 16-bit signed in
+;                BC - the multiplier and divider want a normalised
+;                significand and do not mind a negative exponent
+;------------------------------------------------------------------
+
+f32_unpack_x8:
+        CALL f32_unpack
+        ADD  HL,HL
+        RL   E
+        RL   D
+        ADD  HL,HL
+        RL   E
+        RL   D
+        ADD  HL,HL
+        RL   E
+        RL   D
+        RET
+
+f32_unpack_nrm:
+        CALL f32_unpack
+        LD   B,0
+        LD   C,A
+f32n_loop:
+        BIT  7,E            ; bit 23 set?
+        RET  NZ
+        ADD  HL,HL
+        RL   E
+        RL   D
+        DEC  BC
+        JR   f32n_loop
+
+f32_unpack:
+        PUSH HL
+        INC  HL
+        INC  HL
+        LD   C,(HL)         ; byte 2
+        INC  HL
+        LD   A,(HL)         ; byte 3
+        ADD  A,A
+        BIT  7,C
+        JR   Z,f32u_exp
+        INC  A
+f32u_exp:
+        LD   B,A            ; B = biased exponent
+        LD   A,C
+        AND  0x7F
+        LD   E,A            ; DE = fraction bits 22..16
+        LD   D,0
+        POP  HL
+        LD   A,(HL)
+        INC  HL
+        LD   H,(HL)
+        LD   L,A            ; HL = fraction bits 15..0
+        LD   A,B
+        OR   A
+        JR   Z,f32u_sub
+        SET  7,E            ; normal: restore the hidden 1 bit
+        RET
+f32u_sub:
+        INC  A              ; subnormal: no hidden bit, exponent 1
+        RET
+
+;------------------------------------------------------------------
+; f32_srj - shift right, jamming everything shifted out into bit 0
+;
+; Keeping a sticky bit alive through an alignment shift is what makes
+; round-to-nearest come out right when bits fall off the bottom.
+;
+; Entry : DE:HL = value, B = shift count (>= 1)
+; Exit  : DE:HL shifted, bit 0 set if any 1 bit was shifted out
+; Trash : AF, BC
+;------------------------------------------------------------------
+
+f32_srj:
+        LD   C,0            ; sticky accumulator
+        LD   A,B
+        CP   32
+        JR   C,f32s_bytes
+        LD   A,H            ; everything is shifted out; all that
+        OR   L              ; survives is whether it was nonzero
+        OR   D
+        OR   E
+        LD   DE,0
+        LD   HL,0
+        RET  Z
+        INC  L
+        RET
+f32s_bytes:
+        CP   8
+        JR   C,f32s_bits
+        LD   B,A            ; eight or more: move a whole byte at once
+        LD   A,L
+        OR   C
+        LD   C,A
+        LD   L,H
+        LD   H,E
+        LD   E,D
+        LD   D,0
+        LD   A,B
+        SUB  8
+        JR   NZ,f32s_bytes
+        JR   f32s_jam
+f32s_bits:
+        OR   A
+        JR   Z,f32s_jam
+        LD   B,A
+        LD   A,C
+        OR   A
+        JR   Z,f32s_bitloop
+        LD   A,1            ; seed the sticky accumulator
+f32s_bitloop:
+        SRL  D
+        RR   E
+        RR   H
+        RR   L
+        ADC  A,0            ; count the 1 bits shifted out
+        DJNZ f32s_bitloop
+        LD   C,A
+f32s_jam:
+        LD   A,C
+        OR   A
+        RET  Z
+        SET  0,L
+        RET
+
+;------------------------------------------------------------------
+; f32_round_pack - round to nearest-even and assemble the result
+;
+; Entry : DE:HL = S, the significand scaled by 8 (three guard bits,
+;               the lowest of them sticky), normalised so bit 26 is
+;               set unless the value is subnormal or zero
+;         (f32_wexp) = the exponent E, 16-bit signed: the value is
+;               S * 2^(E-153)
+;         (f32_wsgn) = sign in bit 7
+; Exit  : DE:HL = the packed float32
+; Trash : AF, BC
+;
+; E may be out of range in either direction: too small and the result
+; is shifted down into a subnormal (or to zero), too large and it
+; becomes an infinity. Both still round correctly.
+;------------------------------------------------------------------
+
+f32_round_pack:
+        LD   BC,(f32_wexp)
+        DEC  BC             ; work with E-1 from here on
+        BIT  7,B
+        JR   Z,f32r_round
+        LD   A,B            ; E <= 0: denormalise into place by
+        CPL                 ; shifting right 1-E, keeping the sticky
+        LD   B,A
+        LD   A,C
+        CPL
+        LD   C,A
+        INC  BC             ; BC = 1-E
+        LD   A,B
+        OR   A
+        JR   NZ,f32r_far
+        LD   A,C
+        CP   32
+        JR   C,f32r_shift
+f32r_far:
+        LD   A,32           ; anything past 32 lands on zero anyway
+f32r_shift:
+        LD   B,A
+        CALL f32_srj
+        LD   BC,0           ; E-1 := 0
+f32r_round:
+        PUSH BC             ; save E-1
+        LD   A,L
+        AND  7              ; the three guard bits
+        PUSH AF
+        LD   BC,4
+        ADD  HL,BC          ; round to nearest: add a half
+        JR   NC,f32r_nocarry
+        INC  DE
+f32r_nocarry:
+        POP  AF
+        CP   4              ; exactly half?
+        JR   NZ,f32r_down
+        RES  3,L            ; yes - ties go to even
+f32r_down:
+        SRL  D
+        RR   E
+        RR   H
+        RR   L
+        SRL  D
+        RR   E
+        RR   H
+        RR   L
+        SRL  D
+        RR   E
+        RR   H
+        RR   L              ; DE:HL = M, the rounded significand
+        POP  BC             ; BC = E-1
+
+        ; Packing is just (E-1)<<23 + M: the hidden bit inside M adds
+        ; the missing 1 to the exponent field for a normal result,
+        ; leaves a subnormal alone (E-1 = 0, M < 2^23), and carries
+        ; correctly when rounding pushed M up to 2^24. Only the top
+        ; half of the sum can be affected, and E-1 never exceeds 511,
+        ; so (E-1)<<7 is all the shifting that is needed.
+        SRL  B
+        LD   A,C
+        RRA
+        LD   B,A
+        LD   A,0
+        RRA
+        LD   C,A            ; BC = (E-1) << 7
+        EX   DE,HL
+        ADD  HL,BC
+        EX   DE,HL
+        LD   A,D            ; exponent field 255 or beyond?
+        CP   F32_INF_HI / 256
+        JR   C,f32r_sign
+        JR   NZ,f32r_over
+        LD   A,E
+        CP   F32_INF_HI & 255
+        JR   C,f32r_sign
+f32r_over:
+        LD   DE,F32_INF_HI  ; overflow becomes an infinity
+        LD   HL,0
+f32r_sign:
+        LD   A,(f32_wsgn)
+        AND  0x80
+        OR   D
+        LD   D,A
+        RET
+
+;------------------------------------------------------------------
+; Workspace - 18 bytes, must be in RAM. Move it wherever suits.
+;------------------------------------------------------------------
+
+f32_ws:
+f32_wsig:       DEFS 4      ; the other operand's significand
+f32_wexp:       DEFS 2      ; working exponent, 16-bit signed
+f32_wsgn:       DEFS 1      ; result sign, in bit 7
+f32_wneg:       DEFS 1      ; 0x80 while a subtract is in progress
+f32_wsa:        DEFS 1      ; sign of a
+f32_wsb:        DEFS 1      ; sign of b, subtract flip applied
+f32_wdif:       DEFS 1      ; bit 7 set when the two signs differ
+f32_waz:        DEFS 1      ; zero when a is +-0
+f32_wes:        DEFS 1      ; exponent of the smaller addend
+f32_wca:        DEFS 1      ; class of a
+f32_wcb:        DEFS 1      ; class of b
+f32_wpa:        DEFS 2      ; pointer to a (or to the larger addend)
+f32_wpb:        DEFS 2      ; pointer to b (or to the smaller addend)
+
+f32_end:
+F32_SIZE:       EQU f32_end - f32_sub
+
+;------------------------------------------------------------
