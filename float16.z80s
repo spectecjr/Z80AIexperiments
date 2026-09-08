@@ -1,0 +1,681 @@
+;------------------------------------------------------------------
+; float16.z80s - IEEE 754 binary16 (half precision) arithmetic
+;
+; Public entry points, all of them HL = a op b:
+;
+;   f16_add   HL = a + b
+;   f16_sub   HL = a - b
+;   f16_mul   HL = a * b
+;   f16_div   HL = a / b
+;
+; Entry : HL = a, DE = b
+; Exit  : HL = result
+; Trash : AF, BC, DE (and IX in f16_mul). IY, the shadow set, the
+;         interrupt state and the stack depth are all left alone, and
+;         no scratch RAM is used, so this is interrupt-safe and can be
+;         burned into ROM as it stands. 643 bytes in total.
+;
+; A binary16 lives in HL exactly as it would be stored in memory, so
+; LD HL,(nn) and LD (nn),HL move them about:
+;
+;   H = s eeeee ff      L = ffffffff
+;   bit 15     = sign
+;   bits 14-10 = exponent, biased by 15
+;   bits 9-0   = fraction
+;
+; Everything the standard asks for is here:
+;   - normals, subnormals (as operands and as results)
+;   - signed zeros, infinities, NaNs, and the invalid operations
+;     (Inf-Inf, 0*Inf, 0/0, Inf/Inf), which produce a quiet NaN
+;   - division by zero -> correctly signed infinity
+;   - round to nearest, ties to even, on every operation
+;   - gradual underflow, and overflow to infinity
+;
+; What is left out: the five IEEE exception flags, the other three
+; rounding modes, and NaN payload propagation (any NaN produced is the
+; canonical quiet NaN 0x7E00, which IEEE 754 permits).
+;
+; Every result is bit-exact against IEEE 754. tests/test_float16.py
+; runs the code on an emulated Z80 and compares it with numpy: each
+; operation is checked over the whole 16-bit input space for one
+; operand crossed with 85 probe values, all the awkward values crossed
+; with each other, and two million random pairs - 13.3 million cases
+; per operation, no mismatches.
+;
+; Timings, T-states from the first instruction to the RET inclusive
+; (add the caller's 17T CALL), measured over 52,500 sampled operand
+; pairs per operation:
+;
+;                 fast exit    typical     worst seen
+;   f16_add            77       ~1075           1730
+;   f16_sub            92       ~1090           1733
+;   f16_mul            96       ~1735           2540
+;   f16_div            94       ~2050           2930
+;
+; "fast exit" is a zero/Inf/NaN operand, which never reaches the
+; arithmetic; "typical" is the mean over finite operands.
+;
+; How it works: a value is carried through the routines as
+;
+;   value = S * 2^(E-28)        S = M<<3, M = the 11-bit significand
+;
+; i.e. the significand scaled by 8, giving the three guard bits that
+; round-to-nearest needs, with the lowest of the three used as a
+; sticky bit. That keeps every intermediate inside one 16-bit register
+; pair, and lets a single rounding-and-packing routine finish all four
+; operations. The pack step exploits the fact that the hidden bit of
+; the significand, when added to the shifted exponent, carries into
+; the exponent field exactly as required - so normals, subnormals and
+; rounding overflow all come out of one 16-bit addition.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+; --- shared constants ---------------------------------------------
+
+F16_QNAN:       EQU 0x7E00      ; canonical quiet NaN
+F16_INF:        EQU 0x7C00      ; +infinity
+
+;------------------------------------------------------------------
+; f16_sub / f16_add - HL = a -+ b
+;
+; Entry : HL = a, DE = b
+; Exit  : HL = result
+; Trash : AF, BC, DE
+;------------------------------------------------------------------
+
+f16_sub:
+        LD   A,D            ; [4T]  b := -b, then fall into the adder.
+        XOR  0x80           ; [7T]  Flipping the sign of a NaN leaves a
+        LD   D,A            ; [4T]  NaN, and of a zero gives the sign
+                            ;       rules IEEE wants for x-0 / 0-0.
+f16_add:
+        LD   A,H            ; [4T]  is a's exponent field all ones?
+        AND  0x7C           ; [7T]
+        CP   0x7C           ; [7T]
+        JR   Z,f16a_aspec   ; [7/12T]  a is Inf or NaN
+        LD   A,D            ; [4T]  is b's exponent field all ones?
+        AND  0x7C           ; [7T]
+        CP   0x7C           ; [7T]
+        JP   Z,f16a_bspec   ; [10T]  b is Inf or NaN (a is finite)
+
+        ; --- both operands are finite; deal with zeros --------------
+        LD   A,H            ; [4T]  a == +-0 ?
+        AND  0x7F           ; [7T]
+        OR   L              ; [4T]
+        JP   Z,f16a_azero   ; [10T]
+        LD   A,D            ; [4T]  b == +-0 ?  (a is known nonzero)
+        AND  0x7F           ; [7T]
+        OR   E              ; [4T]
+        RET  Z              ; [11/5T]  a + 0 = a, already in HL
+
+        ; --- order the operands by magnitude -----------------------
+        ; Sorting on |x| (which for binary16 is just an unsigned
+        ; compare of the low 15 bits) means the larger significand is
+        ; always in HL: the subtract below can never borrow, and the
+        ; result sign is simply the sign of the larger operand.
+        LD   A,H            ; [4T]
+        XOR  D              ; [4T]  bit 7 = "signs differ"
+        RLCA                ; [4T]
+        AND  1              ; [7T]
+        LD   C,A            ; [4T]  C bit 0 = signs differ
+        LD   A,H            ; [4T]
+        AND  0x7F           ; [7T]
+        LD   B,A            ; [4T]  B = |a| high byte
+        LD   A,D            ; [4T]
+        AND  0x7F           ; [7T]  A = |b| high byte
+        CP   B              ; [4T]
+        JR   C,f16a_sorted  ; [7/12T]  |b| < |a|
+        JR   NZ,f16a_swap   ; [7/12T]  |b| > |a|
+        LD   A,E            ; [4T]  high bytes equal, compare low
+        CP   L              ; [4T]
+        JR   C,f16a_sorted  ; [7/12T]  |b| < |a|
+        JR   Z,f16a_sorted  ; [7/12T]  |b| = |a|, order is irrelevant
+f16a_swap:
+        EX   DE,HL          ; [4T]  put the larger magnitude in HL
+f16a_sorted:
+        LD   A,H            ; [4T]  result sign = sign of the larger
+        AND  0x80           ; [7T]
+        OR   C              ; [4T]
+        LD   C,A            ; [4T]  C = sign (bit 7) + differ (bit 0)
+
+        ; --- unpack both significands ------------------------------
+        PUSH DE             ; [11T] save the smaller operand
+        CALL f16_unpack_x8  ; [17T] HL = S_large, A = E_large
+        LD   B,A            ; [4T]  B = E_large = the result exponent
+        POP  DE             ; [10T]
+        EX   DE,HL          ; [4T]  HL = smaller operand, DE = S_large
+        PUSH BC             ; [11T] save exponent + sign
+        CALL f16_unpack_x8  ; [17T] HL = S_small, A = E_small
+        POP  BC             ; [10T]
+        NEG                 ; [8T]
+        ADD  A,B            ; [4T]  A = E_large - E_small >= 0
+        EX   DE,HL          ; [4T]  HL = S_large, DE = S_small
+
+        ; --- align the smaller significand -------------------------
+        OR   A              ; [4T]  exponents equal? then nothing to do
+        JR   Z,f16a_aligned ; [7/12T]
+        PUSH BC             ; [11T]
+        LD   B,A            ; [4T]  shift count
+        EX   DE,HL          ; [4T]
+        CALL f16_srj        ; [17T] S_small >>= B, sticky jammed into bit 0
+        EX   DE,HL          ; [4T]
+        POP  BC             ; [10T]
+f16a_aligned:
+        BIT  0,C            ; [8T]  do the signs differ?
+        JR   NZ,f16a_dsign  ; [7/12T]
+
+        ; --- like signs: add ---------------------------------------
+        ADD  HL,DE          ; [11T] S = S_large + S_small
+        BIT  6,H            ; [8T]  did it carry past bit 13?
+        JR   Z,f16a_pack    ; [7/12T]
+        PUSH BC             ; [11T] one bit of renormalisation
+        LD   B,1            ; [7T]
+        CALL f16_srj        ; [17T]
+        POP  BC             ; [10T]
+        INC  B              ; [4T]  ... and bump the exponent
+        JR   f16a_pack      ; [12T]
+
+        ; --- unlike signs: subtract --------------------------------
+f16a_dsign:
+        OR   A              ; [4T]  clear carry for the SBC
+        SBC  HL,DE          ; [15T] S = S_large - S_small (cannot borrow)
+        JR   NZ,f16a_norm   ; [7/12T]
+        RET                 ; [10T] exact cancellation: HL is already
+                            ;       zero, and IEEE wants +0 here
+f16a_norm:
+        BIT  5,H            ; [8T]  renormalise: is bit 13 set yet?
+        JR   NZ,f16a_pack   ; [7/12T]
+        ADD  HL,HL          ; [11T]
+        DEC  B              ; [4T]
+        JR   f16a_norm      ; [12T]
+
+f16a_pack:
+        LD   A,B            ; [4T]  A = exponent, C = sign, HL = S
+        JP   f16_round_pack ; [10T]
+
+        ; --- Inf / NaN operands ------------------------------------
+f16a_aspec:
+        LD   A,H            ; [4T]  a: nonzero fraction means NaN
+        AND  3              ; [7T]
+        OR   L              ; [4T]
+        JR   NZ,f16_nan     ; [7/12T]
+        LD   A,D            ; [4T]  a = +-Inf. Is b special too?
+        AND  0x7C           ; [7T]
+        CP   0x7C           ; [7T]
+        RET  NZ             ; [11/5T]  b finite: Inf + finite = Inf = a
+        LD   A,D            ; [4T]  b is Inf or NaN
+        AND  3              ; [7T]
+        OR   E              ; [4T]
+        JR   NZ,f16_nan     ; [7/12T]  b is NaN
+        LD   A,H            ; [4T]  Inf + Inf: same sign keeps the Inf,
+        XOR  D              ; [4T]  opposite signs is the invalid case
+        AND  0x80           ; [7T]
+        RET  Z              ; [11/5T]
+        JR   f16_nan        ; [12T]
+f16a_bspec:
+        LD   A,D            ; [4T]  a is finite, b is Inf or NaN
+        AND  3              ; [7T]
+        OR   E              ; [4T]
+        JR   NZ,f16_nan     ; [7/12T]
+        EX   DE,HL          ; [4T]  finite + Inf = Inf = b
+        RET                 ; [10T]
+
+        ; --- zero operands -----------------------------------------
+f16a_azero:
+        LD   A,D            ; [4T]  a is +-0. Is b zero as well?
+        AND  0x7F           ; [7T]
+        OR   E              ; [4T]
+        JR   Z,f16a_bothzero ; [7/12T]
+        EX   DE,HL          ; [4T]  0 + b = b
+        RET                 ; [10T]
+f16a_bothzero:
+        LD   A,H            ; [4T]  (+-0) + (+-0) is -0 only when both
+        AND  D              ; [4T]  are -0; every other pairing is +0
+        AND  0x80           ; [7T]
+        LD   H,A            ; [4T]
+        LD   L,0            ; [7T]
+        RET                 ; [10T]
+
+f16_nan:
+        LD   HL,F16_QNAN    ; [10T]
+        RET                 ; [10T]
+
+;------------------------------------------------------------------
+; f16_mul - HL = a * b
+;
+; Entry : HL = a, DE = b
+; Exit  : HL = result
+; Trash : AF, BC, DE, IX
+;------------------------------------------------------------------
+
+f16_mul:
+        LD   A,H            ; [4T]  the sign of a product is always the
+        XOR  D              ; [4T]  XOR of the operand signs, even for
+        AND  0x80           ; [7T]  zeros and infinities
+        LD   C,A            ; [4T]
+        LD   A,H            ; [4T]
+        AND  0x7C           ; [7T]
+        CP   0x7C           ; [7T]
+        JR   Z,f16m_aspec   ; [7/12T]  a is Inf or NaN
+        LD   A,D            ; [4T]
+        AND  0x7C           ; [7T]
+        CP   0x7C           ; [7T]
+        JR   Z,f16m_bspec   ; [7/12T]  b is Inf or NaN
+        LD   A,H            ; [4T]  a == +-0 ?
+        AND  0x7F           ; [7T]
+        OR   L              ; [4T]
+        JP   Z,f16m_zero    ; [10T]
+        LD   A,D            ; [4T]  b == +-0 ?
+        AND  0x7F           ; [7T]
+        OR   E              ; [4T]
+        JR   Z,f16m_zero    ; [7/12T]
+
+        ; --- unpack, normalising any subnormal operand -------------
+        PUSH BC             ; [11T] keep the sign
+        PUSH DE             ; [11T] keep b
+        CALL f16_unpack_nrm ; [17T] HL = M_a, A = E_a
+        POP  DE             ; [10T]
+        PUSH AF             ; [11T] keep E_a
+        PUSH HL             ; [11T] keep M_a
+        EX   DE,HL          ; [4T]
+        CALL f16_unpack_nrm ; [17T] HL = M_b, A = E_b
+        POP  DE             ; [10T] DE = M_a
+        POP  BC             ; [10T] B  = E_a
+        ADD  A,B            ; [4T]
+        SUB  15             ; [7T]  A = E_a + E_b - 15
+        PUSH AF             ; [11T] park the result exponent
+
+        ; --- 11x11 -> 22 bit multiply ------------------------------
+        ; Shift-and-add, most significant bit first. IX holds the
+        ; multiplier left-aligned so that each ADD IX,IX drops the
+        ; next bit straight into carry; C:HL accumulates the product.
+        ADD  HL,HL          ; [11T]
+        ADD  HL,HL          ; [11T]
+        ADD  HL,HL          ; [11T]
+        ADD  HL,HL          ; [11T]
+        ADD  HL,HL          ; [11T] HL = M_b << 5, top bit in bit 15
+        PUSH HL             ; [11T]
+        POP  IX             ; [14T]
+        LD   HL,0           ; [10T]
+        LD   C,L            ; [4T]  C:HL = 0
+        LD   B,11           ; [7T]
+f16m_loop:
+        ADD  HL,HL          ; [11T] product <<= 1
+        RL   C              ; [8T]
+        ADD  IX,IX          ; [15T] next multiplier bit -> carry
+        JR   NC,f16m_next   ; [7/12T]
+        ADD  HL,DE          ; [11T] accumulate the multiplicand
+        JR   NC,f16m_next   ; [7/12T]
+        INC  C              ; [4T]
+f16m_next:
+        DJNZ f16m_loop      ; [13/8T]
+
+        ; --- take the top 16 bits, jam the rest into a sticky bit ---
+        POP  AF             ; [10T] A = result exponent
+        LD   B,A            ; [4T]
+        ADD  HL,HL          ; [11T] C:HL <<= 1, so C:H is product>>7
+        RL   C              ; [8T]  (the product is 22 bits, so the
+        LD   A,L            ; [4T]   shift can never lose the top bit)
+        LD   L,H            ; [4T]
+        LD   H,C            ; [4T]  HL = S = product >> 7
+        OR   A              ; [4T]  were any of the dropped bits set?
+        JR   Z,f16m_norm    ; [7/12T]
+        SET  0,L            ; [8T]  yes: jam them into the sticky bit
+f16m_norm:
+        BIT  6,H            ; [8T]  S in [2^14,2^15)? then one more
+        JR   Z,f16m_pack    ; [7/12T]  shift is needed to normalise it
+        PUSH BC             ; [11T]
+        LD   B,1            ; [7T]
+        CALL f16_srj        ; [17T]
+        POP  BC             ; [10T]
+        INC  B              ; [4T]
+f16m_pack:
+        LD   A,B            ; [4T]
+        POP  BC             ; [10T] recover the sign
+        JP   f16_round_pack ; [10T]
+
+f16m_aspec:
+        LD   A,H            ; [4T]  a is Inf or NaN
+        AND  3              ; [7T]
+        OR   L              ; [4T]
+        JR   NZ,f16_nan     ; [7/12T]  a is NaN
+        LD   A,D            ; [4T]  a = +-Inf; b NaN -> NaN
+        AND  0x7C           ; [7T]
+        CP   0x7C           ; [7T]
+        JR   NZ,f16m_ainf_bfin ; [7/12T]
+        LD   A,D            ; [4T]
+        AND  3              ; [7T]
+        OR   E              ; [4T]
+        JP   NZ,f16_nan     ; [10T]  b is NaN
+        JR   f16m_inf       ; [12T]  Inf * Inf = Inf
+f16m_ainf_bfin:
+        LD   A,D            ; [4T]  Inf * 0 is the invalid case
+        AND  0x7F           ; [7T]
+        OR   E              ; [4T]
+        JP   Z,f16_nan      ; [10T]
+        JR   f16m_inf       ; [12T]
+f16m_bspec:
+        LD   A,D            ; [4T]  a is finite, b is Inf or NaN
+        AND  3              ; [7T]
+        OR   E              ; [4T]
+        JP   NZ,f16_nan     ; [10T]  b is NaN
+        LD   A,H            ; [4T]  0 * Inf is the invalid case
+        AND  0x7F           ; [7T]
+        OR   L              ; [4T]
+        JP   Z,f16_nan      ; [10T]
+f16m_inf:
+        LD   A,C            ; [4T]
+        OR   0x7C           ; [7T]
+        LD   H,A            ; [4T]
+        LD   L,0            ; [7T]
+        RET                 ; [10T]
+f16m_zero:
+        LD   H,C            ; [4T]  signed zero
+        LD   L,0            ; [7T]
+        RET                 ; [10T]
+
+;------------------------------------------------------------------
+; f16_div - HL = a / b
+;
+; Entry : HL = a, DE = b
+; Exit  : HL = result
+; Trash : AF, BC, DE
+;------------------------------------------------------------------
+
+f16_div:
+        LD   A,H            ; [4T]  sign of a quotient, as for a product
+        XOR  D              ; [4T]
+        AND  0x80           ; [7T]
+        LD   C,A            ; [4T]
+        LD   A,H            ; [4T]
+        AND  0x7C           ; [7T]
+        CP   0x7C           ; [7T]
+        JR   Z,f16d_aspec   ; [7/12T]  a is Inf or NaN
+        LD   A,D            ; [4T]
+        AND  0x7C           ; [7T]
+        CP   0x7C           ; [7T]
+        JR   Z,f16d_bspec   ; [7/12T]  b is Inf or NaN
+        LD   A,D            ; [4T]  b == +-0 ?
+        AND  0x7F           ; [7T]
+        OR   E              ; [4T]
+        JR   Z,f16d_bzero   ; [7/12T]
+        LD   A,H            ; [4T]  a == +-0 ?  (0 / finite = signed 0)
+        AND  0x7F           ; [7T]
+        OR   L              ; [4T]
+        JR   Z,f16d_zero    ; [7/12T]
+
+        ; --- unpack, normalising any subnormal operand -------------
+        PUSH BC             ; [11T] keep the sign
+        PUSH DE             ; [11T] keep b
+        CALL f16_unpack_nrm ; [17T] HL = M_a, A = E_a
+        POP  DE             ; [10T]
+        PUSH AF             ; [11T] keep E_a
+        PUSH HL             ; [11T] keep M_a
+        EX   DE,HL          ; [4T]
+        CALL f16_unpack_nrm ; [17T] HL = M_b, A = E_b
+        POP  DE             ; [10T] DE = M_a
+        POP  BC             ; [10T] B  = E_a
+        NEG                 ; [8T]
+        ADD  A,B            ; [4T]
+        ADD  A,15           ; [7T]  A = E_a - E_b + 15
+        PUSH AF             ; [11T] park the result exponent
+        EX   DE,HL          ; [4T]  HL = M_a (remainder), DE = M_b
+
+        ; --- 15 bit restoring division -----------------------------
+        ; M_a/M_b lies in (1/2,2), so the quotient of M_a*2^14 by M_b
+        ; needs 15 bits: one from the initial compare, then fourteen
+        ; from the loop. The remainder becomes the sticky bit.
+        LD   BC,0           ; [10T]
+        OR   A              ; [4T]  clear carry
+        SBC  HL,DE          ; [15T] first quotient bit
+        JR   NC,f16d_first1 ; [7/12T]
+        ADD  HL,DE          ; [11T] restore; bit is 0
+        JR   f16d_start     ; [12T]
+f16d_first1:
+        INC  C              ; [4T]  bit is 1
+f16d_start:
+        LD   A,14           ; [7T]
+f16d_loop:
+        ADD  HL,HL          ; [11T] remainder <<= 1 (carry always 0)
+        SBC  HL,DE          ; [15T] trial subtract
+        JR   NC,f16d_one    ; [7/12T]
+        ADD  HL,DE          ; [11T] too big: restore, quotient bit 0
+        OR   A              ; [4T]  (the restore carries out, so the
+        JR   f16d_shift     ; [12T]  carry has to be cleared by hand)
+f16d_one:
+        SCF                 ; [4T]  quotient bit 1
+f16d_shift:
+        RL   C              ; [8T]
+        RL   B              ; [8T]
+        DEC  A              ; [4T]
+        JR   NZ,f16d_loop   ; [7/12T]
+
+        ; --- normalise the quotient --------------------------------
+        LD   A,H            ; [4T]  A != 0 iff the division was inexact
+        OR   L              ; [4T]
+        LD   H,B            ; [4T]  HL = quotient
+        LD   L,C            ; [4T]
+        POP  BC             ; [10T] B = result exponent
+        BIT  6,H            ; [8T]  quotient >= 2^14 ?
+        JR   NZ,f16d_shq    ; [7/12T]
+        DEC  B              ; [4T]  no: it is already normalised, but
+        JR   f16d_jam       ; [12T]  one binade lower
+f16d_shq:
+        SRL  H              ; [8T]  yes: drop the extra bit into sticky
+        RR   L              ; [8T]
+        JR   NC,f16d_jam    ; [7/12T]
+        LD   A,1            ; [7T]
+f16d_jam:
+        OR   A              ; [4T]
+        JR   Z,f16d_pack    ; [7/12T]
+        SET  0,L            ; [8T]  jam the sticky bit
+f16d_pack:
+        LD   A,B            ; [4T]
+        POP  BC             ; [10T] recover the sign
+        JP   f16_round_pack ; [10T]
+
+f16d_aspec:
+        LD   A,H            ; [4T]  a is Inf or NaN
+        AND  3              ; [7T]
+        OR   L              ; [4T]
+        JP   NZ,f16_nan     ; [10T]  a is NaN
+        LD   A,D            ; [4T]  Inf/Inf and Inf/NaN are both invalid
+        AND  0x7C           ; [7T]
+        CP   0x7C           ; [7T]
+        JP   Z,f16_nan      ; [10T]
+        JR   f16d_inf       ; [12T]  Inf / finite = Inf
+f16d_bspec:
+        LD   A,D            ; [4T]  a is finite, b is Inf or NaN
+        AND  3              ; [7T]
+        OR   E              ; [4T]
+        JP   NZ,f16_nan     ; [10T]  b is NaN
+        JR   f16d_zero      ; [12T]  finite / Inf = signed zero
+f16d_bzero:
+        LD   A,H            ; [4T]  0/0 is invalid, x/0 is a pole
+        AND  0x7F           ; [7T]
+        OR   L              ; [4T]
+        JP   Z,f16_nan      ; [10T]
+f16d_inf:
+        LD   A,C            ; [4T]
+        OR   0x7C           ; [7T]
+        LD   H,A            ; [4T]
+        LD   L,0            ; [7T]
+        RET                 ; [10T]
+f16d_zero:
+        LD   H,C            ; [4T]  signed zero
+        LD   L,0            ; [7T]
+        RET                 ; [10T]
+
+;------------------------------------------------------------------
+; f16_unpack - split a finite binary16 into significand and exponent
+;
+; Entry : HL = finite binary16 (exponent field 0..30)
+; Exit  : HL = 11-bit significand M, with the hidden bit restored
+;         A  = internal exponent E (subnormals are read as E = 1,
+;              which is what makes their value M * 2^-24 come out
+;              of the same formula the normals use)
+; Trash : AF, B, F.  Preserves C, DE, IX, IY.
+;
+; f16_unpack_x8  additionally scales M by 8 (the three guard bits
+;                used by the adder)
+; f16_unpack_nrm additionally left-normalises a subnormal so the
+;                hidden bit is set, decrementing E to compensate -
+;                the multiplier and divider want a normalised
+;                significand and do not care that E goes negative
+;------------------------------------------------------------------
+
+f16_unpack_x8:
+        CALL f16_unpack     ; [17T]
+        ADD  HL,HL          ; [11T]
+        ADD  HL,HL          ; [11T]
+        ADD  HL,HL          ; [11T] S = M << 3
+        RET                 ; [10T]
+
+f16_unpack_nrm:
+        CALL f16_unpack     ; [17T]
+f16u_nloop:
+        BIT  2,H            ; [8T]  hidden bit (bit 10) set?
+        RET  NZ             ; [11/5T]
+        ADD  HL,HL          ; [11T] no - subnormal, so normalise it
+        DEC  A              ; [4T]
+        JR   f16u_nloop     ; [12T]
+
+f16_unpack:
+        LD   A,H            ; [4T]
+        AND  0x7C           ; [7T]
+        RRCA                ; [4T]
+        RRCA                ; [4T]  A = biased exponent field
+        LD   B,A            ; [4T]
+        LD   A,H            ; [4T]
+        AND  3              ; [7T]
+        LD   H,A            ; [4T]  HL = 10-bit fraction
+        LD   A,B            ; [4T]
+        OR   A              ; [4T]
+        JR   Z,f16u_sub     ; [7/12T]
+        SET  2,H            ; [8T]  normal: restore the hidden 1 bit
+        RET                 ; [10T]
+f16u_sub:
+        INC  A              ; [4T]  subnormal: no hidden bit, E = 1
+        RET                 ; [10T]
+
+;------------------------------------------------------------------
+; f16_srj - shift right, jamming everything shifted out into bit 0
+;
+; "Shift right and jam" keeps a sticky bit alive through an alignment
+; shift, which is what makes round-to-nearest come out right when
+; bits fall off the bottom.
+;
+; Entry : HL = value, B = shift count (>= 1)
+; Exit  : HL = shifted value, bit 0 set if any 1 bit was shifted out
+; Trash : AF, B, F.  Preserves C, DE, IX, IY.
+;------------------------------------------------------------------
+
+f16_srj:
+        LD   A,B            ; [4T]
+        CP   16             ; [7T]
+        JR   C,f16s_u16     ; [7/12T]
+        LD   A,H            ; [4T]  everything is shifted out; all that
+        OR   L              ; [4T]  survives is whether it was nonzero
+        LD   HL,0           ; [10T]
+        RET  Z              ; [11/5T]
+        INC  L              ; [4T]
+        RET                 ; [10T]
+f16s_u16:
+        CP   8              ; [7T]  eight or more? then move a whole
+        JR   C,f16s_bits    ; [7/12T]  byte in one go rather than
+        LD   A,L            ; [4T]     bit by bit
+        LD   L,H            ; [4T]
+        LD   H,0            ; [7T]
+        OR   A              ; [4T]  did the dropped byte hold anything?
+        JR   Z,f16s_seeded  ; [7/12T]
+        LD   A,1            ; [7T]  yes: seed the sticky accumulator
+f16s_seeded:
+        DEC  B              ; [4T]  eight bits accounted for
+        DEC  B              ; [4T]
+        DEC  B              ; [4T]
+        DEC  B              ; [4T]
+        DEC  B              ; [4T]
+        DEC  B              ; [4T]
+        DEC  B              ; [4T]
+        DEC  B              ; [4T]
+        JR   NZ,f16s_loop   ; [7/12T]
+        JR   f16s_jam       ; [12T]
+f16s_bits:
+        XOR  A              ; [4T]  A counts the 1 bits shifted out
+f16s_loop:
+        SRL  H              ; [8T]
+        RR   L              ; [8T]
+        ADC  A,0            ; [7T]  (at most 8 of them, so no overflow)
+        DJNZ f16s_loop      ; [13/8T]
+f16s_jam:
+        OR   A              ; [4T]
+        RET  Z              ; [11/5T]
+        SET  0,L            ; [8T]
+        RET                 ; [10T]
+
+;------------------------------------------------------------------
+; f16_round_pack - round to nearest-even and assemble the result
+;
+; Entry : HL = S, the significand scaled by 8 (three guard bits, the
+;              lowest of which is sticky), normalised so bit 13 is
+;              set unless the value is subnormal or zero
+;         A  = E, signed exponent: the value is S * 2^(E-28)
+;         C  = sign in bit 7 (other bits ignored)
+; Exit  : HL = binary16 result
+; Trash : AF, B, DE
+;
+; E is allowed to be out of range in both directions: too small and
+; the result is shifted down into a subnormal (or to zero), too large
+; and it becomes an infinity. Both of those still round correctly.
+;------------------------------------------------------------------
+
+f16_round_pack:
+        DEC  A              ; [4T]  work with E-1 from here on
+        JP   P,f16r_round   ; [10T] E >= 1: the result may be normal
+        NEG                 ; [8T]  E <= 0: denormalise into place by
+        LD   B,A            ; [4T]  shifting right 1-E, keeping sticky
+        CALL f16_srj        ; [17T]
+        XOR  A              ; [4T]  E-1 := 0
+f16r_round:
+        LD   B,A            ; [4T]  B = E-1
+        LD   A,L            ; [4T]
+        AND  7              ; [7T]  A = the three guard bits
+        PUSH AF             ; [11T]
+        LD   DE,4           ; [10T]
+        ADD  HL,DE          ; [11T] round to nearest: add a half
+        POP  AF             ; [10T]
+        CP   4              ; [7T]  exactly half?
+        JR   NZ,f16r_shift  ; [7/12T]
+        RES  3,L            ; [8T]  yes - ties go to even
+f16r_shift:
+        SRL  H              ; [8T]
+        RR   L              ; [8T]
+        SRL  H              ; [8T]
+        RR   L              ; [8T]
+        SRL  H              ; [8T]
+        RR   L              ; [8T]  HL = M, the rounded significand
+
+        ; Packing is just (E-1)<<10 + M: the hidden bit inside M adds
+        ; the missing 1 to the exponent field for a normal result,
+        ; leaves a subnormal alone (E-1 = 0, M < 0x400), and carries
+        ; correctly when rounding pushed M up to 0x800.
+        LD   A,B            ; [4T]
+        ADD  A,A            ; [4T]
+        ADD  A,A            ; [4T]  A = (E-1)*4 = high byte of (E-1)<<10
+        ADD  A,H            ; [4T]
+        LD   H,A            ; [4T]
+        CP   0x7C           ; [7T]  exponent field 31 or beyond?
+        JR   C,f16r_sign    ; [7/12T]
+        LD   HL,F16_INF     ; [10T] overflow becomes an infinity
+f16r_sign:
+        LD   A,C            ; [4T]
+        AND  0x80           ; [7T]
+        OR   H              ; [4T]
+        LD   H,A            ; [4T]
+        RET                 ; [10T]
+
+f16_end:                    ; so callers (and the test bench) can see
+F16_SIZE:       EQU f16_end - f16_sub   ; how much space this all takes
+
+;------------------------------------------------------------
