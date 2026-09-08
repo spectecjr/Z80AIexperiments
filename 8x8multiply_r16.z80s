@@ -8,7 +8,8 @@
 ; Entry : B = M1, C = M2
 ; Exit  : DE = 16-bit result
 ; Trash : AF, HL, DE
-; Cycles: 155T (M1 >= M2) / 158T (M1 < M2)
+; Cycles: 155T (M1 >= M2) / 158T (M1 < M2), both confirmed exactly
+;         over all 65,536 operand pairs by tests/test_mult8x8.py
 ;
 ; m8x8_square_table_low and m8x8_square_table_hgih must each be a 256-byte page-aligned table such that:
 ;   m8x8_square_table_low[n] = LOW (n*n / 2)
@@ -75,14 +76,28 @@ m8x8_absok:
 ; Trash : AF, BC', HL', DE'
 ;
 ; When you positively absolutey have to do a whole bunch of
-; multiplies in a row, this version saves a few t-states. 
+; multiplies in a row, this version saves a few t-states.
+;
+; Cycles: 272.5T per pair, measured (tests/test_mult8x8.py).
+;
+; Which, awkwardly, is more than the 173.5T of CALLing mult8x8_16, and
+; about 237T once the caller's own operand loads and result stores are
+; counted. The multiply itself is the same; what costs is the (IX) and
+; (IY) addressing - 19T a byte against 7T through (HL) - and there are
+; four of those per pair, plus four INCs. Getting the stream version
+; ahead means feeding it more cheaply than the index registers can:
+; POP BC pulls a whole operand pair in 10T, so with SP walking the
+; input (interrupts off) and results written back over it, the pair
+; cost comes out around 200T.
 ;------------------------------------------------------------------
 
 stream_mult8x8_16:
         EXX                 ; [4T]
         LD   H,m8x8_square_table_low / 256    ; [7T]  m8x8_square_table_low[M2]
-        DEFB 63             ; [7T]  LD A,xxx - consumes following EXX instruction, trashes A.
+        DEFB 62             ; [7T]  LD A,xxx - consumes following EXX instruction, trashes A.
                             ;       Saves 1 T-state vs doing an EXX followed by an EXX.
+                            ;       (62 = 0x3E = LD A,n. 63 is CCF, which does not
+                            ;       swallow the byte after it.)
 stream_mult8x8_16_loop:
         EXX                 ; [4T]
         LD B,(IX)           ; [19T]
@@ -115,17 +130,18 @@ stream_m8x8_absok:
         DEC  H              ; [4T]  subtract m8x8_square_table_low[|M1-M2|] from low byte
         LD   L,C            ; [4T]
         LD   A,E            ; [4T]
-        SBC  A,(HL)         ; [7T]  A = sum_lo - m8x8_square_table_low[|M1-M2|]
+        SUB  A,(HL)         ; [7T]  A = sum_lo - m8x8_square_table_low[|M1-M2|]
         LD   (IY),A         ; [19T] save low byte; borrow propagates in carry
         INC IY              ; [10T]
 
         INC  H              ; [4T]  subtract m8x8_square_table_hgih[|M1-M2|] from high byte
         LD   L,C            ; [4T]  C still holds |M1-M2|
         LD   A,D            ; [4T]
-        SUB  A,(HL)         ; [7T]  A = sum_hi - m8x8_square_table_hgih[|M1-M2|] - borrow
+        SBC  A,(HL)         ; [7T]  A = sum_hi - m8x8_square_table_hgih[|M1-M2|] - borrow
 
         LD (IY),A           ; [19T] D = high byte of product
         INC IY              ; [10T]
+        DEC  H              ; [4T]  back to m8x8_square_table_low for the next pair
         EXX                 ; [4T]
         DJNZ stream_mult8x8_16_loop ; [13T/8T] taken/not taken
 

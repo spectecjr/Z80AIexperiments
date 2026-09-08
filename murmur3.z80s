@@ -53,6 +53,12 @@
 ; lookups and eight shifted adds - about six times quicker. The four
 ; constants are fixed, so those tables can be built once at start-up.
 ;
+; If the hash does not have to agree with anything off the machine,
+; tab64.z80s in this repo is the same 64 bits for 234 T-states per
+; byte - twenty-five times quicker on a short key, and measured to be
+; just as well spread. Use this one when the answer has to match what
+; a PC computes; use that one when it just has to be fast.
+;
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
 

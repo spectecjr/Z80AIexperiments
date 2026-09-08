@@ -1,0 +1,473 @@
+;------------------------------------------------------------------
+; tab64.z80s - a 64-bit hash built for a CPU with no multiplier
+;
+;   tab64        HL = string, BC = length -> a 64-bit hash, in memory
+;   tab64_km13   thirteen Bloom filter indices from it
+;
+; MurmurHash3 is built out of 64-bit multiplies, which a Z80 does not
+; have: murmur3.z80s in this repo spends about 90,000 T-states on a
+; short string, nearly all of it multiplying. This does the same job
+; in 234 T-states per byte plus 2,578 of fixed cost - twenty-five
+; times quicker on a short key - by replacing the multiply with the
+; one operation a Z80 is good at: a table lookup.
+;
+; The update is a tabulation (Zobrist) hash in the shape of a CRC:
+;
+;   h = (h >> 8) XOR T[(h XOR byte) AND 255]
+;
+; over a 32-bit state, with T a table of 256 random 32-bit words - so
+; each input byte pulls in a fresh random word, and the index depends
+; on the state, which is what makes it nonlinear (a CRC uses the same
+; loop with a table that is linear in the index, and is not a hash).
+; Two lanes with independent tables and starting values are run over
+; the string, giving 32 bits each; together they are the 64-bit hash,
+; and they are exactly the h1 and h2 that Kirsch-Mitzenmacher wants.
+;
+; Entry : HL = pointer to the string, BC = length in bytes (0..65535)
+;         (tab64_seed) = 32-bit seed, little-endian, zero unless set
+; Exit  : DE:HL = the low 32 bits (lane 0), and the whole 64-bit hash
+;         is in memory at tab64_h as eight little-endian bytes: lane 0
+;         then lane 1
+; Trash : AF, BC, DE, HL, BC', DE', HL'
+;
+; Quality, measured against MurmurHash3 x64 on the same tests (see
+; tests/test_tab64.py, which runs both):
+;
+;   avalanche       flipping one input bit flips each output bit with
+;                   probability 0.494 to 0.506, against murmur3's
+;                   0.495 to 0.508
+;   collisions      60,000 sequential integers, 60,000 formatted
+;                   strings, every three-letter word, 60,000 random
+;                   keys: no 64-bit collisions, and low-24-bit
+;                   collision counts within noise of the birthday
+;                   expectation, same as murmur3
+;   Bloom filter    m = 65536, n = 4000, k = 13: false positive rate
+;                   0.0005 against murmur3's 0.0006, both against a
+;                   theoretical 0.0004
+;   chi-square      the 13 indices over every 1- and 2-byte key, into
+;                   a 4096-entry filter: 4194 and 4261 on 4096 cells,
+;                   the same range as murmur3's 4143 and 4148
+;
+; What it is not: a standard. MurmurHash3 gives the same answer here
+; as it does in C on a PC; this does not, unless the other end has the
+; same 2K of tables. Use murmur3.z80s when the hash has to travel, and
+; this when it just has to be fast and well spread.
+;
+; The tables are eight 256-byte pages - one per byte of each lane's
+; 32-bit word - so a lookup is LD L,index / LD H,page / LD A,(HL) with
+; INC H stepping to the next byte, the same trick crc32.z80s and the
+; table-of-squares multiply use. They MUST stay page-aligned and in
+; this order. Their contents are splitmix64(lane*4096 + i + 1), taken
+; 32 bits at a time; tests/test_tab64.py regenerates and checks them.
+;
+; Speed, measured on an emulated Z80 (tests/test_tab64.py):
+;
+;                        tab64      murmur3_64
+;   empty string          2,578          61,064
+;   1 byte                2,906          90,449
+;   5 bytes               3,842          90,449
+;   16 bytes              6,416         126,829
+;   256 bytes            62,578       1,077,951
+;
+;   per byte              234.0         ~4,200 (long strings)
+;   tab64_km13            1,496 T-states for all thirteen indices
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+;------------------------------------------------------------------
+; tab64 - hash a block of memory
+;------------------------------------------------------------------
+
+tab64:
+        LD   (tab_ptr),HL   ; the string
+        LD   (tab_len),BC
+        LD   (tab_lenv),BC  ; its length gets mixed in at the end
+
+        ; --- lane 0 ------------------------------------------------
+        LD   A,tab_t0 / 256
+        LD   (tab_page),A
+        LD   HL,tab_i0
+        CALL tab_start      ; state = init XOR seed, counters set up
+        JR   Z,tab_f0       ; nothing to hash
+tab_l0:
+        LD   A,(DE)         ; [7T]  next byte of the string
+        INC  DE             ; [6T]
+        EXX                 ; [4T]
+        XOR  E              ; [4T]  index = (h XOR byte) AND 255
+        LD   L,A            ; [4T]
+        LD   H,tab_t0 / 256 ; [7T]
+        LD   A,(HL)         ; [7T]  h = (h >> 8) XOR T[index]
+        XOR  D              ; [4T]
+        LD   E,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,(HL)         ; [7T]
+        XOR  C              ; [4T]
+        LD   D,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,(HL)         ; [7T]
+        XOR  B              ; [4T]
+        LD   C,A            ; [4T]
+        INC  H              ; [4T]
+        LD   A,(HL)         ; [7T]
+        LD   B,A            ; [4T]
+        EXX                 ; [4T]
+        DJNZ tab_l0         ; [13/8T]
+        DEC  C              ; [4T]
+        JR   NZ,tab_l0      ; [12/7T]
+tab_f0:
+        CALL tab_finish     ; length and avalanche rounds
+        EXX
+        LD   (tab64_h),DE   ; lane 0 is the low half of the hash
+        LD   (tab64_h+2),BC
+        EXX
+
+        ; --- lane 1 ------------------------------------------------
+        LD   A,tab_t1 / 256
+        LD   (tab_page),A
+        LD   HL,tab_i1
+        CALL tab_start
+        JR   Z,tab_f1
+tab_l1:
+        LD   A,(DE)
+        INC  DE
+        EXX
+        XOR  E
+        LD   L,A
+        LD   H,tab_t1 / 256
+        LD   A,(HL)
+        XOR  D
+        LD   E,A
+        INC  H
+        LD   A,(HL)
+        XOR  C
+        LD   D,A
+        INC  H
+        LD   A,(HL)
+        XOR  B
+        LD   C,A
+        INC  H
+        LD   A,(HL)
+        LD   B,A
+        EXX
+        DJNZ tab_l1
+        DEC  C
+        JR   NZ,tab_l1
+tab_f1:
+        CALL tab_finish
+        EXX
+        LD   (tab64_h+4),DE ; lane 1 is the high half
+        LD   (tab64_h+6),BC
+        EXX
+        LD   HL,(tab64_h)   ; hand back the low 32 bits in DE:HL
+        LD   DE,(tab64_h+2)
+        RET
+
+;------------------------------------------------------------------
+; tab_start - set a lane going
+;
+; Entry : HL = pointer to the lane's four init bytes
+; Exit  : the shadow set holds the state, DE = string, BC = the
+;         two-level loop counter, Z set if the string is empty
+;------------------------------------------------------------------
+
+tab_start:
+        LD   DE,(tab64_seed) ; state = init XOR seed
+        LD   A,(HL)
+        XOR  E
+        LD   E,A
+        INC  HL
+        LD   A,(HL)
+        XOR  D
+        LD   D,A
+        INC  HL
+        PUSH DE
+        LD   DE,(tab64_seed+2)
+        LD   A,(HL)
+        XOR  E
+        LD   C,A
+        INC  HL
+        LD   A,(HL)
+        XOR  D
+        LD   B,A
+        POP  DE
+        EXX                 ; park it in the shadow set
+        LD   DE,(tab_ptr)
+        LD   BC,(tab_len)
+        LD   A,B            ; an empty string skips the byte loop
+        OR   C
+        RET  Z              ; Z: the caller jumps past it
+        LD   A,B            ; split the count into whole pages and a
+        LD   B,C            ; remainder, so the inner loop is a DJNZ
+        LD   C,A
+        LD   A,B
+        OR   A
+        JR   Z,tab_pages    ; an exact number of pages
+        INC  C              ; one short page, then C full ones
+tab_pages:
+        LD   A,1            ; return NZ, so the caller runs the loop
+        OR   A
+        RET
+
+;------------------------------------------------------------------
+; tab_finish - mix in the length, then avalanche
+;
+; Two rounds fed with the length, then four fed with the state's own
+; low byte. Four is what it takes for a difference sitting in the top
+; byte of the state to be shifted down into the table index, which is
+; what decorrelates it.
+;------------------------------------------------------------------
+
+tab_finish:
+        LD   HL,tab_lenv
+        LD   B,2
+tab_flen:
+        LD   A,(HL)
+        INC  HL
+        CALL tab_round
+        DJNZ tab_flen
+        LD   B,4
+tab_fmix:
+        XOR  A              ; nothing to fold in: index = h AND 255
+        CALL tab_round
+        DJNZ tab_fmix
+        RET
+
+tab_round:                  ; h = (h >> 8) XOR T[(h XOR A) AND 255]
+        EXX
+        XOR  E
+        LD   L,A
+        LD   A,(tab_page)
+        LD   H,A
+        LD   A,(HL)
+        XOR  D
+        LD   E,A
+        INC  H
+        LD   A,(HL)
+        XOR  C
+        LD   D,A
+        INC  H
+        LD   A,(HL)
+        XOR  B
+        LD   C,A
+        INC  H
+        LD   A,(HL)
+        LD   B,A
+        EXX
+        RET
+
+;------------------------------------------------------------------
+; tab64_km13 - Kirsch-Mitzenmacher, thirteen indices from one hash
+;
+; g_i = h1 + i*h2 mod m, i = 0..12, with lane 0 as h1 and lane 1 as
+; h2. For m a power of two only the low bits matter, so this is all
+; 16-bit and every index is one addition. See murmur3.z80s for the
+; reference and for the h2-is-zero caveat.
+;
+; Entry : HL = pointer to 13 words of output
+;         DE = mask, that is m-1, for m a power of two up to 65536
+; Exit  : the thirteen indices stored, HL past the end
+; Trash : AF, BC, DE, HL, IX, BC'
+;------------------------------------------------------------------
+
+tab64_km13:
+        PUSH HL
+        POP  IX             ; IX = where the indices go
+        LD   B,D            ; BC = mask
+        LD   C,E
+        LD   DE,(tab64_h+4) ; DE = step = lane 1
+        LD   HL,(tab64_h)   ; HL = g    = lane 0
+        LD   A,13
+        EXX
+        LD   B,A            ; counter, out of the way in the shadow set
+tab_km_loop:
+        EXX
+        LD   A,L            ; index = g AND mask
+        AND  C
+        LD   (IX+0),A
+        LD   A,H
+        AND  B
+        LD   (IX+1),A
+        INC  IX
+        INC  IX
+        ADD  HL,DE          ; g += h2
+        EXX
+        DJNZ tab_km_loop
+        EXX
+        PUSH IX
+        POP  HL
+        RET
+
+;------------------------------------------------------------------
+; The lane starting values, little-endian
+;------------------------------------------------------------------
+
+tab_i0:         DEFB 0x07,0xE2,0xC0,0x6D ; 0x6DC0E207
+tab_i1:         DEFB 0x1C,0x3F,0x4B,0x7D ; 0x7D4B3F1C
+
+;------------------------------------------------------------------
+; The tables. Eight pages: four bytes of each lane's 32-bit words,
+; one byte per page. They MUST be 256-byte aligned and in this order.
+;------------------------------------------------------------------
+
+        ALIGN 256
+tab_t0:
+        DEFB 193,206,237,202,90,0,215,54,100,202,157,3,255,62,5,7
+        DEFB 99,50,68,140,199,10,214,68,9,218,138,108,112,206,234,1
+        DEFB 168,13,91,27,7,176,236,18,73,149,136,83,214,7,133,35
+        DEFB 88,203,104,74,118,117,28,71,49,210,60,103,49,234,53,195
+        DEFB 177,89,196,202,103,15,175,154,75,155,164,178,129,156,35,123
+        DEFB 245,12,21,66,248,181,194,35,134,198,210,111,183,39,140,33
+        DEFB 177,21,227,68,23,44,176,214,147,146,204,20,222,231,73,58
+        DEFB 108,145,108,113,190,49,183,54,82,116,43,249,130,115,152,190
+        DEFB 21,67,208,131,232,158,242,49,91,190,227,161,220,81,55,8
+        DEFB 215,113,20,127,128,168,105,50,164,231,128,1,102,136,171,0
+        DEFB 230,65,244,48,71,23,121,109,237,186,2,68,18,225,208,31
+        DEFB 189,244,191,36,181,213,79,246,230,104,219,102,49,69,21,216
+        DEFB 205,180,73,199,249,70,181,201,236,152,102,173,76,100,235,208
+        DEFB 128,9,43,133,174,41,121,104,47,103,209,20,39,19,146,129
+        DEFB 247,77,76,86,47,71,178,159,47,145,122,91,16,23,21,222
+        DEFB 92,133,70,105,229,4,251,244,234,76,45,78,21,1,180,63
+
+tab_t0_1:
+        DEFB 92,86,143,138,195,224,13,54,96,47,48,143,138,230,80,146
+        DEFB 115,240,26,129,37,14,129,30,183,77,6,20,207,13,234,36
+        DEFB 24,164,176,186,169,126,222,145,201,110,239,84,74,48,219,255
+        DEFB 169,84,64,64,111,243,51,33,42,95,184,119,166,11,126,140
+        DEFB 22,183,132,121,40,203,218,140,154,146,135,219,240,100,79,145
+        DEFB 204,74,249,3,24,201,105,242,141,206,249,247,45,241,167,33
+        DEFB 157,125,107,245,215,79,240,46,177,155,34,231,204,248,3,46
+        DEFB 123,48,15,255,244,98,229,41,171,124,65,103,215,127,94,237
+        DEFB 208,37,217,254,152,245,183,73,87,198,189,222,209,240,100,193
+        DEFB 157,106,238,233,36,100,57,234,245,167,4,100,246,151,146,127
+        DEFB 91,254,179,162,230,117,9,191,169,236,166,17,58,65,109,233
+        DEFB 97,41,193,174,66,3,169,220,228,215,223,54,61,162,94,163
+        DEFB 228,187,9,20,169,80,108,146,151,232,198,3,52,76,206,218
+        DEFB 172,177,194,209,244,162,81,203,11,213,63,147,40,134,104,140
+        DEFB 6,195,68,60,197,202,117,4,145,137,118,46,200,81,162,220
+        DEFB 54,3,25,87,59,132,1,43,105,254,82,252,191,156,63,101
+
+tab_t0_2:
+        DEFB 2,151,1,51,137,239,50,149,112,88,128,222,173,219,245,119
+        DEFB 227,85,67,22,232,214,1,168,199,85,129,159,1,114,159,78
+        DEFB 34,212,170,36,141,180,204,161,59,235,79,154,192,34,124,7
+        DEFB 194,211,135,180,32,211,159,123,15,8,210,153,234,167,196,230
+        DEFB 47,23,173,10,48,67,103,48,67,118,245,112,31,226,218,250
+        DEFB 103,69,223,38,5,170,20,247,98,73,105,208,202,139,224,38
+        DEFB 106,96,71,60,100,40,160,135,152,103,228,92,251,136,39,251
+        DEFB 233,232,47,123,244,244,167,109,62,52,222,180,190,250,40,143
+        DEFB 219,199,96,69,234,123,198,22,82,180,91,18,55,109,106,238
+        DEFB 174,169,1,52,51,103,78,22,106,178,197,48,133,203,173,28
+        DEFB 94,82,181,32,0,16,182,104,14,29,101,120,38,178,14,131
+        DEFB 102,192,165,180,90,157,90,156,238,56,239,105,227,142,207,88
+        DEFB 18,5,122,27,145,154,136,197,203,141,33,87,166,53,85,200
+        DEFB 14,103,41,27,157,40,19,174,100,101,228,250,64,96,209,92
+        DEFB 163,205,32,119,185,195,42,90,101,91,146,170,208,225,153,142
+        DEFB 79,152,164,5,57,167,64,239,79,95,56,205,134,119,40,36
+
+tab_t0_3:
+        DEFB 137,28,219,226,163,173,89,239,190,138,35,153,248,53,171,186
+        DEFB 46,9,239,72,183,212,27,0,240,15,89,212,136,242,135,181
+        DEFB 190,217,223,7,124,22,227,12,169,47,235,41,140,46,89,246
+        DEFB 237,18,78,7,96,233,52,255,133,176,48,145,1,168,172,251
+        DEFB 5,44,117,188,139,51,228,92,80,155,237,216,124,223,62,242
+        DEFB 131,136,224,50,48,219,86,26,119,230,76,220,9,249,225,0
+        DEFB 119,160,76,241,173,48,239,58,249,109,145,2,251,191,137,209
+        DEFB 21,1,249,69,247,201,190,138,188,228,98,229,139,240,233,19
+        DEFB 139,147,50,163,239,98,105,36,145,69,220,168,239,153,85,67
+        DEFB 215,177,187,234,55,65,198,140,133,50,222,68,36,103,206,225
+        DEFB 104,171,40,176,47,196,239,193,224,58,141,191,11,173,86,156
+        DEFB 171,53,101,239,194,92,68,17,115,224,228,215,178,43,15,101
+        DEFB 84,65,192,168,5,27,20,200,30,39,217,224,114,24,215,158
+        DEFB 211,199,0,33,212,224,210,27,54,163,185,47,104,28,193,111
+        DEFB 99,79,25,182,145,220,18,76,236,209,168,181,153,83,218,162
+        DEFB 109,206,145,150,86,132,226,39,209,43,11,190,37,167,70,227
+
+tab_t1:
+        DEFB 21,243,87,139,37,248,54,178,84,28,56,23,91,130,54,58
+        DEFB 86,216,181,99,119,255,219,153,245,74,102,50,55,22,59,113
+        DEFB 230,230,182,239,191,17,68,249,132,126,1,218,207,197,123,73
+        DEFB 254,183,194,84,149,160,253,251,145,148,81,186,226,254,163,207
+        DEFB 132,198,110,139,14,40,145,18,245,90,139,73,73,234,200,115
+        DEFB 115,157,4,162,79,86,171,134,94,176,45,117,37,206,250,201
+        DEFB 235,6,136,141,46,18,64,218,110,210,182,201,200,4,108,49
+        DEFB 72,210,93,96,53,109,223,241,215,192,142,52,179,178,193,129
+        DEFB 94,232,189,242,192,159,9,114,111,91,85,133,47,42,33,55
+        DEFB 253,227,107,144,206,157,25,46,166,221,75,143,202,40,203,211
+        DEFB 102,46,99,164,19,4,141,89,7,94,89,154,202,147,184,124
+        DEFB 255,94,139,131,68,247,198,216,41,62,85,6,139,15,213,118
+        DEFB 224,185,43,38,115,173,207,203,18,105,2,29,165,121,50,212
+        DEFB 130,75,20,139,36,255,212,39,14,193,13,206,203,135,6,31
+        DEFB 120,229,27,170,38,88,106,254,172,169,144,226,107,226,242,240
+        DEFB 31,92,91,195,114,53,30,202,80,18,127,147,116,0,227,64
+
+tab_t1_1:
+        DEFB 131,141,32,154,142,19,112,184,243,163,15,149,99,182,13,102
+        DEFB 215,112,135,72,30,184,105,132,91,197,46,199,44,72,220,44
+        DEFB 233,95,52,40,51,117,250,49,158,234,149,152,115,148,177,172
+        DEFB 217,234,109,59,169,14,171,68,104,186,140,145,105,240,81,24
+        DEFB 101,166,16,54,4,20,204,81,85,12,98,30,114,232,19,66
+        DEFB 210,14,38,87,105,245,252,245,100,93,143,46,119,108,104,25
+        DEFB 179,67,10,140,203,26,188,45,229,208,249,20,234,111,191,130
+        DEFB 228,238,28,176,134,156,182,246,185,147,190,26,95,16,254,66
+        DEFB 109,143,226,30,159,33,68,149,173,190,137,102,71,98,0,60
+        DEFB 168,32,237,31,183,3,34,2,142,199,168,9,167,141,139,185
+        DEFB 166,186,85,11,210,228,240,81,66,9,101,168,219,164,116,141
+        DEFB 152,140,1,124,178,32,192,103,202,36,120,179,55,70,65,225
+        DEFB 42,108,88,35,137,112,26,214,5,14,93,127,34,70,201,125
+        DEFB 2,178,194,255,117,43,141,140,175,211,254,193,126,214,6,58
+        DEFB 81,249,97,136,38,242,193,189,160,0,197,168,167,232,185,124
+        DEFB 122,106,188,29,222,144,128,183,182,74,253,85,22,40,57,126
+
+tab_t1_2:
+        DEFB 115,120,31,114,19,87,250,104,30,95,21,152,172,21,176,224
+        DEFB 32,143,31,1,120,116,54,31,215,34,98,254,50,137,167,84
+        DEFB 170,230,122,53,212,85,106,26,225,178,71,199,227,110,222,198
+        DEFB 168,122,25,177,68,141,146,102,16,5,172,157,93,109,228,15
+        DEFB 142,85,86,107,105,218,178,20,223,206,208,33,244,212,59,52
+        DEFB 200,172,233,190,255,98,159,65,10,253,137,38,208,55,187,69
+        DEFB 84,55,21,190,41,200,181,58,181,80,249,124,123,227,195,159
+        DEFB 213,18,126,232,104,176,255,82,86,179,185,64,88,20,206,237
+        DEFB 188,103,70,251,142,28,52,31,11,97,118,176,114,162,91,224
+        DEFB 212,160,119,178,232,78,180,94,41,162,144,195,82,153,168,44
+        DEFB 139,249,74,75,101,157,163,249,122,72,110,164,165,56,127,37
+        DEFB 194,91,27,36,16,45,91,216,242,38,36,149,205,25,62,247
+        DEFB 114,184,233,108,140,5,4,147,24,39,126,142,29,229,74,236
+        DEFB 175,0,115,116,167,182,149,155,205,238,121,50,77,238,66,234
+        DEFB 129,29,121,23,140,224,224,163,209,191,106,172,0,178,12,120
+        DEFB 221,235,186,148,176,82,197,165,236,170,40,62,66,76,133,64
+
+tab_t1_3:
+        DEFB 167,92,187,153,3,60,6,127,10,11,16,224,81,227,48,201
+        DEFB 143,125,127,177,102,31,174,157,232,217,112,13,48,11,123,46
+        DEFB 170,62,107,22,188,157,127,34,145,249,177,162,171,66,227,190
+        DEFB 220,67,71,99,13,57,149,71,29,128,41,190,130,43,111,29
+        DEFB 7,223,108,11,252,101,38,159,106,222,236,178,80,58,17,159
+        DEFB 92,181,239,108,249,8,87,219,47,91,124,220,245,138,190,33
+        DEFB 102,142,81,163,75,118,20,101,170,212,123,77,60,12,93,149
+        DEFB 59,199,116,53,68,221,113,19,54,196,226,28,163,101,236,114
+        DEFB 32,98,28,156,22,211,199,152,183,134,34,106,87,17,33,4
+        DEFB 43,203,96,30,127,153,14,216,145,214,184,59,150,185,73,253
+        DEFB 32,66,127,210,4,187,203,31,106,122,155,73,189,27,91,105
+        DEFB 29,252,13,138,205,110,228,82,109,200,247,240,55,174,88,164
+        DEFB 44,172,85,79,235,95,212,216,36,242,144,248,213,145,195,13
+        DEFB 29,66,37,112,206,179,213,166,237,32,22,97,94,14,223,24
+        DEFB 39,30,2,233,228,6,165,251,156,175,226,23,63,125,208,181
+        DEFB 171,80,49,168,218,195,79,223,220,239,137,45,198,134,62,196
+
+;------------------------------------------------------------------
+; Workspace - 20 bytes, must be in RAM
+;------------------------------------------------------------------
+
+tab64_seed:     DEFB 0,0,0,0    ; 32-bit seed, set it before hashing
+tab64_h:        DEFS 8          ; the hash: lane 0 then lane 1
+tab_ptr:        DEFS 2
+tab_len:        DEFS 2
+tab_lenv:       DEFS 2
+tab_page:       DEFS 1
+tab_pad:        DEFS 1
+
+tab64_end:
+TAB64_SIZE:     EQU tab64_end - tab64
+
+;------------------------------------------------------------
