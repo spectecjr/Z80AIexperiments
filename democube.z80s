@@ -1,0 +1,584 @@
+;------------------------------------------------------------------
+; democube.z80s - the frame update for a spinning cube that bounces
+;                 around inside the view frustum, forever
+;
+;   demo_init    place the cube and set it moving
+;   demo_frame   one frame: spin, move, collide, transform, project
+;
+; No rendering: demo_frame leaves eight screen coordinate pairs at
+; demo_screen, and what happens to them is the caller's business.
+;
+; A frame is:
+;   1. three Euler angles advance by fixed steps
+;   2. the rotation matrix is rebuilt from a sine table, Rz*Ry*Rx,
+;      in 1.7 fixed point
+;   3. the centre moves by its velocity
+;   4. the centre bounces off the walls of a box
+;   5. the nine multiply tables get the two entries a cube needs
+;   6. transform3d.z80s projects the eight corners
+;
+; The box is axis aligned with its front face on the screen: at the
+; near plane z = 80 the projection shows +-2z across and +-1.5z down,
+; so the box is 320 by 240 by 160 units, x and y centred, z from 80 to
+; 240. Sphere collision is the standard trick - rather than test the
+; sphere against the walls, shrink the box by the sphere's radius and
+; bounce the centre off that. The cube's bounding sphere is
+; 24*sqrt(3) = 41.6, so R = 42 and the centre lives in
+;
+;   |x| <= 118,   |y| <= 78,   122 <= z <= 198
+;
+; all in world units. A wall bounce is a negated velocity component,
+; and only when that component is heading outwards, so nothing can
+; stick to a wall. Negation is exact, so the speed is the same on the
+; millionth bounce as on the first - no drift to correct.
+;
+; Units: positions are 9.7 (128 = one world unit), velocities are
+; 1/2048 of a unit per frame - sixteen times finer than the positions,
+; so the cube can drift at any speed rather than in 1/128 steps. The
+; leftover sixteenths are carried in a remainder byte per axis instead
+; of being dropped, which is what keeps slow motion smooth.
+;
+; Needs transform3d.z80s and mul8x8_qs.z80s.
+;
+; Checked against a model of the same arithmetic in
+; tests/test_democube.py: 3,000 frames compared state for state -
+; angles, matrix, position, velocity and all eight screen coordinate
+; pairs - and the model then run for a million frames to confirm the
+; cube stays in its box and keeps its speed to the last bit.
+;
+; Measured, on an emulated Z80:
+;
+;   demo_frame      21,123 T-states at best, 21,795 on average,
+;                   22,336 at worst - about 31% of a 69,888 T-state
+;                   PAL frame, and it varies only with which branches
+;                   the angles and the walls happen to take
+;
+;     demo_spin      6,435   three angles, sine lookups, and fourteen
+;                            1.7 multiplies to compose Rz*Ry*Rx
+;     demo_move      1,171   integrate three axes, test six walls
+;     demo_tables    3,824   nine coefficients, two entries each
+;     t3d_run        9,632   rotate, translate and project 8 corners
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+DEMO_S:         EQU 24         ; cube half-side, world units
+DEMO_XLIM:      EQU 15104      ; the box, inset by the bounding sphere
+DEMO_YLIM:      EQU 9984       ; radius of 42: |x|<=118, |y|<=78,
+DEMO_ZMIN:      EQU 15616      ; 122 <= z <= 198
+DEMO_ZMAX:      EQU 25344
+
+;------------------------------------------------------------------
+; demo_init
+;------------------------------------------------------------------
+
+demo_init:
+        LD   HL,0
+        LD   (demo_px),HL
+        LD   (demo_py),HL
+        LD   HL,160 * 128   ; centred, well down the frustum
+        LD   (demo_pz),HL
+        LD   HL,700         ; and drifting, in 1/2048 units per frame
+        LD   (demo_vx),HL
+        LD   HL,500
+        LD   (demo_vy),HL
+        LD   HL,-400
+        LD   (demo_vz),HL
+        XOR  A
+        LD   (demo_fx),A
+        LD   (demo_fy),A
+        LD   (demo_fz),A
+        LD   (demo_ax),A
+        LD   (demo_ay),A
+        LD   (demo_az),A
+        RET
+
+;------------------------------------------------------------------
+; demo_frame
+;------------------------------------------------------------------
+
+demo_frame:
+        CALL demo_spin      ; angles and matrix
+        CALL demo_move      ; velocity, then the frustum
+        CALL demo_tables    ; the two table entries a cube needs
+        LD   HL,(demo_px)   ; the centre is the translation
+        LD   (t3d_tx),HL
+        LD   HL,(demo_py)
+        LD   (t3d_ty),HL
+        LD   HL,(demo_pz)
+        LD   (t3d_tz),HL
+        LD   HL,demo_verts
+        LD   DE,demo_screen
+        LD   B,8
+        JP   t3d_run
+
+;------------------------------------------------------------------
+; demo_spin - advance the angles, rebuild the matrix
+;------------------------------------------------------------------
+
+demo_spin:
+        LD   A,(demo_dax)
+        LD   HL,demo_ax
+        ADD  A,(HL)
+        LD   (HL),A
+        LD   A,(demo_day)
+        INC  HL
+        ADD  A,(HL)
+        LD   (HL),A
+        LD   A,(demo_daz)
+        INC  HL
+        ADD  A,(HL)
+        LD   (HL),A
+
+        LD   A,(demo_ax)    ; sin and cos of each angle
+        CALL demo_sincos
+        LD   (demo_sa),A
+        LD   A,C
+        LD   (demo_ca),A
+        LD   A,(demo_ay)
+        CALL demo_sincos
+        LD   (demo_sb),A
+        LD   A,C
+        LD   (demo_cb),A
+        LD   A,(demo_az)
+        CALL demo_sincos
+        LD   (demo_sc),A
+        LD   A,C
+        LD   (demo_cc),A
+
+        LD   HL,demo_sa     ; sasb = sa*sb, casb = ca*sb
+        LD   DE,demo_sb
+        CALL demo_mulmem
+        LD   (demo_sasb),A
+        LD   HL,demo_ca
+        LD   DE,demo_sb
+        CALL demo_mulmem
+        LD   (demo_casb),A
+
+        LD   HL,demo_cb     ; m00 = cb*cc
+        LD   DE,demo_cc
+        CALL demo_mulmem
+        LD   (t3d_m+0),A
+        LD   HL,demo_cb     ; m10 = cb*sc
+        LD   DE,demo_sc
+        CALL demo_mulmem
+        LD   (t3d_m+3),A
+        LD   A,(demo_sb)    ; m20 = -sb
+        NEG
+        CP   128
+        JR   NZ,dsp_m20
+        LD   A,127
+dsp_m20:
+        LD   (t3d_m+6),A
+        LD   HL,demo_sa     ; m21 = sa*cb
+        LD   DE,demo_cb
+        CALL demo_mulmem
+        LD   (t3d_m+7),A
+        LD   HL,demo_ca     ; m22 = ca*cb
+        LD   DE,demo_cb
+        CALL demo_mulmem
+        LD   (t3d_m+8),A
+
+        LD   HL,demo_sasb   ; m01 = sasb*cc - ca*sc
+        LD   DE,demo_cc
+        CALL demo_mulmem
+        LD   (demo_t1),A
+        LD   HL,demo_ca
+        LD   DE,demo_sc
+        CALL demo_mulmem
+        NEG
+        LD   B,A
+        LD   A,(demo_t1)
+        CALL demo_addsat
+        LD   (t3d_m+1),A
+
+        LD   HL,demo_casb   ; m02 = casb*cc + sa*sc
+        LD   DE,demo_cc
+        CALL demo_mulmem
+        LD   (demo_t1),A
+        LD   HL,demo_sa
+        LD   DE,demo_sc
+        CALL demo_mulmem
+        LD   B,A
+        LD   A,(demo_t1)
+        CALL demo_addsat
+        LD   (t3d_m+2),A
+
+        LD   HL,demo_sasb   ; m11 = sasb*sc + ca*cc
+        LD   DE,demo_sc
+        CALL demo_mulmem
+        LD   (demo_t1),A
+        LD   HL,demo_ca
+        LD   DE,demo_cc
+        CALL demo_mulmem
+        LD   B,A
+        LD   A,(demo_t1)
+        CALL demo_addsat
+        LD   (t3d_m+4),A
+
+        LD   HL,demo_casb   ; m12 = casb*sc - sa*cc
+        LD   DE,demo_sc
+        CALL demo_mulmem
+        LD   (demo_t1),A
+        LD   HL,demo_sa
+        LD   DE,demo_cc
+        CALL demo_mulmem
+        NEG
+        LD   B,A
+        LD   A,(demo_t1)
+        CALL demo_addsat
+        LD   (t3d_m+5),A
+        RET
+
+demo_mulmem:                ; A = round((HL) * (DE) / 128), saturated
+        LD   A,(DE)
+        LD   C,A
+        LD   A,(HL)
+        LD   B,A
+        JP   smul7
+
+demo_sincos:                ; A = angle -> A = sin, C = cos
+        LD   L,A
+        LD   H,demo_sin / 256
+        ADD  A,64
+        LD   E,A
+        LD   A,(HL)
+        LD   L,E
+        LD   C,(HL)
+        RET
+
+demo_addsat:                ; A = clamp(A + B) into 1.7
+        LD   L,A
+        RLA
+        SBC  A,A
+        LD   H,A
+        LD   A,B
+        LD   E,A
+        RLA
+        SBC  A,A
+        LD   D,A
+        EX   DE,HL
+        ADD  HL,DE
+        LD   A,H
+        OR   A
+        JR   Z,das_pos
+        LD   A,L            ; negative: -254..-1
+        CP   129
+        RET  NC
+        LD   A,129          ; -127
+        RET
+das_pos:
+        LD   A,L            ; positive: 0..254
+        CP   128
+        RET  C
+        LD   A,127
+        RET
+
+;------------------------------------------------------------------
+; smul7 - signed 1.7 multiply: A = round(B*C / 128), saturated
+;------------------------------------------------------------------
+
+smul7:
+        LD   A,B
+        XOR  C
+        LD   (demo_sgn),A   ; bit 7 is the sign of the product
+        LD   A,B
+        OR   A
+        JP   P,sm7_a
+        NEG
+sm7_a:  LD   B,A
+        LD   A,C
+        OR   A
+        JP   P,sm7_b
+        NEG
+sm7_b:  LD   C,A
+        CALL qsmul8         ; DE = |B| * |C|
+        LD   HL,64          ; round to nearest, keep bits 14..7
+        ADD  HL,DE
+        ADD  HL,HL
+        LD   A,H
+        CP   128
+        JR   C,sm7_ok
+        LD   A,127          ; 1.0 will not fit in 1.7
+sm7_ok:
+        LD   B,A
+        LD   A,(demo_sgn)
+        OR   A
+        LD   A,B
+        RET  P
+        NEG
+        RET
+
+;------------------------------------------------------------------
+; demo_move - integrate the velocity, then bounce off the box
+;
+; Six walls, each one a signed 16-bit compare and, if the matching
+; velocity component is heading out through it, a negation. Every
+; quantity here is comfortably inside 16 bits, so the compares cannot
+; overflow into the wrong answer.
+;------------------------------------------------------------------
+
+demo_move:
+        LD   HL,demo_vx     ; p += v, sixteenths carried in a remainder
+        LD   DE,demo_px
+        LD   BC,demo_fx
+        CALL demo_step
+        LD   HL,demo_vy
+        LD   DE,demo_py
+        LD   BC,demo_fy
+        CALL demo_step
+        LD   HL,demo_vz
+        LD   DE,demo_pz
+        LD   BC,demo_fz
+        CALL demo_step
+
+        LD   HL,(demo_px)   ; --- the two x walls ---
+        LD   DE,DEMO_XLIM
+        OR   A
+        SBC  HL,DE
+        JP   M,dm_xlo
+        LD   HL,(demo_vx)   ; past the far wall: turn it round if it
+        BIT  7,H            ; is still going that way
+        JR   NZ,dm_y
+        LD   HL,demo_vx
+        CALL demo_negv
+        JR   dm_y
+dm_xlo:
+        LD   HL,(demo_px)
+        LD   DE,-DEMO_XLIM
+        OR   A
+        SBC  HL,DE
+        JP   P,dm_y
+        LD   HL,(demo_vx)
+        BIT  7,H
+        JR   Z,dm_y
+        LD   HL,demo_vx
+        CALL demo_negv
+
+dm_y:
+        LD   HL,(demo_py)   ; --- the two y walls ---
+        LD   DE,DEMO_YLIM
+        OR   A
+        SBC  HL,DE
+        JP   M,dm_ylo
+        LD   HL,(demo_vy)
+        BIT  7,H
+        JR   NZ,dm_z
+        LD   HL,demo_vy
+        CALL demo_negv
+        JR   dm_z
+dm_ylo:
+        LD   HL,(demo_py)
+        LD   DE,-DEMO_YLIM
+        OR   A
+        SBC  HL,DE
+        JP   P,dm_z
+        LD   HL,(demo_vy)
+        BIT  7,H
+        JR   Z,dm_z
+        LD   HL,demo_vy
+        CALL demo_negv
+
+dm_z:
+        LD   HL,(demo_pz)   ; --- the front and back walls ---
+        LD   DE,DEMO_ZMAX
+        OR   A
+        SBC  HL,DE
+        JP   M,dm_zlo
+        LD   HL,(demo_vz)
+        BIT  7,H
+        RET  NZ
+        LD   HL,demo_vz
+        JP   demo_negv
+dm_zlo:
+        LD   HL,(demo_pz)
+        LD   DE,DEMO_ZMIN
+        OR   A
+        SBC  HL,DE
+        RET  P
+        LD   HL,(demo_vz)
+        BIT  7,H
+        RET  Z
+        LD   HL,demo_vz
+        JP   demo_negv
+
+demo_negv:                  ; negate the 16-bit value at (HL)
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        PUSH HL
+        LD   HL,0
+        OR   A
+        SBC  HL,DE
+        EX   DE,HL
+        POP  HL
+        LD   (HL),D
+        DEC  HL
+        LD   (HL),E
+        RET
+
+demo_step:                  ; (DE) += ((HL) + (BC)) >> 4, remainder to (BC)
+        LD   A,(BC)
+        PUSH BC
+        LD   C,A
+        LD   B,0            ; BC = the carried sixteenths
+        LD   A,(HL)
+        INC  HL
+        LD   H,(HL)
+        LD   L,A            ; HL = v
+        ADD  HL,BC
+        LD   A,L            ; the new remainder is the low four bits
+        AND  15
+        POP  BC
+        LD   (BC),A
+        SRA  H              ; step = acc >> 4, arithmetic
+        RR   L
+        SRA  H
+        RR   L
+        SRA  H
+        RR   L
+        SRA  H
+        RR   L
+        EX   DE,HL          ; HL = the position, DE = the step
+        LD   C,(HL)
+        INC  HL
+        LD   B,(HL)
+        EX   DE,HL          ; HL = step, DE -> the position's high byte
+        ADD  HL,BC
+        LD   A,H
+        LD   (DE),A
+        DEC  DE
+        LD   A,L
+        LD   (DE),A
+        RET
+
+;------------------------------------------------------------------
+; demo_tables - the only two table entries a cube needs
+;
+; Every coordinate of every corner is +S or -S, so each of the nine
+; multiply tables needs exactly two entries: m*S, and its negative at
+; the index for -S. Nine multiplies, against 2,304 for a full build.
+;------------------------------------------------------------------
+
+demo_tables:
+        LD   IX,t3d_m
+        LD   A,t3d_tab / 256
+        LD   (demo_tp),A
+        LD   B,9
+dt_loop:
+        PUSH BC
+        LD   A,(IX+0)       ; m, signed
+        INC  IX
+        LD   B,A
+        LD   C,DEMO_S
+        CALL demo_smul16    ; DE = m * S, signed 16-bit
+        LD   A,(demo_tp)
+        LD   H,A
+        LD   L,DEMO_S       ; entry for +S
+        LD   (HL),E
+        INC  H
+        LD   (HL),D
+        LD   HL,0           ; and its negative for -S
+        OR   A
+        SBC  HL,DE
+        LD   A,(demo_tp)
+        LD   D,A
+        LD   E,256 - DEMO_S
+        LD   A,L
+        LD   (DE),A
+        INC  D
+        LD   A,H
+        LD   (DE),A
+        LD   A,(demo_tp)    ; on to the next coefficient
+        ADD  A,2
+        LD   (demo_tp),A
+        POP  BC
+        DJNZ dt_loop
+        RET
+
+demo_smul16:                ; DE = signed B * unsigned C
+        LD   A,B
+        OR   A
+        JP   M,dsm_neg
+        JP   qsmul8
+dsm_neg:
+        NEG
+        LD   B,A
+        CALL qsmul8
+        LD   HL,0
+        OR   A
+        SBC  HL,DE
+        EX   DE,HL
+        RET
+
+;------------------------------------------------------------------
+; Data and workspace
+;------------------------------------------------------------------
+
+demo_verts:                 ; the eight corners, signed bytes
+        DEFB 24,24,24
+        DEFB 24,24,232
+        DEFB 24,232,24
+        DEFB 24,232,232
+        DEFB 232,24,24
+        DEFB 232,24,232
+        DEFB 232,232,24
+        DEFB 232,232,232
+
+demo_dax:       DEFB 3      ; how fast it spins, in 1/256 turns a frame
+demo_day:       DEFB 5
+demo_daz:       DEFB 2
+
+demo_ax:        DEFS 1      ; the three angles
+demo_ay:        DEFS 1
+demo_az:        DEFS 1
+demo_px:        DEFS 2      ; centre, 9.7 fixed point
+demo_py:        DEFS 2
+demo_pz:        DEFS 2
+demo_vx:        DEFS 2      ; velocity, 1/2048 units a frame
+demo_vy:        DEFS 2
+demo_vz:        DEFS 2
+demo_fx:        DEFS 1      ; the sixteenths not yet spent
+demo_fy:        DEFS 1
+demo_fz:        DEFS 1
+demo_sa:        DEFS 1      ; sines and cosines of the three angles
+demo_ca:        DEFS 1
+demo_sb:        DEFS 1
+demo_cb:        DEFS 1
+demo_sc:        DEFS 1
+demo_cc:        DEFS 1
+demo_sasb:      DEFS 1
+demo_casb:      DEFS 1
+demo_t1:        DEFS 1
+demo_sgn:       DEFS 1
+demo_tp:        DEFS 1
+
+demo_screen:    DEFS 16     ; eight screen coordinate pairs, x then y
+
+;------------------------------------------------------------------
+; sin(2*pi*i/256) * 127, signed. Generated; must be page-aligned.
+;------------------------------------------------------------------
+
+        ALIGN 256
+demo_sin:
+        DEFB 0,3,6,9,12,16,19,22,25,28,31,34,37,40,43,46
+        DEFB 49,51,54,57,60,63,65,68,71,73,76,78,81,83,85,88
+        DEFB 90,92,94,96,98,100,102,104,106,107,109,111,112,113,115,116
+        DEFB 117,118,120,121,122,122,123,124,125,125,126,126,126,127,127,127
+        DEFB 127,127,127,127,126,126,126,125,125,124,123,122,122,121,120,118
+        DEFB 117,116,115,113,112,111,109,107,106,104,102,100,98,96,94,92
+        DEFB 90,88,85,83,81,78,76,73,71,68,65,63,60,57,54,51
+        DEFB 49,46,43,40,37,34,31,28,25,22,19,16,12,9,6,3
+        DEFB 0,-3,-6,-9,-12,-16,-19,-22,-25,-28,-31,-34,-37,-40,-43,-46
+        DEFB -49,-51,-54,-57,-60,-63,-65,-68,-71,-73,-76,-78,-81,-83,-85,-88
+        DEFB -90,-92,-94,-96,-98,-100,-102,-104,-106,-107,-109,-111,-112,-113,-115,-116
+        DEFB -117,-118,-120,-121,-122,-122,-123,-124,-125,-125,-126,-126,-126,-127,-127,-127
+        DEFB -127,-127,-127,-127,-126,-126,-126,-125,-125,-124,-123,-122,-122,-121,-120,-118
+        DEFB -117,-116,-115,-113,-112,-111,-109,-107,-106,-104,-102,-100,-98,-96,-94,-92
+        DEFB -90,-88,-85,-83,-81,-78,-76,-73,-71,-68,-65,-63,-60,-57,-54,-51
+        DEFB -49,-46,-43,-40,-37,-34,-31,-28,-25,-22,-19,-16,-12,-9,-6,-3
+
+demo_end:
+DEMO_SIZE:      EQU demo_end - demo_init
+
+;------------------------------------------------------------

@@ -8,5 +8,6 @@ start:
                 INCLUDE "tab64.z80s"
                 INCLUDE "mul8x8_qs.z80s"
                 INCLUDE "transform3d.z80s"
+                INCLUDE "democube.z80s"
 end:            equ $
 codelen:        equ end - start
