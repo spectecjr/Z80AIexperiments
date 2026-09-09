@@ -149,7 +149,13 @@ harmless.
 
 ---
 
-## 4. Voxel landscape — **modelled, not yet on the Z80**
+## 4. Voxel landscape — **BUILT**
+
+`vox.z80s`, 313,302 T-states a frame, 19.2 Hz, bit exact over 16 camera
+positions. The estimate below said 17 Hz and the three decisions it
+records are the ones that got it there. See `vox.md`.
+
+What follows is the note written while modelling it.
 
 `tests/vox.py` is the model and it renders correctly (a landscape, a
 horizon buffer, no overdraw). What stopped it being written in assembly

@@ -404,6 +404,50 @@ def roto(outdir, seconds=6):
     report(p, size, n, durs, secs, got, bad)
 
 
+VOX_PAL = ([(0, 0, 0), (58, 78, 130)]
+           + [(18 + i * 9, 40 + i * 11, 22 + i * 5) for i in range(14)])
+
+
+def vox(outdir, seconds=8):
+    """vox at its measured rate: 323,952 T-states a frame, 18.5 Hz.
+
+    A flight over the map: forward along the heading, turning slowly.
+    px is 8.8 in map cells and py is 4.12, so the same speed is a
+    different number in each - see vox.md.
+    """
+    import math
+    b = Bench("harness_vox.asm", org=0)
+    s = b.syms
+    b.call_regs(s["vx_init"])
+    rate = 1000.0 / held([b.call_regs(s["vx_frame"])[0]])[0]
+    n = int(seconds * rate)
+    px, py = 0x0800, 0x8000
+    frames, ts = [], []
+    for t in range(n):
+        ang = 0.6 + 1.7 * math.sin(2 * math.pi * t / 210)
+        v = 0.055
+        px = int(px + v * 256 * math.cos(ang)) & 0xFFFF
+        py = int(py + v * 4096 * math.sin(ang)) & 0xFFFF
+        dx0 = int(1.0 * 256 * math.cos(ang - 0.5)) & 0xFFFF
+        dy0 = int(1.0 * 4096 * math.sin(ang - 0.5)) & 0xFFFF
+        sx = int(1.0 * 256 * (math.cos(ang + 0.5)
+                              - math.cos(ang - 0.5)) / 63) & 0xFFFF
+        sy = int(1.0 * 4096 * (math.sin(ang + 0.5)
+                               - math.sin(ang - 0.5)) / 63) & 0xFFFF
+        for nm, v2 in (("vx_px", px), ("vx_py", py), ("vx_dx0", dx0),
+                       ("vx_dy0", dy0), ("vx_sx", sx), ("vx_sy", sy)):
+            b.poke(s[nm], v2.to_bytes(2, "little"))
+        into = b.peek(s["vx_back"], 1)[0]
+        tt, _ = b.call_regs(s["vx_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    p = "%s/vox.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, frames, VOX_PAL, durs)
+    got, bad, secs = check_gif(p, frames, VOX_PAL, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 if __name__ == "__main__":
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
     cube(d)
@@ -415,3 +459,4 @@ if __name__ == "__main__":
     harrier(d)
     twist(d)
     roto(d)
+    vox(d)

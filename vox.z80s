@@ -1,0 +1,237 @@
+;------------------------------------------------------------------
+; vox.z80s - a Comanche-style heightmap for the SAM Coupe
+;
+;   vx_init      black both buffers, once
+;   vx_frame     draw from (vx_px, vx_py) and flip
+;
+; One ray a screen column, stepped outwards in fixed increments, and
+; the column filled from the bottom upwards. The horizon buffer is what
+; makes it cheap: a column only draws where a sample rises above
+; everything already drawn in it, so every screen byte is written
+; exactly once and there is no overdraw at all. wolf3d, by contrast,
+; prefills the viewport and paints over 78% of what it wrote.
+;
+; ONE SAMPLE, AS CHEAPLY AS IT GOES. Everything about the layout is
+; chosen to keep the inner loop to adds and table reads:
+;
+;   the map is 16 by 16 and page aligned, so a cell's address is one
+;   byte - roto.z80s's texel trick;
+;
+;   y is 4.12, so its row is already in the top nibble of its high
+;   byte and needs no shifting - also roto's, and for the same reason
+;   only A survives EXX, so the address has to be finished before
+;   coming back;
+;
+;   sixteen height levels and sixteen steps out, so the tables that
+;   turn a height into a screen row and into a colour are both indexed
+;   by (h & 0xF0) | z, with no shifting at all, and both are one page.
+;   Indexing the colour by the step as well as the height means the
+;   distance fade costs nothing.
+;
+; THE FILL is wolf3d's wide scaler run, upwards: 64 groups of
+; LD (HL),A / INC L / LD (HL),A / ADD HL,DE with DE one row less one,
+; entered as many groups from the end as there are rows to fill. HL is
+; left pointing at the next row up, which is exactly where the next
+; fill in that column starts, so nothing has to be recomputed. The
+; viewport is 64 rows so one fill can never want more than 64 groups,
+; which is what keeps the entry to a single patched byte.
+;
+;   alternate   HL = x, DE = y, BC = dx, SP = dy
+;   main        HL = the next row up in this column, B = the horizon,
+;               C = the step, DE = a table pointer, A = whatever
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+VX_BUF0:        EQU 0x80
+VX_BUF1:        EQU 0x20
+
+;------------------------------------------------------------------
+; vx_init - both buffers black
+;------------------------------------------------------------------
+
+vx_init:
+        LD   A,VX_BUF0
+        LD   (vx_back),A
+        LD   A,VX_BUF1
+        LD   (vx_front),A
+        LD   H,VX_BUF0
+        CALL vx_black
+        LD   H,VX_BUF1
+        ; fall through
+
+vx_black:
+        LD   L,0
+        LD   D,0x60
+vx_bl1:
+        LD   B,0
+vx_bl2:
+        LD   (HL),0
+        INC  HL
+        DJNZ vx_bl2
+        DEC  D
+        JR   NZ,vx_bl1
+        RET
+
+;------------------------------------------------------------------
+; vx_frame - one frame
+;------------------------------------------------------------------
+
+vx_frame:
+        CALL vx_draw
+        LD   A,(vx_back)
+        LD   B,A
+        LD   A,(vx_front)
+        LD   (vx_back),A
+        LD   A,B
+        LD   (vx_front),A
+        RET
+
+;------------------------------------------------------------------
+; vx_draw - the landscape, a column at a time
+;------------------------------------------------------------------
+
+vx_draw:
+        DI
+        LD   (vx_sp),SP
+        LD   IY,vx_ret
+        LD   HL,(vx_dx0)        ; the leftmost ray, and the step to the
+        LD   (vx_dxc),HL        ; next column
+        LD   HL,(vx_dy0)
+        LD   (vx_dyc),HL
+        LD   A,(vx_back)
+        LD   H,A
+        LD   L,0
+        LD   DE,(VX_TOP + VX_VH - 1) * 128
+        ADD  HL,DE              ; the first column's bottom row
+        LD   (vx_cp),HL
+        LD   A,VX_COLS
+        LD   (vx_cn),A
+vx_col1:
+        LD   HL,(vx_dyc)
+        LD   SP,HL              ; dy rides in SP, the last spare add
+        EXX
+        LD   HL,(vx_px)
+        LD   DE,(vx_py)
+        LD   BC,(vx_dxc)
+        EXX
+        LD   HL,(vx_cp)
+        LD   B,VX_TOP + VX_VH   ; the horizon: nothing drawn yet
+        LD   C,VX_STEPS - 1     ; the step out, counting down
+        LD   D,vx_map / 256
+vx_z:
+        EXX
+        ADD  HL,BC              ; x += dx, and it wraps at sixteen
+        LD   A,H
+        AND  0x0F
+        LD   H,A
+        EX   DE,HL
+        ADD  HL,SP              ; y += dy, which wraps of its own accord
+        LD   A,H                ; because it is 4.12
+        AND  0xF0
+        OR   D                  ; the cell: row above, column below
+        EX   DE,HL
+        EXX
+        LD   E,A
+        LD   A,(DE)             ; the height there
+        AND  0xF0
+        OR   C                  ; the level and the step, one index for
+        LD   E,A                ; both tables - and they are the next two
+        INC  D                  ; pages up, so this is how to reach them
+        LD   A,(DE)             ; where it lands on screen
+        CP   B
+        JR   NC,vx_hd           ; behind something already drawn
+
+        INC  D                  ; it rises: what colour, at this range
+        EX   AF,AF'
+        LD   A,(DE)
+        DEC  D
+        LD   E,A
+        EX   AF,AF'
+        LD   D,A                ; the new horizon, kept while the run
+        NEG                     ; entry is worked out: as many groups
+        ADD  A,B                ; from the end as there are rows
+        ADD  A,A
+        ADD  A,A
+        NEG
+        LD   (vx_j+1),A
+        LD   B,D
+        LD   A,E
+        LD   DE,-129            ; a row up, less the INC L in a group
+vx_j:
+        JP   vx_run
+vx_ret:
+        LD   D,vx_map / 256     ; D was the scratch for the new horizon
+        JR   vx_hd2
+vx_hd:
+        DEC  D
+vx_hd2:
+        DEC  C                  ; the step counts down, so this is the
+        JP   P,vx_z             ; whole loop test
+
+        LD   A,B                ; and the sky above the lot
+        SUB  VX_TOP
+        JR   Z,vx_nosky
+        ADD  A,A
+        ADD  A,A
+        NEG
+        LD   (vx_j2+1),A
+        LD   A,VX_SKY
+        LD   DE,-129
+        LD   IY,vx_ret2
+vx_j2:
+        JP   vx_run
+vx_ret2:
+        LD   IY,vx_ret
+vx_nosky:
+        LD   HL,(vx_cp)         ; on to the next column
+        INC  HL
+        INC  HL
+        LD   (vx_cp),HL
+        LD   HL,(vx_dxc)
+        LD   DE,(vx_sx)
+        ADD  HL,DE
+        LD   (vx_dxc),HL
+        LD   HL,(vx_dyc)
+        LD   DE,(vx_sy)
+        ADD  HL,DE
+        LD   (vx_dyc),HL
+        LD   A,(vx_cn)
+        DEC  A
+        LD   (vx_cn),A
+        JP   NZ,vx_col1
+        LD   SP,(vx_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+vx_back:        DEFB VX_BUF0
+vx_front:       DEFB VX_BUF1
+vx_px:          DEFW 0          ; the camera, 8.8 in map cells
+vx_py:          DEFW 0          ; and 4.12
+vx_dx0:         DEFW 0          ; the leftmost ray's step
+vx_dy0:         DEFW 0
+vx_sx:          DEFW 0          ; and the turn from one column to the next
+vx_sy:          DEFW 0
+vx_dxc:         DEFS 2
+vx_dyc:         DEFS 2
+vx_cp:          DEFS 2
+vx_cn:          DEFS 1
+vx_sp:          DEFS 2
+
+;------------------------------------------------------------------
+; The fill: 64 groups of two bytes and a row up, entered from the end
+;------------------------------------------------------------------
+
+        ALIGN 256
+vx_run:
+        DUP  64
+        LD   (HL),A
+        INC  L
+        LD   (HL),A
+        ADD  HL,DE
+        EDUP
+        JP   (IY)
