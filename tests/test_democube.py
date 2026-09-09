@@ -15,7 +15,7 @@ import sys
 from bench import Bench
 from test_transform3d import model as t3d_model, s8, s16
 
-S, R = 24, 42
+S, R = 40, 70
 BX, BY, ZN, ZF = 160, 120, 80, 240      # the box, in world units
 XLIM, YLIM = (BX - R) * 128, (BY - R) * 128     # inset by the sphere
 ZMIN, ZMAX = (ZN + R) * 128, (ZF - R) * 128

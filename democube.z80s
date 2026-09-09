@@ -23,9 +23,9 @@
 ; 240. Sphere collision is the standard trick - rather than test the
 ; sphere against the walls, shrink the box by the sphere's radius and
 ; bounce the centre off that. The cube's bounding sphere is
-; 24*sqrt(3) = 41.6, so R = 42 and the centre lives in
+; 40*sqrt(3) = 69.3, so R = 70 and the centre lives in
 ;
-;   |x| <= 118,   |y| <= 78,   122 <= z <= 198
+;   |x| <= 90,   |y| <= 50,   150 <= z <= 170
 ;
 ; all in world units. A wall bounce is a negated velocity component,
 ; and only when that component is heading outwards, so nothing can
@@ -62,11 +62,11 @@
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
 
-DEMO_S:         EQU 24         ; cube half-side, world units
-DEMO_XLIM:      EQU 15104      ; the box, inset by the bounding sphere
-DEMO_YLIM:      EQU 9984       ; radius of 42: |x|<=118, |y|<=78,
-DEMO_ZMIN:      EQU 15616      ; 122 <= z <= 198
-DEMO_ZMAX:      EQU 25344
+DEMO_S:         EQU 40         ; cube half-side, world units
+DEMO_XLIM:      EQU 11520      ; the box, inset by the bounding sphere
+DEMO_YLIM:      EQU 6400       ; radius of 70: |x|<=90, |y|<=50,
+DEMO_ZMIN:      EQU 19200      ; 150 <= z <= 170
+DEMO_ZMAX:      EQU 21760
 
 ;------------------------------------------------------------------
 ; demo_init
@@ -76,7 +76,7 @@ demo_init:
         LD   HL,0
         LD   (demo_px),HL
         LD   (demo_py),HL
-        LD   HL,160 * 128   ; centred, well down the frustum
+        LD   HL,160 * 128   ; centred, in the middle of the box
         LD   (demo_pz),HL
         LD   HL,700         ; and drifting, in 1/2048 units per frame
         LD   (demo_vx),HL
@@ -516,14 +516,14 @@ dsm_neg:
 ;------------------------------------------------------------------
 
 demo_verts:                 ; the eight corners, signed bytes
-        DEFB 24,24,24
-        DEFB 24,24,232
-        DEFB 24,232,24
-        DEFB 24,232,232
-        DEFB 232,24,24
-        DEFB 232,24,232
-        DEFB 232,232,24
-        DEFB 232,232,232
+        DEFB 40,40,40
+        DEFB 40,40,216
+        DEFB 40,216,40
+        DEFB 40,216,216
+        DEFB 216,40,40
+        DEFB 216,40,216
+        DEFB 216,216,40
+        DEFB 216,216,216
 
 demo_dax:       DEFB 3      ; how fast it spins, in 1/256 turns a frame
 demo_day:       DEFB 5

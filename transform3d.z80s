@@ -196,14 +196,18 @@ t3d_zok:
         LD   C,(HL)         ; [7T]  C is the multiplier for both axes
 
         LD   DE,(t3d_xr)    ; [20T] sx = 128 + ((X >> 7) * r >> 8)
-        LD   A,E            ; [4T]  v = coordinate >> 7, signed
+        BIT  7,D            ; [8T]  v = coordinate >> 7. |v| can reach
+        JR   Z,t3d_ax_pos       ; [7/12T] 255, so take the magnitude from the
+        LD   A,E            ; [4T]  16-bit value rather than from a byte
+        NEG                 ; [8T]  that has already lost the top bit
+        LD   E,A            ; [4T]
+        LD   A,0            ; [7T]
+        SBC  A,D            ; [4T]
+        LD   D,A            ; [4T]
+        LD   A,E            ; [4T]  |v| = (D<<1) | (E>>7)
         RLA                 ; [4T]
         LD   A,D            ; [4T]
         RLA                 ; [4T]
-        LD   B,A            ; [4T]
-        OR   A              ; [4T]
-        JP   P,t3d_ax_pos       ; [10T]
-        NEG                 ; [8T]  hold |v|, put the sign back after
         LD   B,A            ; [4T]
         LD   A,B            ; [4T]  |v| * r, quarter squares inline
         ADD  A,C            ; [4T]
@@ -232,6 +236,11 @@ t3d_ax_m1:
         NEG                 ; [8T]
         JR   t3d_ax_done        ; [12T]
 t3d_ax_pos:
+        LD   A,E            ; [4T]  v = (D<<1) | (E>>7), already positive
+        RLA                 ; [4T]
+        LD   A,D            ; [4T]
+        RLA                 ; [4T]
+        LD   B,A            ; [4T]
         LD   A,B            ; [4T]  |v| * r, quarter squares inline
         ADD  A,C            ; [4T]
         LD   L,A            ; [4T]
@@ -264,14 +273,18 @@ t3d_ax_done:
         PUSH HL             ; [11T]
 
         LD   DE,(t3d_yr)    ; [20T] sy = 96 - ((Y >> 7) * r >> 8)
-        LD   A,E            ; [4T]  v = coordinate >> 7, signed
+        BIT  7,D            ; [8T]  v = coordinate >> 7. |v| can reach
+        JR   Z,t3d_ay_pos       ; [7/12T] 255, so take the magnitude from the
+        LD   A,E            ; [4T]  16-bit value rather than from a byte
+        NEG                 ; [8T]  that has already lost the top bit
+        LD   E,A            ; [4T]
+        LD   A,0            ; [7T]
+        SBC  A,D            ; [4T]
+        LD   D,A            ; [4T]
+        LD   A,E            ; [4T]  |v| = (D<<1) | (E>>7)
         RLA                 ; [4T]
         LD   A,D            ; [4T]
         RLA                 ; [4T]
-        LD   B,A            ; [4T]
-        OR   A              ; [4T]
-        JP   P,t3d_ay_pos       ; [10T]
-        NEG                 ; [8T]  hold |v|, put the sign back after
         LD   B,A            ; [4T]
         LD   A,B            ; [4T]  |v| * r, quarter squares inline
         ADD  A,C            ; [4T]
@@ -300,6 +313,11 @@ t3d_ay_m1:
         NEG                 ; [8T]
         JR   t3d_ay_done        ; [12T]
 t3d_ay_pos:
+        LD   A,E            ; [4T]  v = (D<<1) | (E>>7), already positive
+        RLA                 ; [4T]
+        LD   A,D            ; [4T]
+        RLA                 ; [4T]
+        LD   B,A            ; [4T]
         LD   A,B            ; [4T]  |v| * r, quarter squares inline
         ADD  A,C            ; [4T]
         LD   L,A            ; [4T]

@@ -59,12 +59,12 @@ def assemble(harness="harness.asm", incdirs=()):
 
 
 class Bench:
-    def __init__(self, harness="harness.asm", opsize=2, incdirs=()):
+    def __init__(self, harness="harness.asm", opsize=2, incdirs=(), org=ORG):
         self.opsize = opsize            # bytes per operand (2 or 4)
         self.batchsize = BATCH if opsize == 2 else BATCH // 2
         code, self.syms = assemble(harness, incdirs)
         self.m = z80.Z80Machine()
-        self.m.set_memory_block(ORG, code)
+        self.m.set_memory_block(org, code)
         self.m.set_memory_block(RETADDR, bytes([0x76]))     # HALT
         self.m.set_memory_block(0xFEFE, bytes([RETADDR & 0xFF, RETADDR >> 8]))
         self.view = self.m.get_state_view()

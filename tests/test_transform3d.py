@@ -45,15 +45,13 @@ def model(verts, m, t, recip):
         else:
             zi = (Z >> 7) & 0xFF
         r = recip[zi]
-        sx = ((X >> 7) & 0xFF)
-        sy = ((Y >> 7) & 0xFF)
-        px = abs(s8(sx)) if s8(sx) != -128 else 128
-        py = abs(s8(sy)) if s8(sy) != -128 else 128
+        # |v| comes from the 16-bit value, so it can reach 255
+        px, py = (abs(X) >> 7) & 0xFF, (abs(Y) >> 7) & 0xFF
         hx = (px * r) >> 8
         hy = (py * r) >> 8
-        if s8(sx) < 0:
+        if X < 0:
             hx = (-hx) & 0xFF
-        if s8(sy) < 0:
+        if Y < 0:
             hy = (-hy) & 0xFF
         out.append(((hx + 128) & 0xFF, (96 - hy) & 0xFF))
     return out

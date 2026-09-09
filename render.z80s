@@ -1,0 +1,757 @@
+;------------------------------------------------------------------
+; render.z80s - draw the cube into a SAM Coupe MODE 4 back buffer
+;
+;   rnd_init     start with both buffers blank
+;   rnd_frame    clear what was drawn last time, draw the cube, flip
+;
+; MODE 4 is 256x192 in 16 colours, two pixels to a byte, high nibble
+; left: 128 bytes a line, lines top to bottom. Two buffers, one at
+; 0x8000 and one at 0x2000, 0x6000 bytes each; rnd_flip is where the
+; hardware page swap goes - it is left as a stub so this file has no
+; machine specifics in it.
+;
+; Faces are drawn in whatever colour rnd_colour says: one byte per
+; face, 0 to 15, in the order +X -X +Y -Y +Z -Z.
+;
+; Hidden faces go by the sign of the dot product between the face
+; normal and the view direction. That dot product, once everything is
+; projected, is the z of the cross product of two edges of the face on
+; screen - so it is computed there, as
+;
+;   (x1-x0)*(y2-y0) - (y1-y0)*(x2-x0)
+;
+; two signed byte multiplies a face, and positive means facing us. Two
+; things recommend doing it after projection rather than before: it
+; needs no per-face normal and no 24-bit arithmetic, and it is exact
+; with respect to what is actually about to be drawn, so a back face
+; can never be drawn over a front one because of rounding.
+;
+; Each face is filled by walking its four edges with Bresenham into a
+; pair of scanline arrays - the edges that descend into one, the ones
+; that climb into the other - and then filling between them. No
+; divisions, no sorting, no chain bookkeeping: each scanline of the
+; face gets exactly one entry per side, and the fill reads them off in
+; pairs. An edge costs 39 T-states a scanline plus 27 for every pixel
+; it moves sideways.
+;
+; Erasing is by dirty rectangle: each buffer remembers the bounding
+; box of what was drawn into it, and that is all that gets cleared
+; next time round - a couple of thousand bytes rather than 24K - and
+; the clear runs off the stack pointer, two bytes a PUSH, so it costs
+; 5.5 T-states a byte instead of the 30 an LD (HL),0 loop costs.
+;
+; The cube is assumed to project entirely on screen, which the box
+; the demo bounces it around guarantees; there is no clipping.
+;
+; Measured, over the 400 demo frames of tests/test_render.py, against
+; a model of the same rasteriser that it matches byte for byte:
+;
+;   rnd_frame            min  44,568   mean  87,557   max 117,679
+;     one face visible   min  44,568   mean  61,396   max  75,855
+;     two faces          min  62,310   mean  82,593   max 103,064
+;     three faces        min  81,064   mean 100,059   max 117,679
+;   rnd_erase alone      min     119   mean  12,642   max  17,717
+;
+; and where an average frame goes:
+;
+;   span fill   46,488 T  55%      cull         4,208 T   5%
+;   edge walk   15,752 T  19%      gather       2,192 T   3%
+;   erase       12,774 T  15%      dirty box    1,742 T   2%
+;
+; With democube's 21,782 T-state update in front of it that is 109,339
+; T-states a frame, 91% of the 120,000 a 6 MHz SAM has between 50 Hz
+; interrupts - so the cube spins at full frame rate. These are raw
+; T-state counts; real SAM screen contention is on top.
+;
+; 1,536 bytes: 864 of code, 66 for the run of PUSHes, 94 of tables and
+; workspace, and 512 for the two scanline arrays.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+RND_BUF0:       EQU 0x80        ; high byte of the first buffer
+RND_BUF1:       EQU 0x20        ; and the second
+RND_H:          EQU 192
+
+;------------------------------------------------------------------
+; rnd_init - blank both buffers and start on the first
+;------------------------------------------------------------------
+
+rnd_init:
+        LD   A,RND_BUF0
+        LD   (rnd_back),A
+        LD   A,RND_BUF1
+        LD   (rnd_front),A
+        LD   HL,rnd_dirty0  ; nothing drawn yet, so nothing to erase
+        LD   (HL),0         ; ytop
+        INC  HL
+        LD   (HL),0         ; ybot
+        INC  HL
+        LD   (HL),0
+        INC  HL
+        LD   (HL),0
+        LD   HL,rnd_dirty1
+        LD   (HL),0
+        INC  HL
+        LD   (HL),0
+        INC  HL
+        LD   (HL),0
+        INC  HL
+        LD   (HL),0
+        RET
+
+;------------------------------------------------------------------
+; rnd_frame - one frame's worth of drawing
+;
+; Entry : (rnd_pts) points at eight screen coordinate pairs
+;         (rnd_colour) holds the six face colours, 0..15
+; Trash : everything except IY
+;------------------------------------------------------------------
+
+rnd_frame:
+        CALL rnd_erase      ; wipe what this buffer held two frames ago
+        LD   IX,rnd_faces
+        LD   B,6
+        LD   A,0
+        LD   (rnd_face),A
+rnd_floop:
+        PUSH BC
+        CALL rnd_cull       ; visible?
+        JR   Z,rnd_fnext
+        CALL rnd_quad
+rnd_fnext:
+        LD   BC,4
+        ADD  IX,BC          ; on to the next face
+        LD   A,(rnd_face)
+        INC  A
+        LD   (rnd_face),A
+        POP  BC
+        DJNZ rnd_floop
+        CALL rnd_bbox       ; remember what to erase next time
+        ; fall through into the flip
+
+;------------------------------------------------------------------
+; rnd_flip - swap the buffers. The hardware half is left to you.
+;------------------------------------------------------------------
+
+rnd_flip:
+        LD   A,(rnd_back)
+        LD   B,A
+        LD   A,(rnd_front)
+        LD   (rnd_back),A
+        LD   A,B
+        LD   (rnd_front),A
+        RET                 ; <- tell the display hardware here
+
+;------------------------------------------------------------------
+; rnd_cull - is this face towards us?
+;
+; Entry : IX -> the face's four vertex offsets
+; Exit  : Z set if the face is facing away (or edge on)
+; Trash : AF, BC, DE, HL
+;------------------------------------------------------------------
+
+rnd_cull:
+        LD   HL,(rnd_pts)
+        LD   E,(IX+0)       ; the first three corners
+        LD   D,0
+        ADD  HL,DE
+        LD   C,(HL)         ; x0
+        INC  HL
+        LD   B,(HL)         ; y0
+        LD   HL,(rnd_pts)
+        LD   E,(IX+1)
+        ADD  HL,DE
+        LD   A,(HL)
+        SUB  C
+        LD   (rnd_dx1),A    ; x1 - x0
+        INC  HL
+        LD   A,(HL)
+        SUB  B
+        LD   (rnd_dy1),A    ; y1 - y0
+        LD   HL,(rnd_pts)
+        LD   E,(IX+2)
+        ADD  HL,DE
+        LD   A,(HL)
+        SUB  C
+        LD   (rnd_dx2),A    ; x2 - x0
+        INC  HL
+        LD   A,(HL)
+        SUB  B              ; y2 - y0
+        LD   C,A
+        LD   A,(rnd_dx1)
+        LD   B,A
+        CALL rnd_smul       ; (x1-x0) * (y2-y0)
+        PUSH DE
+        LD   A,(rnd_dy1)
+        LD   B,A
+        LD   A,(rnd_dx2)
+        LD   C,A
+        CALL rnd_smul       ; (y1-y0) * (x2-x0)
+        POP  HL
+        OR   A
+        SBC  HL,DE          ; the cross product
+        LD   A,H
+        OR   A
+        JP   M,rnd_back_face
+        OR   L              ; positive and nonzero means visible
+        RET
+rnd_back_face:
+        XOR  A              ; Z: skip it
+        RET
+
+;------------------------------------------------------------------
+; rnd_smul - signed 8x8 -> 16, out of the quarter square multiply
+;
+; Entry : B, C signed      Exit : DE = B*C      Trash : AF, BC, HL
+;------------------------------------------------------------------
+
+rnd_smul:
+        LD   A,B
+        XOR  C
+        LD   (rnd_sgn),A
+        LD   A,B
+        OR   A
+        JP   P,rnd_sm1
+        NEG
+rnd_sm1:
+        LD   B,A
+        LD   A,C
+        OR   A
+        JP   P,rnd_sm2
+        NEG
+rnd_sm2:
+        LD   C,A
+        CALL qsmul8
+        LD   A,(rnd_sgn)
+        OR   A
+        RET  P
+        LD   HL,0           ; the signs differed, so negate the product
+        OR   A
+        SBC  HL,DE
+        EX   DE,HL
+        RET
+
+;------------------------------------------------------------------
+; rnd_quad - fill one face
+;
+; Entry : IX -> the face's four vertex offsets, (rnd_face) = its index
+; Trash : everything except IY
+;------------------------------------------------------------------
+
+rnd_quad:
+        LD   A,(rnd_face)   ; the face's colour, in both nibbles
+        LD   E,A
+        LD   D,0
+        LD   HL,rnd_colour
+        ADD  HL,DE
+        LD   A,(HL)
+        AND  15
+        LD   C,A
+        RLCA
+        RLCA
+        RLCA
+        RLCA
+        OR   C
+        LD   (rnd_col),A
+
+        LD   HL,(rnd_pts)   ; gather the four corners
+        LD   B,4
+        LD   C,0
+rnd_gath:
+        PUSH HL
+        LD   E,(IX+0)
+        LD   D,0
+        ADD  HL,DE
+        LD   E,(HL)         ; x
+        INC  HL
+        LD   D,(HL)         ; y
+        LD   HL,rnd_qx      ; qx and qy sit four bytes apart, so bit 2
+        LD   A,L            ; of L picks between them
+        ADD  A,C
+        LD   L,A
+        LD   (HL),E
+        SET  2,L
+        LD   (HL),D
+        POP  HL
+        INC  IX
+        INC  C
+        DJNZ rnd_gath
+        LD   DE,-4
+        ADD  IX,DE
+
+        LD   HL,rnd_qy      ; top and bottom of the face
+        LD   B,(HL)
+        LD   C,B
+        LD   E,3
+rnd_mnmx:
+        INC  L
+        LD   A,(HL)
+        CP   B
+        JR   NC,rnd_mm1
+        LD   B,A
+rnd_mm1:
+        CP   C
+        JR   C,rnd_mm2
+        LD   C,A
+rnd_mm2:
+        DEC  E
+        JR   NZ,rnd_mnmx
+        LD   A,B
+        LD   (rnd_ytop),A
+        LD   A,C
+        LD   (rnd_ybot),A
+        CP   B
+        RET  Z              ; no height, nothing to draw
+
+        LD   B,4            ; walk the four edges into the arrays
+        LD   C,0
+rnd_eloop:
+        PUSH BC
+        LD   HL,rnd_qx
+        LD   A,L
+        ADD  A,C
+        LD   L,A
+        LD   E,(HL)         ; x0
+        SET  2,L
+        LD   D,(HL)         ; y0
+        LD   A,C
+        INC  A
+        AND  3
+        ADD  A,rnd_qx & 255
+        LD   L,A
+        SET  2,L
+        LD   B,(HL)         ; y1
+        RES  2,L
+        LD   C,(HL)         ; x1
+        LD   A,D
+        CP   B
+        JR   Z,rnd_enext    ; horizontal edges contribute nothing
+        JR   C,rnd_edown
+        LD   A,D            ; climbing: swap the ends so the walk still
+        LD   D,B            ; runs downwards, and send it to the other
+        LD   B,A            ; array
+        LD   A,E
+        LD   E,C
+        LD   C,A
+        LD   A,rnd_xl / 256
+        JR   rnd_ego
+rnd_edown:
+        LD   A,rnd_xr / 256
+rnd_ego:
+        CALL rnd_edge
+rnd_enext:
+        POP  BC
+        INC  C
+        DJNZ rnd_eloop
+        ; fall through into the fill
+
+;------------------------------------------------------------------
+; rnd_fill - fill between the two scanline arrays
+;------------------------------------------------------------------
+
+rnd_fill:
+        LD   A,(rnd_ytop)
+        LD   E,A            ; the screen line address for ytop
+        AND  1
+        RRCA
+        LD   L,A            ; 0 or 128
+        LD   A,E
+        SRL  A
+        LD   D,A
+        LD   A,(rnd_back)
+        ADD  A,D
+        LD   H,A            ; HL = the line
+        LD   A,(rnd_ybot)
+        SUB  E
+        RET  Z
+        LD   D,A            ; D = scanline count
+        LD   A,(rnd_col)
+        LD   C,A            ; C = the colour byte
+        LD   A,rnd_xl / 256 ; the shadow set walks the arrays
+        PUSH AF
+        LD   A,E
+        PUSH AF
+        EXX
+        POP  AF
+        LD   L,A
+        POP  AF
+        LD   H,A            ; HL' -> rnd_xl[ytop]
+        EXX
+        LD   B,D            ; B = scanline count
+rnd_floop2:
+        EXX
+        LD   E,(HL)         ; xl
+        INC  H
+        LD   D,(HL)         ; xr
+        DEC  H
+        INC  L
+        PUSH DE
+        EXX
+        POP  DE
+        LD   A,D            ; xl > xr is an empty span - the two sides
+        CP   E              ; cross on the sliver scanlines of a face seen
+        JR   C,rnd_fok      ; nearly edge on - so it draws nothing
+        PUSH BC
+        CALL rnd_span
+        POP  BC
+rnd_fok:
+        LD   A,128          ; the next line down
+        ADD  A,L
+        LD   L,A
+        JR   NC,rnd_fnc
+        INC  H
+rnd_fnc:
+        DJNZ rnd_floop2
+        RET
+
+;------------------------------------------------------------------
+; rnd_edge - Bresenham one edge into a scanline array
+;
+; Entry : A = array page, D = y0, B = y1 (y1 > y0), E = x0, C = x1
+; Trash : AF, BC, DE, HL
+;
+; 39 T-states a scanline, plus 27 for each pixel of sideways travel.
+; It assumes dy + |dx| stays under 256, which a face of a cube this
+; size comfortably does.
+;------------------------------------------------------------------
+
+rnd_edge:
+        LD   H,A
+        LD   L,D            ; HL -> arr[y0]
+        LD   A,B
+        SUB  D
+        LD   B,A            ; B = dy = how many scanlines
+        LD   D,A            ; D = dy
+        SRL  A              ; err starts at dy/2, so the line rounds
+        PUSH AF
+        LD   A,C
+        SUB  E              ; dx
+        JR   NC,rnd_epos
+        NEG                 ; |dx|
+        LD   C,A
+        POP  AF
+        JR   rnd_edgen
+rnd_epos:
+        LD   C,A            ; C = |dx|
+        POP  AF
+
+rnd_edgep:                  ; x climbing
+        LD   (HL),E         ; [7T]
+        INC  L              ; [4T]
+        ADD  A,C            ; [4T]  err += |dx|
+rnd_ep1:
+        CP   D              ; [4T]
+        JR   C,rnd_ep2      ; [7/12T]
+        SUB  D              ; [4T]
+        INC  E              ; [4T]
+        JR   rnd_ep1        ; [12T]
+rnd_ep2:
+        DJNZ rnd_edgep      ; [13/8T]
+        RET
+
+rnd_edgen:                  ; x falling
+        LD   (HL),E
+        INC  L
+        ADD  A,C
+rnd_en1:
+        CP   D
+        JR   C,rnd_en2
+        SUB  D
+        DEC  E
+        JR   rnd_en1
+rnd_en2:
+        DJNZ rnd_edgen
+        RET
+
+;------------------------------------------------------------------
+; rnd_span - one run of pixels in one colour
+;
+; Entry : HL = the line's address, E = x0, D = x1 (x0 <= x1),
+;         C = the colour in both nibbles
+; Exit  : HL preserved
+; Trash : AF, B, DE
+;
+; The two ends may be half a byte, so they are read-modify-written
+; through a mask; everything between is whole bytes.
+;------------------------------------------------------------------
+
+rnd_span:
+        PUSH HL
+        LD   A,E
+        SRL  A
+        LD   B,A            ; B = the left byte
+        ADD  A,L
+        LD   L,A            ; HL -> it
+        LD   A,D
+        SRL  A              ; the right byte
+        SUB  B
+        LD   B,A            ; B = how many bytes apart they are
+        LD   A,E            ; the left end's keep-mask: a run starting on
+        RRA                 ; an odd pixel keeps the high nibble of its
+        SBC  A,A            ; first byte, else nothing
+        AND  0xF0
+        LD   E,A
+        LD   A,B
+        OR   A
+        JR   NZ,rnd_spmulti
+
+        LD   A,D            ; both ends in one byte: keep from both
+        RRA
+        SBC  A,A
+        CPL
+        AND  0x0F
+        OR   E
+        LD   E,A
+        JR   rnd_spend
+
+rnd_spmulti:
+        LD   A,(HL)         ; the left end, masked
+        XOR  C
+        AND  E
+        XOR  C
+        LD   (HL),A
+        INC  L
+        DEC  B              ; whole bytes left between the ends
+        JR   Z,rnd_spright
+        SRL  B              ; B = pairs of them, carry = an odd one over
+        JR   NC,rnd_speven
+        LD   (HL),C
+        INC  L
+rnd_speven:
+        LD   A,B
+        OR   A
+        JR   Z,rnd_spright
+rnd_spfill:
+        LD   (HL),C         ; [7T]  two bytes, four pixels, a pass
+        INC  L              ; [4T]
+        LD   (HL),C         ; [7T]
+        INC  L              ; [4T]
+        DJNZ rnd_spfill     ; [13/8T]
+
+rnd_spright:
+        LD   A,D            ; the right end's keep-mask: a run stopping on
+        RRA                 ; an even pixel keeps the low nibble of its
+        SBC  A,A            ; last byte, else nothing
+        CPL
+        AND  0x0F
+        LD   E,A
+rnd_spend:
+        LD   A,(HL)         ; (old & keep) | (colour & ~keep)
+        XOR  C
+        AND  E
+        XOR  C
+        LD   (HL),A
+        POP  HL
+        RET
+
+;------------------------------------------------------------------
+; rnd_bbox - the box the cube covered, kept for erasing it later
+;------------------------------------------------------------------
+
+rnd_bbox:
+        LD   HL,(rnd_pts)
+        LD   A,255
+        LD   (rnd_bxmin),A
+        LD   (rnd_bymin),A
+        XOR  A
+        LD   (rnd_bxmax),A
+        LD   (rnd_bymax),A
+        LD   B,8
+rnd_bbl:
+        LD   C,(HL)         ; x
+        LD   A,(rnd_bxmin)
+        CP   C
+        JR   C,rnd_bb1
+        LD   A,C
+        LD   (rnd_bxmin),A
+rnd_bb1:
+        LD   A,(rnd_bxmax)
+        CP   C
+        JR   NC,rnd_bb2
+        LD   A,C
+        LD   (rnd_bxmax),A
+rnd_bb2:
+        INC  HL
+        LD   C,(HL)         ; y
+        LD   A,(rnd_bymin)
+        CP   C
+        JR   C,rnd_bb3
+        LD   A,C
+        LD   (rnd_bymin),A
+rnd_bb3:
+        LD   A,(rnd_bymax)
+        CP   C
+        JR   NC,rnd_bb4
+        LD   A,C
+        LD   (rnd_bymax),A
+rnd_bb4:
+        INC  HL
+        DJNZ rnd_bbl
+        CALL rnd_dirty      ; write it into this buffer's record
+        LD   A,(rnd_bymin)
+        LD   (HL),A
+        INC  HL
+        LD   A,(rnd_bymax)
+        INC  A              ; the fill covers [ytop, ybot)
+        LD   (HL),A
+        INC  HL
+        LD   A,(rnd_bxmin)
+        SRL  A
+        LD   (HL),A
+        INC  HL
+        LD   A,(rnd_bxmax)
+        SRL  A
+        LD   (HL),A
+        RET
+
+rnd_dirty:                  ; HL -> the back buffer's dirty record
+        LD   A,(rnd_back)
+        CP   RND_BUF0
+        LD   HL,rnd_dirty0
+        RET  Z
+        LD   HL,rnd_dirty1
+        RET
+
+;------------------------------------------------------------------
+; rnd_erase - blank the box this buffer held two frames ago
+;------------------------------------------------------------------
+
+rnd_erase:
+        CALL rnd_dirty
+        LD   E,(HL)         ; ytop
+        INC  HL
+        LD   A,(HL)         ; ybot
+        INC  HL
+        LD   C,(HL)         ; left byte
+        INC  HL
+        LD   B,(HL)         ; right byte
+        SUB  E
+        RET  Z              ; nothing was drawn into this buffer yet
+        LD   (rnd_lines),A
+
+        RES  0,C            ; widen the box to whole pairs of bytes, so
+        SET  0,B            ; every line is an exact run of PUSHes
+        LD   A,B
+        SUB  C
+        INC  A
+        RRCA
+        LD   B,A            ; B = pairs across, 1..64
+
+        LD   A,E            ; DE -> the top left byte of the box
+        AND  1
+        RRCA                ; 0 or 128
+        ADD  A,C
+        LD   L,A
+        LD   A,E
+        SRL  A
+        LD   E,A
+        LD   A,(rnd_back)
+        ADD  A,E
+        LD   D,A
+        LD   A,B            ; and on to one past the top right
+        ADD  A,A
+        ADD  A,L
+        LD   E,A
+        JR   NC,rnd_ernc0
+        INC  D
+rnd_ernc0:
+        LD   A,rnd_pushend & 255
+        SUB  B              ; B pairs enter the run B PUSHes from its end
+        LD   L,A
+        LD   H,rnd_pushend / 256
+        JR   NC,rnd_ernc1
+        DEC  H
+rnd_ernc1:
+        PUSH HL
+        POP  IX
+        LD   IY,rnd_erback
+        LD   A,(rnd_lines)
+        LD   B,A
+        DI
+        LD   (rnd_sp),SP
+rnd_erl:
+        LD   H,D            ; SP -> one past this line's right hand end
+        LD   L,E
+        LD   SP,HL
+        LD   A,128          ; and DE on to the next line down
+        ADD  A,E
+        LD   E,A
+        JR   NC,rnd_erl1
+        INC  D
+rnd_erl1:
+        LD   HL,0
+        JP   (IX)           ; into the run of PUSHes
+rnd_erback:
+        DJNZ rnd_erl
+        LD   SP,(rnd_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; rnd_pushes - a run of 64 PUSH HLs, entered n from its end to write
+; 2n bytes of HL downwards from SP. Two bytes every 11 T-states, or
+; 5.5 a byte, against the 30 an LD (HL),0 / INC L / DJNZ loop costs.
+; The caller points SP one past the last byte to write and IY at
+; where it wants to come back to.
+;------------------------------------------------------------------
+
+        ALIGN 128
+rnd_pushes:
+        DEFS 64,0xE5        ; PUSH HL, sixty four times
+rnd_pushend:
+        JP   (IY)
+
+
+;------------------------------------------------------------------
+; The face table: four vertex offsets each, wound so the screen cross
+; product comes out positive when the face is towards us. In the order
+; +X -X +Y -Y +Z -Z, matching rnd_colour.
+;------------------------------------------------------------------
+
+rnd_faces:
+        DEFB 6,2,0,4
+        DEFB 10,14,12,8
+        DEFB 2,10,8,0
+        DEFB 14,6,4,12
+        DEFB 8,12,4,0
+        DEFB 14,10,2,6
+
+rnd_colour:     DEFB 2,10,4,12,1,9      ; one colour per face, 0..15
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+rnd_pts:        DEFW demo_screen ; where the eight projected corners live
+rnd_back:       DEFB RND_BUF0    ; high byte of the buffer being drawn
+rnd_front:      DEFB RND_BUF1
+rnd_dirty0:     DEFS 4           ; ytop, ybot, left byte, right byte
+rnd_dirty1:     DEFS 4
+rnd_sp:         DEFS 2           ; SP parked while the stack fills the screen
+rnd_lines:      DEFS 1
+rnd_face:       DEFS 1
+rnd_col:        DEFS 1
+rnd_ytop:       DEFS 1
+rnd_ybot:       DEFS 1
+rnd_sgn:        DEFS 1
+rnd_dx1:        DEFS 1
+rnd_dy1:        DEFS 1
+rnd_dx2:        DEFS 1
+rnd_bxmin:      DEFS 1
+rnd_bxmax:      DEFS 1
+rnd_bymin:      DEFS 1
+rnd_bymax:      DEFS 1
+
+        ALIGN 8
+rnd_qx:         DEFS 4           ; the face being drawn: x then y
+rnd_qy:         DEFS 4
+
+        ALIGN 256
+rnd_xl:         DEFS 256         ; one x per scanline, per side
+rnd_xr:         DEFS 256
+
+rnd_end:
+RND_SIZE:       EQU rnd_end - rnd_init
+
+;------------------------------------------------------------
