@@ -67,6 +67,12 @@
 ; 120,000 a 6 MHz SAM has between 50 Hz interrupts. Raw T-states;
 ; real SAM screen contention is on top.
 ;
+; That is the mean. The worst pose is 121,003 for the renderer alone,
+; so with democube in front of it a third of the demo's frames miss
+; the flyback and are held for two of them: over the 500 frames in
+; demo/lit_cube.gif, 333 at 20ms and 167 at 40ms, which is 37.5 Hz
+; rather than 50.
+;
 ; A light fixed on an axis in view space - (0,0,-1), a headlight - is
 ; the cheap case: M'L is then a row of the matrix negated, three byte
 ; copies rather than 3,050 T-states, and the lighting costs about 700

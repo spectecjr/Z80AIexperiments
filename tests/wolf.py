@@ -2,26 +2,55 @@
 """A model of wolf3d.z80s - the same arithmetic, in Python.
 
 A grid maze cast one ray per screen column, Wolfenstein fashion, with
-textured walls. Half horizontal resolution: 128 columns of two pixels,
-so a column is exactly one byte of a MODE 4 line and a wall column is
-written straight down the screen.
+textured walls. Half horizontal resolution: two pixels a column, so a
+column is exactly one byte of a MODE 4 line and a wall column is
+written straight down the screen. set_view sizes the viewport; the
+tables the Z80 reads are generated to match by tests/mkwolfdata.py.
 """
 import math
 
-W, H, STRIDE = 256, 192, 128
-TOPLINE = 24                    # first viewport scanline
-VH = 144                        # 256 x 144, 16:9 with square pixels
-HALFV = VH // 2                 # 72
-COLS = 128                      # rays, one a column
+W, H, STRIDE = 256, 192, 128     # the screen the viewport sits in
 TEX = 32                        # textures are TEX x TEX
-HMAX = VH                       # a wall is never drawn taller than this
+TAN30 = 0.5773502692            # the camera plane, a 60 degree view
 
-# The height ladder the scalers are built for: every second row while
-# the wall is short, every eighth while it fills the screen, so the
-# relative error stays near 6% at any distance rather than being
-# negligible near and hopeless far.
-LADDER = (list(range(2, 33, 2)) + list(range(36, 65, 4))
-          + list(range(72, 145, 8)))
+SIN = [round(16384 * math.sin(2 * math.pi * i / 256)) for i in range(256)]
+PLANE = [round(16384 * TAN30 * math.sin(2 * math.pi * i / 256))
+         for i in range(256)]
+
+
+def ladder(vh):
+    """The height ladder the scalers are built for.
+
+    Every second row while the wall is short, every eighth while it
+    fills the screen, so the relative error stays near 6% at any
+    distance rather than being negligible near and hopeless far.
+    """
+    return ([h for h in range(2, 33, 2) if h <= vh]
+            + [h for h in range(36, 65, 4) if h <= vh]
+            + [h for h in range(72, vh + 1, 8)])
+
+
+def set_view(width=256, height=144):
+    """Size the viewport: width pixels by height rows, centred.
+
+    Two pixels a column, so the width is twice the ray count and half
+    of it again is the byte the viewport starts at on a screen line.
+    The focal length follows the width, which keeps the 60 degree view
+    the camera plane gives and lets the vertical field narrow with the
+    window, the way shrinking a window in Wolfenstein did.
+    """
+    global VW, VH, HALFV, COLS, TOPLINE, XOFF, FOCAL, HSCALE, HMAX
+    global LADDER, HTAB
+    VW, VH = width, height
+    HALFV = VH // 2
+    COLS = VW // 2
+    TOPLINE = (H - VH) // 2
+    XOFF = (W - VW) // 4
+    FOCAL = int((VW // 2) / TAN30)
+    HSCALE = FOCAL * 128        # h = HSCALE / perpendicular distance
+    HMAX = VH                   # a wall is never drawn taller than this
+    LADDER = ladder(VH)
+    HTAB = height_tab()
 
 
 def rung(h):
@@ -32,12 +61,6 @@ def rung(h):
         if L <= want:
             idx = i
     return idx, LADDER[idx]
-FOCAL = 221                     # half width 128 px over tan(30 degrees)
-HSCALE = FOCAL * 128            # h = HSCALE / perpendicular distance
-
-SIN = [round(16384 * math.sin(2 * math.pi * i / 256)) for i in range(256)]
-PLANE = [round(16384 * 0.5773502692 * math.sin(2 * math.pi * i / 256))
-         for i in range(256)]
 
 
 def s16(v):
@@ -60,7 +83,7 @@ def height_tab():
 
 
 RECIP = recip_tab()
-HTAB = height_tab()
+set_view()
 
 
 def cast(mp, px, py, rayx, rayy):
@@ -139,7 +162,7 @@ def draw(cols, textures, ceil_col, floor_col, buf=None):
     if buf is None:
         buf = bytearray(STRIDE * H)
     for y in range(VH):
-        base = (TOPLINE + y) * STRIDE
+        base = (TOPLINE + y) * STRIDE + XOFF
         c = ceil_col if y < HALFV else floor_col
         for x in range(COLS):
             buf[base + x] = c
@@ -155,5 +178,5 @@ def draw(cols, textures, ceil_col, floor_col, buf=None):
             b = tex[u * TEX + v]
             y = top + k
             if 0 <= y < VH:
-                buf[(TOPLINE + y) * STRIDE + x] = b
+                buf[(TOPLINE + y) * STRIDE + XOFF + x] = b
     return buf

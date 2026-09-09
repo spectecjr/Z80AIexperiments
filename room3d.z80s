@@ -89,6 +89,8 @@
 ;
 ; So a view of two walls or fewer holds 25 Hz - 72% of this demo's
 ; frames - and a corner with three or four in it runs at 19 to 22.
+; Against the display that rounds to whole 50ths of a second: over the
+; 250 frames in demo/room.gif, 165 at 40ms and 85 at 60ms, 21.4 Hz.
 ;
 ; Where a mean frame goes:
 ;

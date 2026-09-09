@@ -7,6 +7,11 @@ and nothing is quantised.
 
     pip install pillow numpy
     python3 tests/mkgif.py [outdir]
+
+Each frame is held for the whole number of 50ths of a second it costs
+on the emulated Z80, so the GIF runs at the rate the routine would
+really manage against the display, judder and all, rather than at its
+average.
 """
 import sys
 
@@ -16,7 +21,24 @@ from PIL import Image
 from bench import Bench
 
 
-def write_gif(path, frames, palette, ms):
+TICK = 20               # one display frame on a 50 Hz SAM, in ms
+TFRAME = 6000000 // 50  # and in T-states of a 6 MHz Z80
+
+
+def held(ts):
+    """How long a frame is actually on screen, waiting for the flyback.
+
+    A routine that syncs to the display cannot show a frame for part of
+    a display frame: whatever it costs, it is held for the whole number
+    of 50ths of a second it fits into. So a frame is not 1/8.4 of a
+    second because that is the average cost - it is 120ms when it fits
+    in six display frames and 140ms when it needs seven, and the
+    unevenness is what the eye actually sees.
+    """
+    return [TICK * max(1, -(-int(t) // TFRAME)) for t in ts]
+
+
+def write_gif(path, frames, palette, durs):
     """frames: a list of (H, W) uint8 arrays of palette indices."""
     pal = []
     for r, g, b in palette:
@@ -28,27 +50,41 @@ def write_gif(path, frames, palette, ms):
         im.putpalette(pal)
         imgs.append(im)
     imgs[0].save(path, save_all=True, append_images=imgs[1:], loop=0,
-                 duration=ms, disposal=1, optimize=True)
+                 duration=durs, disposal=1, optimize=True)
     return len(open(path, "rb").read())
 
 
-def check_gif(path, frames, palette, ms):
+def check_gif(path, frames, palette, durs):
     """Read it back with a decoder that had no part in writing it.
 
     Pillow merges runs of identical frames and adds their delays
-    together, and it renumbers the palette, so the comparison is by
-    colour and the decoded frames are spread back out by their delays.
+    together, and it renumbers the palette, so both sides are spread
+    out into display frames and compared as colours.
     """
     from PIL import ImageSequence
     pal = np.array(palette, dtype=np.uint8)
+    want = []
+    for f, d in zip(frames, durs):
+        want += [pal[f]] * (d // TICK)
     got = []
     total = 0
     for f in ImageSequence.Iterator(Image.open(path)):
-        d = f.info.get("duration", ms)
+        d = f.info.get("duration", TICK)
         total += d
-        got += [np.array(f.convert("RGB"))] * max(1, round(d / ms))
-    bad = sum(1 for g, w in zip(got, frames) if not np.array_equal(g, pal[w]))
+        got += [np.array(f.convert("RGB"))] * max(1, round(d / TICK))
+    bad = sum(1 for g, w in zip(got, want) if not np.array_equal(g, w))
+    bad += abs(len(got) - len(want))
     return len(got), bad, total / 1000.0
+
+
+def report(path, size, n, durs, secs, got, bad):
+    hold = {}
+    for d in durs:
+        hold[d] = hold.get(d, 0) + 1
+    print("  %-18s %3d frames, %.1f Hz, %.2fs, %6.1f KB, %d of %d wrong"
+          % (path, n, n / (sum(durs) / 1000.0), secs, size / 1024, bad, got))
+    print("  %-18s %s" % ("", ", ".join(
+        "%d at %dms" % (hold[d], d) for d in sorted(hold))))
 
 def unpack(raw):
     """A MODE 4 buffer into one byte a pixel."""
@@ -79,17 +115,18 @@ def cube(outdir, seconds=10):
     b.call_regs(s["demo_init"])
     b.call_regs(s["rndl_init"])
     n = seconds * 50
-    frames = []
+    frames, ts = [], []
     for _ in range(n):
-        b.call_regs(s["demo_frame"])
+        t, _ = b.call_regs(s["demo_frame"])
         into = b.peek(s["rndl_back"], 1)[0]
-        b.call_regs(s["rndl_frame"])
+        t2, _ = b.call_regs(s["rndl_frame"])
+        ts.append(t + t2)
         frames.append(unpack(b.peek(BUF[into], 128 * 192)))
     p = "%s/lit_cube.gif" % outdir
-    size = write_gif(p, frames, CUBE_PAL, 20)
-    got, bad, secs = check_gif(p, frames, CUBE_PAL, 20)
-    print("  %-18s %3d frames, 50 Hz, %.2fs, %6.1f KB, %d of %d wrong"
-          % (p, n, secs, size / 1024, bad, got))
+    durs = held(ts)
+    size = write_gif(p, frames, CUBE_PAL, durs)
+    got, bad, secs = check_gif(p, frames, CUBE_PAL, durs)
+    report(p, size, n, durs, secs, got, bad)
 
 
 def room(outdir, seconds=10):
@@ -103,7 +140,7 @@ def room(outdir, seconds=10):
     s = b.syms
     b.call_regs(s["r3d_init"])
     n = seconds * 25
-    frames = []
+    frames, ts = [], []
     for t in range(n):
         cx = int(45 * math.sin(2 * math.pi * t / 250))   # a wander that
         cz = int(35 * math.cos(2 * math.pi * t / 188))   # keeps corners
@@ -112,13 +149,14 @@ def room(outdir, seconds=10):
         b.poke(s["r3d_cz"], (cz & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["r3d_ca"], bytes([ca]))
         into = b.peek(s["r3d_back"], 1)[0]
-        b.call_regs(s["r3d_frame"])
+        t, _ = b.call_regs(s["r3d_frame"])
+        ts.append(t)
         frames.append(unpack(b.peek(BUF[into], 128 * 192)))
     p = "%s/room.gif" % outdir
-    size = write_gif(p, frames, ROOM_PAL, 40)
-    got, bad, secs = check_gif(p, frames, ROOM_PAL, 40)
-    print("  %-18s %3d frames, 25 Hz, %.2fs, %6.1f KB, %d of %d wrong"
-          % (p, n, secs, size / 1024, bad, got))
+    durs = held(ts)
+    size = write_gif(p, frames, ROOM_PAL, durs)
+    got, bad, secs = check_gif(p, frames, ROOM_PAL, durs)
+    report(p, size, n, durs, secs, got, bad)
 
 
 MAZE_PAL = [(0, 0, 0), (58, 58, 68), (118, 120, 132), (88, 90, 100),
@@ -127,20 +165,22 @@ MAZE_PAL = [(0, 0, 0), (58, 58, 68), (118, 120, 132), (88, 90, 100),
             (0, 0, 0), (0, 0, 0), (38, 38, 52), (94, 74, 52)]
 
 
-def maze(outdir, seconds=12):
-    """wolf3d at its measured rate: 713,368 T-states a frame, 8.4 Hz.
+def maze(outdir, seconds=12, harness="harness_wolf.asm", name="maze"):
+    """wolf3d, whichever viewport the harness was built for.
 
     The camera walks itself: a step forward each frame, and where the
     cell ahead is solid it turns on the spot until it is not.
     """
     import math
-    b = Bench("harness_wolf.asm", org=0)
+    b = Bench(harness, org=0)
     s = b.syms
     b.call_regs(s["w3d_init"])
     mp = b.peek(s["w3d_map"], 256)
     px, py, ang, spin = 3.5, 3.5, 40, 3
-    n = int(seconds * 8.4)
-    frames = []
+    b.call_regs(s["w3d_frame"])                 # so the pace is known
+    rate = 1000.0 / held([b.call_regs(s["w3d_frame"])[0]])[0]
+    n = int(seconds * rate)
+    frames, ts = [], []
     for _ in range(n):
         dx = math.cos(2 * math.pi * ang / 256)
         dy = math.sin(2 * math.pi * ang / 256)
@@ -160,13 +200,14 @@ def maze(outdir, seconds=12):
         b.poke(s["w3d_py"], int(py * 256).to_bytes(2, "little"))
         b.poke(s["w3d_ang"], bytes([ang & 255]))
         into = b.peek(s["w3d_back"], 1)[0]
-        b.call_regs(s["w3d_frame"])
+        t, _ = b.call_regs(s["w3d_frame"])
+        ts.append(t)
         frames.append(unpack(b.peek(BUF[into], 128 * 192)))
-    p = "%s/maze.gif" % outdir
-    size = write_gif(p, frames, MAZE_PAL, 120)
-    got, bad, secs = check_gif(p, frames, MAZE_PAL, 120)
-    print("  %-18s %3d frames, 8.4 Hz, %.2fs, %6.1f KB, %d of %d wrong"
-          % (p, n, secs, size / 1024, bad, got))
+    p = "%s/%s.gif" % (outdir, name)
+    durs = held(ts)
+    size = write_gif(p, frames, MAZE_PAL, durs)
+    got, bad, secs = check_gif(p, frames, MAZE_PAL, durs)
+    report(p, size, n, durs, secs, got, bad)
 
 
 if __name__ == "__main__":
@@ -174,3 +215,4 @@ if __name__ == "__main__":
     cube(d)
     room(d)
     maze(d)
+    maze(d, harness="harness_wolf96.asm", name="maze96")

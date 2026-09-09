@@ -45,31 +45,41 @@
 ; being negligible near and hopeless far. That keeps the whole bank
 ; inside 5K; a uniform ladder to the same accuracy would need 30K.
 ;
-; WHAT A FRAME COSTS, measured on the emulator over 96 camera poses:
+; WHAT A FRAME COSTS, measured on the emulator over 96 camera poses in
+; each of the two viewports the repo generates tables for:
 ;
-;   w3d_frame   min 601,810 T-states, mean 713,368, max 778,499
+;                     256x144, 128 rays      192x96, 96 rays
+;   w3d_frame mean       712,706 T              453,596 T
+;             min/max  583,652/780,755      391,511/483,338
+;   at 6 MHz              8.4 Hz                 13.2 Hz
 ;
-; which at 6 MHz is 8.4 frames a second, 7.7 in the worst view, and it
-; divides up like this:
+;   wall columns         363,110 T  51%        211,374 T  47%
+;   w3d_cast             241,826 T  34%        184,564 T  41%
+;   w3d_prefill          107,656 T  15%         57,544 T  13%
 ;
-;   the wall columns    363,107 T   51%   14,297 bytes at 25.4 T each
-;   w3d_cast            241,826 T   34%   128 rays at 1,889 T each
-;   w3d_prefill         107,656 T   15%   18,432 bytes at 5.5 T each
+;   wall bytes a frame    14,297 at 25.4 T      7,353 at 28.7 T
+;   T-states a ray         1,889                 1,923
+;   scaler bank            5,508 bytes           3,624 bytes
+;   w3d_init           1,899,320 T once      1,734,704 T once
 ;
-; The first line is the floor for a textured wall and the third is the
-; floor for anything at all, so this is roughly what the machine can
-; do: half the frame is the 14K of wall the texture forces into column
-; order, and the prefill is 18K of ceiling and floor at a third of the
-; price a column costs. Two thirds of what is left is casting.
+; Those are the rates the work costs. What a display shows is coarser:
+; a routine that syncs to the flyback holds a frame for a whole number
+; of 50ths of a second, so 8.4 Hz is really 120ms in the cheap views
+; and 140ms in the dear ones. Over the demo walk in demo/maze.gif that
+; is 42 frames at 120ms and 58 at 140ms - 7.6 Hz - and in the small
+; viewport 95 at 80ms and 55 at 100ms, 11.5 Hz. The GIFs are timed
+; that way, a frame held as long as it really costs.
 ;
-; Two things would buy real speed, both by drawing fewer columns. Four
-; pixels a column halves the rays and lets a scaler write two bytes a
-; row - about 12 Hz. A shorter viewport is cheaper in proportion to
-; its height, but only for the half of the frame that draws it: at
-; 256x96 it would be about 10 Hz.
+; The three lines divide the same way in both viewports, so neither is
+; the thing to attack: the wall bytes are the floor for a textured
+; wall, the prefill is the floor for anything at all, and the cast is
+; what is left. Halving the pixels bought 1.57x, which is what the
+; arithmetic says it should. A ray costs slightly more in the small
+; view only because the two per-frame tables are shared out over 96
+; rays instead of 128.
 ;
-; w3d_init costs 1,899,320 T-states once, nearly all of it writing the
-; 5,508 bytes of scaler.
+; Four pixels a column would be the next step: it halves the rays
+; again and lets a scaler write two bytes a row rather than one.
 ;
 ; RAM outside the two screen buffers: the scaler bank at W3D_SCAL, two
 ; 512-byte tables at W3D_TX and W3D_TY that w3d_cast rebuilds each
@@ -79,10 +89,11 @@
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
 
-W3D_TOP:        EQU 24          ; first viewport scanline
-W3D_VH:         EQU 144         ; 256x144, 16:9 with square pixels
-W3D_HALF:       EQU 72
-W3D_COLS:       EQU 128         ; one ray, one screen byte
+; W3D_TOP, W3D_VH, W3D_HALF, W3D_COLS and W3D_XOFF - where the
+; viewport is and how big - come from wolfview.z80s, which is generated
+; with the height tables that have to agree with them. Assemble it
+; first. Everything below is the same code whatever they say.
+
 W3D_TEX:        EQU 32          ; textures are 32 wide by 32 tall
 W3D_BUF0:       EQU 0x80
 W3D_BUF1:       EQU 0x20
@@ -207,6 +218,14 @@ w3d_bl2:
         JR   NZ,w3d_bl1
         RET
 
+        MACRO W3DSKIP       ; from the start of one row to the end of
+        IF 128 - W3D_COLS   ; the one above, when there is a border
+        LD   HL,W3D_COLS - 128
+        ADD  HL,SP
+        LD   SP,HL
+        ENDIF
+        ENDM
+
 ;------------------------------------------------------------------
 ; w3d_prefill - ceiling over the top half of the viewport, floor over
 ; the bottom, off the stack pointer at 5.5 T-states a byte
@@ -223,7 +242,7 @@ w3d_prefill:
         LD   A,(w3d_back)
         LD   H,A
         LD   L,0
-        LD   DE,(W3D_TOP + W3D_HALF) * 128
+        LD   DE,(W3D_TOP + W3D_HALF - 1) * 128 + W3D_XOFF + W3D_COLS
         ADD  HL,DE          ; one past the last ceiling byte
         LD   SP,HL
         LD   A,(w3d_ceil)
@@ -232,9 +251,10 @@ w3d_prefill:
         LD   A,W3D_HALF
         LD   (w3d_pfn),A
 w3d_pf1:
-        DUP  64
+        DUP  W3D_COLS / 2
         PUSH BC
         EDUP
+        W3DSKIP
         LD   A,(w3d_pfn)
         DEC  A
         LD   (w3d_pfn),A
@@ -243,7 +263,7 @@ w3d_pf1:
         LD   A,(w3d_back)
         LD   H,A
         LD   L,0
-        LD   DE,(W3D_TOP + W3D_VH) * 128
+        LD   DE,(W3D_TOP + W3D_VH - 1) * 128 + W3D_XOFF + W3D_COLS
         ADD  HL,DE          ; one past the last floor byte
         LD   SP,HL
         LD   A,(w3d_floor)
@@ -252,9 +272,10 @@ w3d_pf1:
         LD   A,W3D_HALF
         LD   (w3d_pfn),A
 w3d_pf2:
-        DUP  64
+        DUP  W3D_COLS / 2
         PUSH BC
         EDUP
+        W3DSKIP
         LD   A,(w3d_pfn)
         DEC  A
         LD   (w3d_pfn),A
@@ -275,7 +296,7 @@ w3d_pf2:
 w3d_draw:
         CALL w3d_prefill
         LD   IX,w3d_cols
-        XOR  A
+        LD   A,W3D_XOFF
         LD   (w3d_cx),A
 w3d_dr1:
         LD   A,(IX+0)       ; the half height
@@ -330,7 +351,7 @@ w3d_dr2:
         LD   A,(w3d_cx)
         INC  A
         LD   (w3d_cx),A
-        CP   W3D_COLS
+        CP   W3D_XOFF + W3D_COLS
         JP   C,w3d_dr1
         RET
 
@@ -868,18 +889,6 @@ w3d_flip:
         LD   A,B
         LD   (w3d_front),A
         RET
-
-;------------------------------------------------------------------
-; The height ladder: every second row while the wall is short, every
-; eighth while it fills the screen, so the relative error stays near
-; 6% at any distance. W3D_NLAD rungs, drawn heights H = 2h.
-;------------------------------------------------------------------
-
-w3d_ladder:
-        DEFB 2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32
-        DEFB 36,40,44,48,52,56,60,64
-        DEFB 72,80,88,96,104,112,120,128,136,144
-W3D_NLAD:       EQU 34
 
 w3d_back:       DEFB W3D_BUF0
 w3d_front:      DEFB W3D_BUF1
