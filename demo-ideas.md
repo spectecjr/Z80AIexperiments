@@ -19,16 +19,16 @@ MODE 4 is 256×192 in 16 colours, two pixels a byte, 128 bytes a line —
 | flat column, no texture | 18.4 | `wolf3d` probe |
 | textured column, two pixels wide | 22.8 | `wolf3d` |
 | textured column, four pixels wide | 14.5 | `wolf3d` |
-| an arbitrary computed byte | ~30–40 (estimate) | **not measured — see the rotozoomer** |
+| an arbitrary computed byte | **109.7** | `roto` — and the estimate here was 30–40, which was wrong by three times |
 
 Two consequences worth keeping in front of you:
 
 - **A full screen of constant runs is 135,000 T-states.** More than a 50 Hz
   frame. Anything that repaints all 24K every frame is a 25 Hz routine at
   best, whatever it is painting.
-- **A per-pixel computed effect gets about 6,000 bytes a frame at 25 Hz.**
-  That is a quarter of the screen. Full screen puts it at 6–8 Hz, which is
-  where `wolf3d` sits.
+- **A per-pixel computed effect gets about 2,200 bytes a frame at 25 Hz.**
+  Measured, not estimated: `roto` does 4,096 of them at 13.4 Hz. The whole
+  screen computed per byte would be about 2 Hz.
 
 So the effects that fly here are the ones made of *runs*, and the ones that
 crawl are the ones made of *pixels*. Every entry below is really a question
@@ -36,7 +36,11 @@ about which of those it is.
 
 ---
 
-## 1. Space Harrier checkerboard floor  *(requested)*
+## 1. Space Harrier checkerboard floor  — **BUILT**
+
+`chequer.z80s` at four-pixel resolution, 92,404 T-states, 50 Hz; and
+`harrier.z80s` at full pixel accuracy, 221,420 T-states, 25 Hz. See
+`chequer.md` and `harrier.md`. What follows is the original note.
 
 An infinite checkerboard plane, fixed camera height, scrolling horizontally
 and vertically. Fixed Y-height for now; a moving camera height is a later
@@ -98,7 +102,10 @@ mixed-pair fill; `wolf3d`'s init-time code generator.
 
 ---
 
-## 2. The twister
+## 2. The twister — **BUILT**
+
+`twist.z80s`, 105,690 T-states, 50 Hz. The estimate below was 106,000,
+which is the closest any estimate in this file came. See `twist.md`.
 
 A rotating ribbon of square cross-section, drawn as horizontal spans, one
 or two visible faces shaded differently.
@@ -120,7 +127,10 @@ mixed-pair problem exactly.
 
 ---
 
-## 3. Rotozoomer
+## 3. Rotozoomer — **BUILT**
+
+`roto.z80s`, 449,272 T-states for a 128x64 window, 13.4 Hz, and it
+measured the number this file had wrong. See `roto.md`.
 
 A rotating, zooming texture. The honest stress test, and the reason to
 build it is that **it would measure the one number missing from the table

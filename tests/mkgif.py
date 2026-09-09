@@ -363,6 +363,47 @@ def harrier(outdir, seconds=6):
     report(p, size, n, durs, secs, got, bad)
 
 
+ROTO_PAL = ([(0, 0, 0)]
+            + [(30 + 30 * i, 10 + 12 * i, 60 + 26 * i) for i in range(7)]
+            + [(40 + 28 * i, 30 + 26 * i, 20 + 10 * i) for i in range(8)])
+
+
+def roto(outdir, seconds=6):
+    """roto at its measured rate: 449,272 T-states a frame, 13.4 Hz.
+
+    u steps in 8.8 and v in 4.12, because v's row wants to be in the
+    top nibble of its high byte - see roto.md.
+    """
+    import math
+    b = Bench("harness_roto.asm", org=0)
+    s = b.syms
+    b.call_regs(s["rz_init"])
+    rate = 1000.0 / held([b.call_regs(s["rz_frame"])[0]])[0]
+    n = int(seconds * rate)
+    frames, ts = [], []
+    for t in range(n):
+        a = 2 * math.pi * t / 190
+        z = 0.20 + 0.16 * math.sin(2 * math.pi * t / 97)    # texels a byte
+        du = int(-256 * z * math.cos(a))                    # leftwards
+        dvv = int(4096 * z * math.sin(a))
+        dux = int(256 * z * math.sin(a))                    # one row down
+        dvx = int(4096 * z * math.cos(a))
+        ur = int(2048 + 900 * math.sin(2 * math.pi * t / 143))
+        vr = int(2048 + 900 * math.cos(2 * math.pi * t / 111))
+        for nm, v in (("rz_ur", ur), ("rz_vr", vr), ("rz_du", du),
+                      ("rz_dv", dvv), ("rz_dux", dux), ("rz_dvx", dvx)):
+            b.poke(s[nm], (v & 0xFFFF).to_bytes(2, "little"))
+        into = b.peek(s["rz_back"], 1)[0]
+        tt, _ = b.call_regs(s["rz_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    p = "%s/roto.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, frames, ROTO_PAL, durs)
+    got, bad, secs = check_gif(p, frames, ROTO_PAL, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 if __name__ == "__main__":
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
     cube(d)
@@ -373,3 +414,4 @@ if __name__ == "__main__":
     chequer(d)
     harrier(d)
     twist(d)
+    roto(d)

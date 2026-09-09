@@ -1,0 +1,167 @@
+;------------------------------------------------------------------
+; roto.z80s - a rotating, zooming texture for the SAM Coupe
+;
+;   rz_init      black both buffers, once
+;   rz_frame     draw the window and flip
+;
+; This is the expensive case, and it is here to measure it. Every byte
+; of the picture is a different texel, so there is no run structure to
+; exploit at all: no PUSH run can be entered n from the end, no colour
+; is constant along anything. It is the opposite end of the scale from
+; twist.z80s, where a whole scanline is one jump.
+;
+; THE INNER LOOP. The texture is 16 by 16 and page aligned, so a
+; texel's address is one byte - the row in the top nibble, the column
+; in the bottom. u is 8.8, and masking its high byte to four bits each
+; step is harmless: it keeps u modulo 4096 and leaves the fraction
+; alone. v is 4.12 so that its row is already in the top nibble, and
+; it wraps of its own accord in sixteen bits - masking that one back
+; would eat its fraction. u and v live in the alternate registers,
+; because the main set is the texture pointer and the pair being built
+; for the PUSH:
+;
+;   alternate   HL = u, DE = v, BC = du, SP = dv
+;   main        HL = texture page and address, DE = where the byte
+;               goes, B = how many are left
+;
+; SP holds dv because ADD HL,SP is the only other sixteen bit add there
+; is, and there are not enough register pairs otherwise - which is
+; also why the output is LD (DE),A rather than PUSH: PUSH wants SP,
+; and SP is spoken for.
+;
+; WHAT IT COSTS is in roto.md, and it is the number the rest of this
+; repo was missing: what an arbitrary computed byte costs, against the
+; 5.5 T-states a constant run costs and the 25 a textured wall column
+; does. It is why the window is 128 by 64 and not the screen.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+RZ_BUF0:        EQU 0x80
+RZ_BUF1:        EQU 0x20
+RZ_BX:          EQU 32          ; the window, in bytes and scanlines
+RZ_BW:          EQU 64
+RZ_BY:          EQU 64
+RZ_BH:          EQU 64
+
+;------------------------------------------------------------------
+; rz_init - both buffers black
+;------------------------------------------------------------------
+
+rz_init:
+        LD   A,RZ_BUF0
+        LD   (rz_back),A
+        LD   A,RZ_BUF1
+        LD   (rz_front),A
+        LD   H,RZ_BUF0
+        CALL rz_black
+        LD   H,RZ_BUF1
+        ; fall through
+
+rz_black:
+        LD   L,0
+        LD   D,0x60
+rz_b1:
+        LD   B,0
+rz_b2:
+        LD   (HL),0
+        INC  HL
+        DJNZ rz_b2
+        DEC  D
+        JR   NZ,rz_b1
+        RET
+
+;------------------------------------------------------------------
+; rz_frame - one frame
+;------------------------------------------------------------------
+
+rz_frame:
+        CALL rz_draw
+        LD   A,(rz_back)
+        LD   B,A
+        LD   A,(rz_front)
+        LD   (rz_back),A
+        LD   A,B
+        LD   (rz_front),A
+        RET
+
+;------------------------------------------------------------------
+; rz_draw - the window, a row at a time, each rightwards to leftwards
+;------------------------------------------------------------------
+
+rz_draw:
+        DI
+        LD   (rz_sp),SP
+        LD   HL,(rz_dv)         ; dv rides in SP: ADD HL,SP is the only
+        LD   SP,HL              ; other sixteen bit add there is, and
+        LD   A,(rz_back)        ; there are not enough pairs otherwise
+        LD   H,A
+        LD   L,0
+        LD   DE,RZ_BY * 128 + RZ_BX + RZ_BW - 1
+        ADD  HL,DE              ; the first row's rightmost byte
+        LD   (rz_rp),HL
+        LD   A,RZ_BH
+        LD   (rz_n),A
+rz_row:
+        LD   DE,(rz_rp)         ; where this row's bytes go, rightwards
+        LD   HL,128             ; to leftwards, and the next row down
+        ADD  HL,DE
+        LD   (rz_rp),HL
+        EXX
+        LD   HL,(rz_ur)         ; u and v at this row's right hand end
+        LD   DE,(rz_vr)
+        LD   BC,(rz_du)
+        EXX
+        LD   H,rz_tex / 256
+        LD   B,RZ_BW
+rz_px:
+        EXX
+        ADD  HL,BC              ; u += du, and it wraps at sixteen
+        LD   A,H
+        AND  0x0F
+        LD   H,A
+        EX   DE,HL
+        ADD  HL,SP              ; v += dv, which wraps of its own accord
+        LD   A,H                ; because it is 4.12 and the top nibble
+        AND  0xF0               ; is the row - so it must NOT be masked
+        OR   D                  ; back, or the mask eats its fraction
+        EX   DE,HL
+        EXX
+        LD   L,A
+        LD   A,(HL)
+        LD   (DE),A
+        DEC  DE
+        DJNZ rz_px
+
+        LD   HL,(rz_ur)         ; and one row down the texture
+        LD   DE,(rz_dux)
+        ADD  HL,DE
+        LD   (rz_ur),HL
+        LD   HL,(rz_vr)
+        LD   DE,(rz_dvx)
+        ADD  HL,DE
+        LD   (rz_vr),HL
+        LD   A,(rz_n)
+        DEC  A
+        LD   (rz_n),A
+        JP   NZ,rz_row
+        LD   SP,(rz_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+rz_back:        DEFB RZ_BUF0
+rz_front:       DEFB RZ_BUF1
+rz_ur:          DEFW 0          ; u and v at the row's right hand end
+rz_vr:          DEFW 0
+rz_du:          DEFW 0          ; one byte leftwards
+rz_dv:          DEFW 0
+rz_dux:         DEFW 0          ; one row down
+rz_dvx:         DEFW 0
+rz_rp:          DEFS 2
+rz_sp:          DEFS 2
+rz_n:           DEFS 1
+rz_bn:          DEFS 1
