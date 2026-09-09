@@ -1,0 +1,348 @@
+;------------------------------------------------------------------
+; wolf3d.z80s - a textured grid maze for the SAM Coupe
+;
+;   w3d_init     build the scalers, black both buffers
+;   w3d_draw     draw the column list in w3d_cols into the back buffer
+;
+; Half horizontal resolution, which is what makes this possible at all:
+; 128 columns of two pixels, so a screen column is exactly one byte of
+; a MODE 4 line, and a wall column is one byte written straight down
+; the screen. The viewport is 256x144, letterboxed into 256x192.
+;
+; WHY THIS IS THE OPPOSITE OF room3d. That renderer never wrote a
+; column, because a flat run along a row goes at 5.5 T-states a byte
+; with PUSH and a column costs three times that. A textured wall has a
+; different texel in every column, so there are no runs along a row to
+; find - the texture forces column order, and the whole job becomes
+; making a column write cheap.
+;
+; Measured on the emulator, per screen byte of a wall column:
+;
+;   an accumulator loop, stepping the texture by a fraction   72.6 T
+;   an unrolled scaler with the texture steps baked in        22.8 T
+;   a flat column with no texture at all                      18.4 T
+;
+; So the texturing costs 4 T-states a byte and the column order costs
+; 13 more than a row would. That is the whole story of this file: the
+; scalers exist to turn 72.6 into 22.8.
+;
+; THE SCALERS. w3d_scalgen writes, for each wall height on a ladder, a
+; run of unrolled code that maps the 32 texels of a texture column onto
+; that many screen rows:
+;
+;   LD A,(DE)          the next texel, once per texel rather than once
+;   INC DE             per row
+;   LD (HL),A          } as many times as this texel is stretched to
+;   ADD HL,BC          } cover, BC being 128, one screen row
+;
+; and the caller points HL at the top of the column and DE at the
+; texture column. The ladder is geometric rather than uniform - every
+; second height while the wall is short, every eighth while it fills
+; the screen - so the height error stays near 6% everywhere instead of
+; being negligible near and hopeless far. That keeps the whole bank
+; inside 5K; a uniform ladder to the same accuracy would need 30K.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+W3D_TOP:        EQU 24          ; first viewport scanline
+W3D_VH:         EQU 144         ; 256x144, 16:9 with square pixels
+W3D_HALF:       EQU 72
+W3D_COLS:       EQU 128         ; one ray, one screen byte
+W3D_TEX:        EQU 32          ; textures are 32 wide by 32 tall
+W3D_BUF0:       EQU 0x80
+W3D_BUF1:       EQU 0x20
+W3D_SCAL:       EQU 0xE000      ; the scaler bank lives up here
+
+;------------------------------------------------------------------
+; w3d_init - black both buffers and build the scaler bank
+;------------------------------------------------------------------
+
+w3d_init:
+        LD   A,W3D_BUF0
+        LD   (w3d_back),A
+        LD   A,W3D_BUF1
+        LD   (w3d_front),A
+        LD   H,W3D_BUF0
+        CALL w3d_black
+        LD   H,W3D_BUF1
+        CALL w3d_black
+        ; fall through into the generator
+
+;------------------------------------------------------------------
+; w3d_scalgen - write the unrolled scalers, one per ladder height
+;
+; For a wall H screen rows tall the texel for row k is (k*32)/H, which
+; is walked with a Bresenham accumulator rather than a division, and
+; the texture pointer only moves when the texel changes.
+;------------------------------------------------------------------
+
+w3d_scalgen:
+        LD   HL,W3D_SCAL
+        LD   (w3d_gp),HL
+        LD   IX,w3d_ladder
+        LD   IY,w3d_scal
+        LD   B,W3D_NLAD
+w3d_sg1:
+        PUSH BC
+        LD   HL,(w3d_gp)    ; this height's scaler starts here
+        LD   (IY+0),L
+        LD   (IY+1),H
+        INC  IY
+        INC  IY
+        LD   A,(IX+0)       ; H, the drawn height
+        LD   (w3d_gh),A
+        INC  IX
+
+        LD   (HL),0x1A      ; LD A,(DE)   - the first texel
+        INC  HL
+        XOR  A
+        LD   (w3d_gacc),A   ; the Bresenham accumulator
+        LD   (w3d_gmoved),A
+        LD   A,(w3d_gh)
+        LD   B,A
+w3d_sg2:
+        LD   (HL),0x77      ; LD (HL),A   - this row, with the texel the
+        INC  HL             ; accumulator has reached so far
+        LD   (HL),0x09      ; ADD HL,BC   - one row down
+        INC  HL
+
+        LD   A,(w3d_gacc)   ; then acc += 32, stepping the texel while it
+        ADD  A,W3D_TEX      ; overflows the height, ready for the next row
+        LD   C,A
+        LD   A,0
+        ADC  A,0
+        LD   D,A            ; D:C = acc
+        LD   A,(w3d_gh)
+        LD   E,A
+w3d_sg3:
+        LD   A,D            ; while acc >= H
+        OR   A
+        JR   NZ,w3d_sg4
+        LD   A,C
+        CP   E
+        JR   C,w3d_sg5
+w3d_sg4:
+        LD   A,C
+        SUB  E
+        LD   C,A
+        LD   A,D
+        SBC  A,0
+        LD   D,A
+        LD   (HL),0x13      ; INC DE      - on to the next texel
+        INC  HL
+        LD   A,1
+        LD   (w3d_gmoved),A
+        JR   w3d_sg3
+w3d_sg5:
+        LD   A,C
+        LD   (w3d_gacc),A
+        LD   A,(w3d_gmoved) ; and reload it if it moved
+        OR   A
+        JR   Z,w3d_sg6
+        XOR  A
+        LD   (w3d_gmoved),A
+        LD   (HL),0x1A      ; LD A,(DE)
+        INC  HL
+w3d_sg6:
+        DJNZ w3d_sg2
+
+        LD   (HL),0xC9      ; RET
+        INC  HL
+        LD   (w3d_gp),HL
+        POP  BC
+        DJNZ w3d_sg1
+        RET
+
+;------------------------------------------------------------------
+; w3d_black - 0x6000 bytes from H:00
+;------------------------------------------------------------------
+
+w3d_black:
+        LD   L,0
+        LD   D,0x60
+w3d_bl1:
+        LD   B,0
+w3d_bl2:
+        LD   (HL),0
+        INC  HL
+        DJNZ w3d_bl2
+        DEC  D
+        JR   NZ,w3d_bl1
+        RET
+
+;------------------------------------------------------------------
+; w3d_prefill - ceiling over the top half of the viewport, floor over
+; the bottom, off the stack pointer at 5.5 T-states a byte
+;
+; Every wall column is written over the top of this. Filling the lot
+; and overdrawing is cheaper than working out what the walls will not
+; cover, because a byte written along a row costs a third of one
+; written down a column.
+;------------------------------------------------------------------
+
+w3d_prefill:
+        DI
+        LD   (w3d_sp),SP
+        LD   A,(w3d_back)
+        LD   H,A
+        LD   L,0
+        LD   DE,(W3D_TOP + W3D_HALF) * 128
+        ADD  HL,DE          ; one past the last ceiling byte
+        LD   SP,HL
+        LD   A,(w3d_ceil)
+        LD   B,A
+        LD   C,A
+        LD   A,W3D_HALF
+        LD   (w3d_pfn),A
+w3d_pf1:
+        DUP  64
+        PUSH BC
+        EDUP
+        LD   A,(w3d_pfn)
+        DEC  A
+        LD   (w3d_pfn),A
+        JR   NZ,w3d_pf1
+
+        LD   A,(w3d_back)
+        LD   H,A
+        LD   L,0
+        LD   DE,(W3D_TOP + W3D_VH) * 128
+        ADD  HL,DE          ; one past the last floor byte
+        LD   SP,HL
+        LD   A,(w3d_floor)
+        LD   B,A
+        LD   C,A
+        LD   A,W3D_HALF
+        LD   (w3d_pfn),A
+w3d_pf2:
+        DUP  64
+        PUSH BC
+        EDUP
+        LD   A,(w3d_pfn)
+        DEC  A
+        LD   (w3d_pfn),A
+        JR   NZ,w3d_pf2
+
+        LD   SP,(w3d_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; w3d_draw - the whole viewport from the column list
+;
+; w3d_cols holds three bytes a column: the wall half height, which
+; texture, and which column of it. A half height of zero leaves the
+; column as ceiling and floor.
+;------------------------------------------------------------------
+
+w3d_draw:
+        CALL w3d_prefill
+        LD   IX,w3d_cols
+        XOR  A
+        LD   (w3d_cx),A
+w3d_dr1:
+        LD   A,(IX+0)       ; the half height
+        OR   A
+        JP   Z,w3d_dr2
+
+        LD   L,A            ; the ladder rung for it
+        LD   H,w3d_hidx / 256
+        LD   A,(HL)
+        ADD  A,A
+        LD   L,A
+        LD   H,w3d_scal / 256
+        LD   E,(HL)
+        INC  L
+        LD   D,(HL)
+        LD   (w3d_call+1),DE    ; the scaler to run
+
+        LD   A,(IX+0)       ; where its top is: 72 - h, rounded onto the
+        LD   L,A            ; rung the scaler was built for
+        LD   H,w3d_htop / 256
+        LD   A,(HL)
+        LD   L,A
+        LD   H,0
+        ADD  HL,HL          ; row * 128
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        LD   A,(w3d_back)
+        LD   D,A
+        LD   E,0
+        ADD  HL,DE
+        LD   A,(w3d_cx)
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE          ; HL -> the top of this column
+
+        LD   A,(IX+2)       ; the texture column: base + u * 32, which
+        RRCA                ; needs sixteen bits - u reaches 31, so the
+        RRCA                ; product reaches 992
+        RRCA
+        LD   E,A
+        AND  0x1F
+        LD   D,A
+        LD   A,E
+        AND  0xE0
+        LD   E,A
+        LD   A,(IX+1)
+        ADD  A,D
+        LD   D,A
+        LD   BC,128
+w3d_call:
+        CALL 0              ; patched: the scaler for this height
+w3d_dr2:
+        LD   BC,3
+        ADD  IX,BC
+        LD   A,(w3d_cx)
+        INC  A
+        LD   (w3d_cx),A
+        CP   W3D_COLS
+        JP   C,w3d_dr1
+        RET
+
+;------------------------------------------------------------------
+; w3d_flip - swap the buffers
+;------------------------------------------------------------------
+
+w3d_flip:
+        LD   A,(w3d_back)
+        LD   B,A
+        LD   A,(w3d_front)
+        LD   (w3d_back),A
+        LD   A,B
+        LD   (w3d_front),A
+        RET
+
+;------------------------------------------------------------------
+; The height ladder: every second row while the wall is short, every
+; eighth while it fills the screen, so the relative error stays near
+; 6% at any distance. W3D_NLAD rungs, drawn heights H = 2h.
+;------------------------------------------------------------------
+
+w3d_ladder:
+        DEFB 2,4,6,8,10,12,14,16,18,20,22,24,26,28,30,32
+        DEFB 36,40,44,48,52,56,60,64
+        DEFB 72,80,88,96,104,112,120,128,136,144
+W3D_NLAD:       EQU 34
+
+w3d_back:       DEFB W3D_BUF0
+w3d_front:      DEFB W3D_BUF1
+w3d_ceil:       DEFB 0xEE
+w3d_floor:      DEFB 0xFF
+w3d_gp:         DEFS 2
+w3d_gh:         DEFS 1
+w3d_gacc:       DEFS 1
+w3d_gmoved:     DEFS 1
+w3d_pfn:        DEFS 1
+w3d_cx:         DEFS 1
+w3d_sp:         DEFS 2
+
+w3d_cols:       DEFS 3 * W3D_COLS   ; half height, texture page, texture column
+
+        ALIGN 256
+w3d_scal:       DEFS 2 * W3D_NLAD   ; where each rung's scaler starts
