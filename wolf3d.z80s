@@ -39,67 +39,91 @@
 ;   ADD HL,BC          } cover, BC being 128, one screen row
 ;
 ; and the caller points HL at the top of the column and DE at the
-; texture column. The ladder is geometric rather than uniform - every
+; texture column. At four pixels a column each row is instead
+;
+;   LD (HL),A          the byte, then the one beside it, and BC is a
+;   INC L              row less one to make up for the INC
+;   LD (HL),A
+;   ADD HL,BC
+;
+; which is 29 T-states for two bytes against 18 for one, and doubles
+; the size of the bank. The ladder is geometric rather than uniform - every
 ; second height while the wall is short, every eighth while it fills
 ; the screen - so the height error stays near 6% everywhere instead of
 ; being negligible near and hopeless far. That keeps the whole bank
 ; inside 5K; a uniform ladder to the same accuracy would need 30K.
 ;
 ; WHAT A FRAME COSTS, measured on the emulator over 96 camera poses in
-; each of the two viewports the repo generates tables for:
+; each of the three viewports the repo generates tables for. The third
+; is four pixels a column rather than two: half as many rays, and a
+; scaler that writes a pair of bytes a row.
 ;
-;                     256x144, 128 rays      192x96, 96 rays
-;   w3d_frame mean       712,706 T              453,596 T
-;             min/max  583,652/780,755      391,511/483,338
-;   at 6 MHz              8.4 Hz                 13.2 Hz
+;                    256x144        192x96          256x96
+;                    128 rays, 2px  96 rays, 2px    64 rays, 4px
+;   w3d_frame mean     712,596 T      453,991 T       405,333 T
+;             min      583,453        396,709         349,814
+;             max      780,547        482,607         428,394
+;   at 6 MHz             8.4 Hz        13.2 Hz         14.8 Hz
+;   held to the flyback  7.6 Hz        12.1 Hz         12.5 Hz
 ;
-;   wall columns         363,110 T  51%        211,374 T  47%
-;   w3d_cast             241,826 T  34%        184,564 T  41%
-;   w3d_prefill          107,656 T  15%         57,544 T  13%
+;   wall columns       362,688  51%   211,406  47%    205,693  51%
+;   w3d_cast           242,138  34%   184,926  41%    127,678  32%
+;   w3d_prefill        107,656  15%    57,544  13%     71,848  18%
 ;
-;   wall bytes a frame    14,297 at 25.4 T      7,353 at 28.7 T
-;   T-states a ray         1,889                 1,923
-;   scaler bank            5,508 bytes           3,624 bytes
-;   w3d_init           1,899,320 T once      1,734,704 T once
+;   wall bytes a frame  14,302 at      7,376 at       10,554 at
+;                       25.4 T          28.7 T         19.5 T
+;   T-states a ray       1,892          1,926           1,995
+;   scaler bank          5,508 bytes    3,624           5,640
+;   w3d_init         1,899,320 T    1,734,704       1,766,960
 ;
 ; Those are the rates the work costs. What a display shows is coarser:
 ; a routine that syncs to the flyback holds a frame for a whole number
 ; of 50ths of a second, so 8.4 Hz is really 120ms in the cheap views
-; and 140ms in the dear ones. Over the demo walk in demo/maze.gif that
-; is 42 frames at 120ms and 58 at 140ms - 7.6 Hz - and in the small
-; viewport 95 at 80ms and 55 at 100ms, 11.5 Hz. The GIFs are timed
-; that way, a frame held as long as it really costs.
+; and 140ms in the dear ones. The demo/*.gif walks are timed that way,
+; a frame held as long as it really costs, and the row above is what
+; they come out at.
 ;
-; The three lines divide the same way in both viewports, so neither is
-; the thing to attack: the wall bytes are the floor for a textured
-; wall, the prefill is the floor for anything at all, and the cast is
-; what is left. Halving the pixels bought 1.57x, which is what the
-; arithmetic says it should. A ray costs slightly more in the small
-; view only because the two per-frame tables are shared out over 96
-; rays instead of 128.
+; The three costs divide about the same way whichever viewport it is,
+; so none of them is the thing to attack on its own: the wall bytes
+; are the floor for a textured wall, the prefill is the floor for
+; anything at all, and the cast is what is left.
 ;
-; Four pixels a column would be the next step: it halves the rays
-; again and lets a scaler write two bytes a row rather than one.
+; Four pixels a column is the best of the three, and it is the wall
+; bytes that make it so: 19.5 T-states each against 25.4, because a
+; row of a column is LD (HL),A / INC L / LD (HL),A / ADD HL,BC - 29
+; T-states for two bytes where the narrow one spends 18 on one - and
+; the texel it writes was fetched once for both. Casting halves as
+; well. What it costs is the horizontal resolution and, awkwardly,
+; twice the scaler bank.
 ;
-; RAM outside the two screen buffers: the scaler bank at W3D_SCAL, two
-; 512-byte tables at W3D_TX and W3D_TY that w3d_cast rebuilds each
+; That bank is what stops 256x144 at four pixels, which the arithmetic
+; puts near 12.5 Hz: it would want about 9K of scaler and there are
+; only 6K to be had between the screen buffers and the stack. On a
+; machine that can page it in, that is the combination to build.
+;
+; RAM outside the two screen buffers: the scaler bank at W3D_SCAL, the
+; two 512-byte tables w3d_txtab and W3D_TY that w3d_cast rebuilds every
 ; frame, and qsmul8's own 1K of quarter squares, which this file needs
-; but does not contain - assemble mul8x8_qs.z80s alongside it.
+; but does not contain - assemble mul8x8_qs.z80s alongside it. Four
+; pixel columns double the scaler bank, so it is the thing that decides
+; whether a viewport fits: 5,640 bytes for 256x96 at four pixels.
 ;
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
 
-; W3D_TOP, W3D_VH, W3D_HALF, W3D_COLS and W3D_XOFF - where the
-; viewport is and how big - come from wolfview.z80s, which is generated
-; with the height tables that have to agree with them. Assemble it
-; first. Everything below is the same code whatever they say.
+; The viewport - W3D_TOP, W3D_VH, W3D_HALF, W3D_XOFF, how many rays
+; W3D_COLS, how many bytes wide a column W3D_BPC and a row W3D_BYTES -
+; comes from wolfview.z80s, generated with the ray step and height
+; tables that have to agree with it. Assemble that first. Everything
+; below is the same code whatever it says.
 
 W3D_TEX:        EQU 32          ; textures are 32 wide by 32 tall
 W3D_BUF0:       EQU 0x80
 W3D_BUF1:       EQU 0x20
 W3D_SCAL:       EQU 0xE000      ; the scaler bank lives up here
-W3D_TX:         EQU 0xFA00      ; and the two per-frame product tables
-W3D_TY:         EQU 0xFC00      ; at the top of memory
+W3D_TY:         EQU 0xFC00      ; one per-frame product table up here,
+                                ; the other is w3d_txtab, down with the
+                                ; code where there is room for it
 
 ;------------------------------------------------------------------
 ; w3d_init - black both buffers and build the scaler bank
@@ -151,8 +175,14 @@ w3d_sg1:
 w3d_sg2:
         LD   (HL),0x77      ; LD (HL),A   - this row, with the texel the
         INC  HL             ; accumulator has reached so far
-        LD   (HL),0x09      ; ADD HL,BC   - one row down
+        IF W3D_BPC = 2
+        LD   (HL),0x2C      ; INC L       - and the byte beside it, for
+        INC  HL             ; a four pixel column
+        LD   (HL),0x77      ; LD (HL),A
         INC  HL
+        ENDIF
+        LD   (HL),0x09      ; ADD HL,BC   - one row down, BC being one
+        INC  HL             ; row less whatever the writes advanced
 
         LD   A,(w3d_gacc)   ; then acc += 32, stepping the texel while it
         ADD  A,W3D_TEX      ; overflows the height, ready for the next row
@@ -219,8 +249,8 @@ w3d_bl2:
         RET
 
         MACRO W3DSKIP       ; from the start of one row to the end of
-        IF 128 - W3D_COLS   ; the one above, when there is a border
-        LD   HL,W3D_COLS - 128
+        IF 128 - W3D_BYTES  ; the one above, when there is a border
+        LD   HL,W3D_BYTES - 128
         ADD  HL,SP
         LD   SP,HL
         ENDIF
@@ -242,7 +272,7 @@ w3d_prefill:
         LD   A,(w3d_back)
         LD   H,A
         LD   L,0
-        LD   DE,(W3D_TOP + W3D_HALF - 1) * 128 + W3D_XOFF + W3D_COLS
+        LD   DE,(W3D_TOP + W3D_HALF - 1) * 128 + W3D_XOFF + W3D_BYTES
         ADD  HL,DE          ; one past the last ceiling byte
         LD   SP,HL
         LD   A,(w3d_ceil)
@@ -251,7 +281,7 @@ w3d_prefill:
         LD   A,W3D_HALF
         LD   (w3d_pfn),A
 w3d_pf1:
-        DUP  W3D_COLS / 2
+        DUP  W3D_BYTES / 2
         PUSH BC
         EDUP
         W3DSKIP
@@ -263,7 +293,7 @@ w3d_pf1:
         LD   A,(w3d_back)
         LD   H,A
         LD   L,0
-        LD   DE,(W3D_TOP + W3D_VH - 1) * 128 + W3D_XOFF + W3D_COLS
+        LD   DE,(W3D_TOP + W3D_VH - 1) * 128 + W3D_XOFF + W3D_BYTES
         ADD  HL,DE          ; one past the last floor byte
         LD   SP,HL
         LD   A,(w3d_floor)
@@ -272,7 +302,7 @@ w3d_pf1:
         LD   A,W3D_HALF
         LD   (w3d_pfn),A
 w3d_pf2:
-        DUP  W3D_COLS / 2
+        DUP  W3D_BYTES / 2
         PUSH BC
         EDUP
         W3DSKIP
@@ -314,9 +344,9 @@ w3d_dr1:
         LD   D,(HL)
         LD   (w3d_call+1),DE    ; the scaler to run
 
-        LD   A,(IX+0)       ; where its top is: 72 - h, rounded onto the
-        LD   L,A            ; rung the scaler was built for
-        LD   H,w3d_htop / 256
+        SRL  L              ; where its top is, which the rung knows:
+        SET  7,L            ; the hidx page again, half of it up
+        LD   H,w3d_hidx / 256
         LD   A,(HL)
         SRL  A              ; and a row is half a page, so the address
         LD   L,0            ; is (row >> 1) pages on and (row & 1) half
@@ -342,16 +372,16 @@ w3d_dr1:
         LD   A,(IX+1)
         ADD  A,D
         LD   D,A
-        LD   BC,128
+        LD   BC,129 - W3D_BPC
 w3d_call:
         CALL 0              ; patched: the scaler for this height
 w3d_dr2:
         LD   BC,3
         ADD  IX,BC
         LD   A,(w3d_cx)
-        INC  A
+        ADD  A,W3D_BPC
         LD   (w3d_cx),A
-        CP   W3D_XOFF + W3D_COLS
+        CP   W3D_XOFF + W3D_BYTES
         JP   C,w3d_dr1
         RET
 
@@ -396,44 +426,38 @@ w3d_dr2:
 ;------------------------------------------------------------------
 
 w3d_cast:
-        LD   A,(w3d_ang)        ; the direction vector
+        LD   A,(w3d_ang)        ; the step from one ray to the next is
+        CALL w3d_pstplk         ; the camera plane over half the rays,
+        EX   DE,HL              ; which is a table rather than a shift
+        LD   HL,0               ; because half the rays need not be a
+        OR   A                  ; power of two
+        SBC  HL,DE
+        LD   (w3d_sx),HL        ; sx = -PSTEP[ang]
+        LD   C,W3D_HALFC
+        CALL w3d_mulc
+        EX   DE,HL
+        LD   A,(w3d_ang)
         ADD  A,64
         CALL w3d_sinlk
-        LD   (w3d_rx),HL        ; dx
-        LD   A,(w3d_ang)
-        CALL w3d_planelk
-        EX   DE,HL
-        LD   HL,0
         OR   A
-        SBC  HL,DE              ; plx = -PLANE[ang]
-        PUSH HL
-        EX   DE,HL
-        LD   HL,(w3d_rx)
-        OR   A
-        SBC  HL,DE              ; the leftmost ray, dir - plane
-        LD   (w3d_rx),HL
-        POP  HL
-        CALL w3d_asr6           ; and a 128th of the plane's width is
-        LD   (w3d_sx),HL        ; the step from one ray to the next
+        SBC  HL,DE              ; and the sweep starts half of them out
+        LD   (w3d_rx),HL        ; from the direction, so it is centred
 
         LD   A,(w3d_ang)
-        CALL w3d_sinlk
-        LD   (w3d_ry),HL        ; dy
-        LD   A,(w3d_ang)
         ADD  A,64
-        CALL w3d_planelk        ; ply = PLANE[ang+64]
-        PUSH HL
+        CALL w3d_pstplk
+        LD   (w3d_sy),HL        ; sy = PSTEP[ang + 64]
+        LD   C,W3D_HALFC
+        CALL w3d_mulc
         EX   DE,HL
-        LD   HL,(w3d_ry)
+        LD   A,(w3d_ang)
+        CALL w3d_sinlk
         OR   A
         SBC  HL,DE
         LD   (w3d_ry),HL
-        POP  HL
-        CALL w3d_asr6
-        LD   (w3d_sy),HL
 
         LD   A,(w3d_px)         ; where the camera sits inside its cell
-        LD   HL,W3D_TX
+        LD   HL,w3d_txtab
         CALL w3d_ftab
         LD   A,(w3d_py)
         LD   HL,W3D_TY
@@ -505,7 +529,7 @@ w3d_xsg:
         LD   A,D                ; n = (f * ddx) >> 8, out of the table
         ADD  A,A                ;   = TX[ddx >> 8] + high(TX[ddx & 255])
         LD   L,A
-        LD   A,W3D_TX / 256
+        LD   A,w3d_txtab / 256
         ADC  A,0
         LD   H,A
         LD   C,(HL)
@@ -514,7 +538,7 @@ w3d_xsg:
         LD   A,E
         ADD  A,A
         LD   L,A
-        LD   A,W3D_TX / 256
+        LD   A,w3d_txtab / 256
         ADC  A,0
         LD   H,A
         LD   A,(HL)             ; the low byte only decides a rounding
@@ -811,10 +835,10 @@ w3d_sinlk:
         LD   L,A
         RET
 
-w3d_planelk:
+w3d_pstplk:
         ADD  A,A
         LD   L,A
-        LD   A,w3d_plane / 256
+        LD   A,w3d_pstep / 256
         ADC  A,0
         LD   H,A
         LD   A,(HL)
@@ -824,15 +848,21 @@ w3d_planelk:
         RET
 
 ;------------------------------------------------------------------
-; w3d_asr6 - HL >> 6, signed
+; w3d_mulc - HL = HL * C, twice a frame, so a shift and add will do
 ;------------------------------------------------------------------
 
-w3d_asr6:
-        LD   B,6
-w3d_a61:
-        SRA  H
-        RR   L
-        DJNZ w3d_a61
+w3d_mulc:
+        LD   D,H
+        LD   E,L
+        LD   HL,0
+        LD   B,8
+w3d_mc1:
+        ADD  HL,HL
+        SLA  C
+        JR   NC,w3d_mc2
+        ADD  HL,DE
+w3d_mc2:
+        DJNZ w3d_mc1
         RET
 
 ;------------------------------------------------------------------
@@ -920,3 +950,7 @@ w3d_cols:       DEFS 3 * W3D_COLS   ; half height, texture page, texture column
 
         ALIGN 256
 w3d_scal:       DEFS 2 * W3D_NLAD   ; where each rung's scaler starts
+
+        ALIGN 256
+w3d_txtab:      DEFS 512            ; f * i for the camera's x, rebuilt
+                                    ; every frame by w3d_ftab

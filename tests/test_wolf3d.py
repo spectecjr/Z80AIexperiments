@@ -15,7 +15,9 @@ from bench import Bench
 import wolf
 
 BUF = {0x80: 0x8000, 0x20: 0x2000}
-VIEWS = [("harness_wolf.asm", 256, 144), ("harness_wolf96.asm", 192, 96)]
+VIEWS = [("harness_wolf.asm", 256, 144, 1),
+         ("harness_wolf96.asm", 192, 96, 1),
+         ("harness_wolfwide.asm", 256, 96, 2)]
 
 
 def textures():
@@ -46,9 +48,10 @@ POSES = ([(3 * 256 + 128, 3 * 256 + 128, a) for a in range(0, 256, 8)]
          + [(11 * 256 + 128, 11 * 256 + 128, a) for a in range(0, 256, 8)])
 
 
-def run(harness, width, height):
-    wolf.set_view(width, height)
-    print("\n%dx%d, %d columns, %s" % (width, height, wolf.COLS, harness))
+def run(harness, width, height, bpc):
+    wolf.set_view(width, height, bpc)
+    print("\n%dx%d, %d rays of %d pixels, %s"
+          % (width, height, wolf.COLS, 2 * bpc, harness))
     b = Bench(harness, org=0)
     s = b.syms
     mp = list(b.peek(s["w3d_map"], 256))
@@ -57,12 +60,16 @@ def run(harness, width, height):
     ceil = b.peek(s["w3d_ceil"], 1)[0]
     floor = b.peek(s["w3d_floor"], 1)[0]
     it, _ = b.call_regs(s["w3d_init"])
-    used = int.from_bytes(b.peek(s["w3d_gp"], 2), "little") - 0xE000
-    print("  w3d_init  %d T-states once, for %d bytes of scaler"
-          % (it, used))
-
+    end = int.from_bytes(b.peek(s["w3d_gp"], 2), "little")
+    ceiling = s["qsmul8"]
+    print("  w3d_init  %d T-states once, for %d bytes of scaler, %d to spare"
+          % (it, end - 0xE000, ceiling - end))
     bad = 0
-    times = ctimes = None
+    if end > ceiling:
+        print("  SCALER BANK OVERRUN: ends %04X, %04X is spoken for"
+              % (end, ceiling))
+        bad += 1
+
     times, ctimes, ftimes, wallbytes = [], [], [], []
     for px, py, ang in POSES:
         cols = wolf.frame(mp, px, py, ang)
@@ -71,7 +78,7 @@ def run(harness, width, height):
         for c in cols:
             h, cell, u, side = c
             raw += bytes([h, pages[cell - 1], u])
-            wb += wolf.rung(h)[1]
+            wb += wolf.rung(h)[1] * wolf.BPC
         wallbytes.append(wb)
 
         # the caster, against the model's own ray casting
@@ -123,7 +130,7 @@ def run(harness, width, height):
           % (min(times), sum(times) / n, max(times),
              (sum(times) / n - pt) / wb))
     print("  w3d_prefill      %7d              of that      %.1f T a byte"
-          % (pt, pt / (wolf.COLS * wolf.VH)))
+          % (pt, pt / (wolf.BYTES * wolf.VH)))
     fm = sum(ftimes) / n
     print("  w3d_frame    min %7d  mean %7.0f  max %7d"
           % (min(ftimes), fm, max(ftimes)))

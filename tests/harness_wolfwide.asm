@@ -1,4 +1,4 @@
-; Test scaffold for wolf3d.z80s in its 192x96 viewport.
+; Test scaffold for wolf3d.z80s in its 256x96 four-pixel viewport.
 ;
 ; The SAM layout: code, tables and textures in the low 8K, the two
 ; 0x6000-byte screen buffers at 0x2000 and 0x8000, and above them the
@@ -13,7 +13,7 @@
                 ORG 0x0000
                 HALT                    ; the bench returns to here
                 DEFS 0x0100-$
-                INCLUDE "wolfview96.z80s"
+                INCLUDE "wolfviewwide.z80s"
                 INCLUDE "wolf3d.z80s"
                 INCLUDE "wolfdata.z80s"
 

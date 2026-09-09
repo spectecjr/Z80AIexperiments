@@ -216,3 +216,4 @@ if __name__ == "__main__":
     room(d)
     maze(d)
     maze(d, harness="harness_wolf96.asm", name="maze96")
+    maze(d, harness="harness_wolfwide.asm", name="mazewide")

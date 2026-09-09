@@ -18,6 +18,17 @@ PLANE = [round(16384 * TAN30 * math.sin(2 * math.pi * i / 256))
          for i in range(256)]
 
 
+def step_tab():
+    """PSTEP: the camera plane divided by half the ray count.
+
+    The sweep is built out of this rather than the plane itself, so it
+    stays centred and the full 60 degrees wide whatever the ray count
+    is. Dividing the plane by a shift only works when half the count is
+    a power of two, which 128 rays is and 96 is not.
+    """
+    return [round(p / (COLS // 2)) for p in PLANE]
+
+
 def ladder(vh):
     """The height ladder the scalers are built for.
 
@@ -30,20 +41,21 @@ def ladder(vh):
             + [h for h in range(72, vh + 1, 8)])
 
 
-def set_view(width=256, height=144):
+def set_view(width=256, height=144, bpc=1):
     """Size the viewport: width pixels by height rows, centred.
 
-    Two pixels a column, so the width is twice the ray count and half
-    of it again is the byte the viewport starts at on a screen line.
-    The focal length follows the width, which keeps the 60 degree view
-    the camera plane gives and lets the vertical field narrow with the
+    bpc is bytes a column: 1 for two-pixel columns, 2 for four. The
+    focal length follows the width, which keeps the 60 degree view the
+    camera plane gives and lets the vertical field narrow with the
     window, the way shrinking a window in Wolfenstein did.
     """
-    global VW, VH, HALFV, COLS, TOPLINE, XOFF, FOCAL, HSCALE, HMAX
-    global LADDER, HTAB
+    global VW, VH, HALFV, COLS, BPC, BYTES, TOPLINE, XOFF
+    global FOCAL, HSCALE, HMAX, LADDER, HTAB, PSTEP
     VW, VH = width, height
     HALFV = VH // 2
-    COLS = VW // 2
+    BPC = bpc                   # bytes, so pixels over two, a column
+    COLS = VW // (2 * bpc)
+    BYTES = COLS * bpc          # what a viewport row is, in bytes
     TOPLINE = (H - VH) // 2
     XOFF = (W - VW) // 4
     FOCAL = int((VW // 2) / TAN30)
@@ -51,6 +63,7 @@ def set_view(width=256, height=144):
     HMAX = VH                   # a wall is never drawn taller than this
     LADDER = ladder(VH)
     HTAB = height_tab()
+    PSTEP = step_tab()
 
 
 def rung(h):
@@ -139,9 +152,9 @@ def cast(mp, px, py, rayx, rayy):
 def frame(mp, px, py, ang):
     """Every column's (wall height, texture, texture column), or None."""
     dx, dy = SIN[(ang + 64) & 255], SIN[ang & 255]
-    plx, ply = -PLANE[ang & 255], PLANE[(ang + 64) & 255]
-    rx, ry = s16(dx - plx), s16(dy - ply)
-    sx, sy = plx >> 6, ply >> 6
+    sx, sy = -PSTEP[ang & 255], PSTEP[(ang + 64) & 255]
+    half = COLS // 2                    # so the sweep is centred on dir
+    rx, ry = s16(dx - half * sx), s16(dy - half * sy)
     out = []
     for _ in range(COLS):
         hit = cast(mp, px, py, rx, ry)
@@ -164,7 +177,7 @@ def draw(cols, textures, ceil_col, floor_col, buf=None):
     for y in range(VH):
         base = (TOPLINE + y) * STRIDE + XOFF
         c = ceil_col if y < HALFV else floor_col
-        for x in range(COLS):
+        for x in range(BYTES):
             buf[base + x] = c
     for x, col in enumerate(cols):
         if col is None:
@@ -178,5 +191,7 @@ def draw(cols, textures, ceil_col, floor_col, buf=None):
             b = tex[u * TEX + v]
             y = top + k
             if 0 <= y < VH:
-                buf[(TOPLINE + y) * STRIDE + XOFF + x] = b
+                o = (TOPLINE + y) * STRIDE + XOFF + x * BPC
+                for i in range(BPC):
+                    buf[o + i] = b
     return buf
