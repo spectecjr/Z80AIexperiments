@@ -124,7 +124,10 @@ it needs. `--scratch fixed` bakes one address in instead.
 
 * **CLUT byte encoding** — until then palettes are emitted as RGB
   comments rather than SAM colour bytes.
-* **Getting a binary into SimCoupe** for end-to-end testing.
+* **Getting a binary into SimCoupe** for end-to-end testing. SimCoupe has
+  no external debugger interface yet; what would make one useful here is
+  written up in
+  [`designs/debugger-feature-requests.md`](../../designs/debugger-feature-requests.md).
 
 ## Register and interrupt contract
 
