@@ -1,0 +1,1518 @@
+;------------------------------------------------------------------
+; room3d.z80s - a first person room renderer for the SAM Coupe
+;
+;   r3d_init     black the screen, both buffers
+;   r3d_frame    draw the room from (r3d_cx, r3d_cz, r3d_ca) and flip
+;
+; The view is 256x144 - 16:9 with square SAM pixels - letterboxed into
+; MODE 4's 256x192 with 24 blank lines above and below. The bars are
+; blacked once and never touched again, so they cost nothing a frame,
+; and nothing else needs erasing either: every byte of the viewport is
+; written exactly once a frame.
+;
+; WHY NOT RAYS. Wolfenstein casts one ray per screen column and draws
+; a vertical strip. On a Z80 with a row-major frame buffer that is the
+; wrong way round: a vertical strip touches one byte per scanline, and
+; the fastest a byte can be written that way is about 20 T-states,
+; against 5.5 for a run along a row written with PUSH. 256x144 is
+; 18,432 bytes, so column order costs 368,000 T-states a frame before
+; a single ray is cast, and row order 101,000.
+;
+; So the walls are drawn as polygons instead. In a convex room every
+; wall is a screen-space trapezoid - a straight edge in 3D projects to
+; a straight edge - and the walls tile the view exactly: no gaps, no
+; overlap, no sorting, no overdraw. The picture is the one the rays
+; would have produced.
+;
+; THE SHAPE OF A STRIP. For a wall covering byte columns bl..br the
+; wall half height h is affine in screen x, because 1/z is affine in
+; screen x across a plane and h is proportional to 1/z. So at height
+; level j the wall covers a contiguous c columns of the run, taken
+; from whichever end is nearer, and c is walked with one fixed point
+; accumulator:
+;
+;   inc = n*256 / |hl - hr| ,  c(j) = min(acc >> 8, n) ,  acc += inc
+;
+; j runs 71 down to 0 and draws two scanlines a step: the viewport is
+; symmetric about the horizon, so scanline 71-j and scanline 72+j have
+; the same split and differ only in whether the rest of the run is
+; ceiling or floor. That halves the edge walking.
+;
+; FILLING. Each row of a strip is two runs of one colour, filled off
+; the stack pointer through a run of PUSH HLs entered n from its end:
+; two bytes every 11 T-states. Wall boundaries are snapped to even
+; byte columns so every run is a whole number of pairs; where the
+; split lands mid-pair one PUSH of a mixed pair - one colour in H, the
+; other in L - covers both sides of it, so the split itself keeps full
+; two-pixel resolution.
+;
+; GEOMETRY. Vertices are rotated into view space with the sine table,
+; walls clipped against the near plane, projected, and clamped to the
+; screen edges by interpolating h - which is legitimate precisely
+; because h is affine in screen x. The wall's colour is a shade of its
+; ramp chosen by distance.
+;
+; The room must be convex with the camera inside it. World coordinates
+; are signed 16-bit and should stay inside about +/-2000 units; walls
+; come out of the room in the order they are wound, which is a rotation
+; of their order on screen, and r3d_rank puts that right.
+;
+; WHAT IT COSTS. Measured over the 256 camera positions of
+; tests/test_room3d.py, which checks every drawn byte against
+; tests/room.py, a model of the same arithmetic:
+;
+;   r3d_frame     min 227,228   mean 291,953   max 381,103 T-states
+;   walls drawn   min       1   mean     2.20  max       4
+;
+; and where a mean frame goes:
+;
+;   push run   107,309 T  37%     divide      27,702 T   9%
+;   rowout      53,163 T  18%     geometry    25,738 T   9%
+;   prep        39,676 T  14%     qsmul8       8,780 T   3%
+;   raster      28,707 T  10%     addstrip     1,508 T   1%
+;
+; A 6 MHz SAM has 240,000 T-states between 25 Hz frames, so this runs
+; at about 20 Hz - 122% of the 25 Hz budget - and 25 Hz is close but
+; not free. What the numbers really say is where the floor is: the
+; push run is 18,432 bytes at 5.5 T-states each and cannot be beaten,
+; and it is only 45% of a 25 Hz frame. The other 185,000 is this
+; implementation, and it has obvious slack left: a normalised
+; reciprocal in place of the restoring divide is worth about 16,000,
+; merging the background runs either side of a far corner about 9,000,
+; and prep another 8,000.
+;
+; The comparison that matters: a ray per column, drawing each strip
+; down the screen, would spend 368,000 T-states writing those same
+; 18,432 bytes and would not have cast a ray yet.
+;
+; 4,864 bytes: 2,520 of code, 1,728 for the run table, 256 for the
+; sine table, and the rest workspace.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+R3D_NEAR:       EQU 32          ; near plane, world units
+R3D_HALF:       EQU 72          ; half the viewport, scanlines
+R3D_TOP:        EQU 24          ; first viewport scanline
+R3D_HSCALE:     EQU 8192        ; h = R3D_HSCALE / vz
+R3D_LEVELS:     EQU 6           ; shades in a wall ramp
+R3D_BUF0:       EQU 0x80        ; high byte of the first buffer
+R3D_BUF1:       EQU 0x20        ; and the second
+R3D_MAXW:       EQU 8           ; most walls a room may have
+
+;------------------------------------------------------------------
+; r3d_init - black both buffers, letterbox and all
+;------------------------------------------------------------------
+
+r3d_init:
+        LD   A,R3D_BUF0
+        LD   (r3d_back),A
+        LD   A,R3D_BUF1
+        LD   (r3d_front),A
+        LD   H,R3D_BUF0
+        CALL r3d_black
+        LD   H,R3D_BUF1
+r3d_black:
+        LD   L,0
+        LD   D,0x60         ; 0x6000 bytes
+r3d_bl1:
+        LD   B,0
+r3d_bl2:
+        LD   (HL),0
+        INC  HL
+        DJNZ r3d_bl2
+        DEC  D
+        JR   NZ,r3d_bl1
+        RET
+
+;------------------------------------------------------------------
+; r3d_frame - transform, clip, project and draw the room, then flip
+;------------------------------------------------------------------
+
+r3d_frame:
+        CALL r3d_xform      ; every vertex into view space
+        XOR  A
+        LD   (r3d_ns),A
+        LD   (r3d_wall),A
+r3d_floop:
+        CALL r3d_onewall
+        LD   A,(r3d_wall)
+        INC  A
+        LD   (r3d_wall),A
+        LD   HL,r3d_nw
+        CP   (HL)
+        JR   C,r3d_floop
+
+        CALL r3d_raster     ; all of them at once, a row at a time
+
+        LD   A,(r3d_back)   ; flip
+        LD   B,A
+        LD   A,(r3d_front)
+        LD   (r3d_back),A
+        LD   A,B
+        LD   (r3d_front),A
+        RET                 ; <- tell the display hardware here
+
+;------------------------------------------------------------------
+; r3d_xform - every room vertex into view space
+;
+;   vx = (dx*cos - dz*sin) >> 7 ,  vz = (dx*sin + dz*cos) >> 7
+;
+; with dx, dz the vertex relative to the camera and the sine table in
+; 1.7 fixed point.
+;------------------------------------------------------------------
+
+r3d_xform:
+        LD   A,(r3d_ca)     ; sin and cos of the heading
+        LD   L,A
+        LD   H,r3d_sin / 256
+        LD   A,(HL)
+        LD   (r3d_sa),A
+        LD   A,L
+        ADD  A,64
+        LD   L,A
+        LD   A,(HL)
+        LD   (r3d_co),A
+
+        LD   A,(r3d_nw)
+        LD   (r3d_xn),A
+        LD   HL,r3d_rx
+        LD   (r3d_xp),HL
+        LD   HL,r3d_vvx
+        LD   (r3d_xq),HL
+r3d_xl:
+        LD   HL,(r3d_xp)    ; dx = X - camera x
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        INC  HL
+        LD   (r3d_xp),HL
+        LD   HL,(r3d_cx)
+        EX   DE,HL
+        OR   A
+        SBC  HL,DE
+        LD   (r3d_dx),HL
+        LD   HL,(r3d_xp)    ; dz = Z - camera z
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        INC  HL
+        LD   (r3d_xp),HL
+        LD   HL,(r3d_cz)
+        EX   DE,HL
+        OR   A
+        SBC  HL,DE
+        LD   (r3d_dz),HL
+
+        LD   HL,(r3d_dx)    ; vx = dx*cos - dz*sin
+        LD   A,(r3d_co)
+        CALL r3d_mul7
+        PUSH HL
+        LD   HL,(r3d_dz)
+        LD   A,(r3d_sa)
+        CALL r3d_mul7
+        POP  DE
+        EX   DE,HL
+        OR   A
+        SBC  HL,DE
+        PUSH HL
+
+        LD   HL,(r3d_dx)    ; vz = dx*sin + dz*cos
+        LD   A,(r3d_sa)
+        CALL r3d_mul7
+        PUSH HL
+        LD   HL,(r3d_dz)
+        LD   A,(r3d_co)
+        CALL r3d_mul7
+        POP  DE
+        ADD  HL,DE
+        EX   DE,HL          ; DE = vz
+        POP  BC             ; BC = vx
+
+        LD   HL,(r3d_xq)
+        LD   (HL),C
+        INC  HL
+        LD   (HL),B
+        INC  HL
+        LD   (HL),E
+        INC  HL
+        LD   (HL),D
+        INC  HL
+        LD   (r3d_xq),HL
+        LD   A,(r3d_xn)
+        DEC  A
+        LD   (r3d_xn),A
+        JR   NZ,r3d_xl
+        RET
+
+;------------------------------------------------------------------
+; r3d_mul7 - (HL * A) >> 7, sixteen bits by a signed 1.7 byte
+;
+;   d*c = dh*c*256 + dl*c , so (d*c) >> 7 is 2*(dh*c + high(dl*c))
+;   plus bit 7 of low(dl*c) - two byte multiplies, an add and a shift.
+;------------------------------------------------------------------
+
+r3d_mul7:
+        LD   (r3d_m7c),A
+        LD   C,A
+        LD   B,H            ; the signed high byte times c
+        LD   A,L
+        LD   (r3d_m7l),A
+        CALL r3d_smul
+        LD   (r3d_m7p),DE
+        LD   A,(r3d_m7l)    ; the unsigned low byte times c
+        LD   B,A
+        LD   A,(r3d_m7c)
+        LD   C,A
+        CALL qsmul8
+        LD   A,C            ; c negative? then correct the high byte
+        RLA
+        JR   NC,r3d_m71
+        LD   A,D
+        SUB  B
+        LD   D,A
+r3d_m71:
+        LD   A,D            ; HL = the high byte of dl*c, sign extended
+        LD   L,A
+        ADD  A,A
+        SBC  A,A
+        LD   H,A
+        PUSH DE
+        LD   DE,(r3d_m7p)
+        ADD  HL,DE          ; + dh*c
+        ADD  HL,HL          ; times two
+        POP  DE
+        BIT  7,E            ; plus bit 7 of the low byte
+        RET  Z
+        INC  HL
+        RET
+
+;------------------------------------------------------------------
+; r3d_smul - signed 8x8 -> 16, out of the quarter square multiply
+;
+; qsmul8 is unsigned; with a = au - 256p and b = bu - 256q the signed
+; product is au*bu - 256*(q*au + p*bu) modulo 65536, and a multiple of
+; 256 only touches the high byte.
+;
+; Entry : B, C signed      Exit : DE = B*C      Trash : AF, DE, HL
+;------------------------------------------------------------------
+
+r3d_smul:
+        CALL qsmul8
+        LD   A,B
+        RLA
+        JR   NC,r3d_sm1
+        LD   A,D
+        SUB  C
+        LD   D,A
+r3d_sm1:
+        LD   A,C
+        RLA
+        RET  NC
+        LD   A,D
+        SUB  B
+        LD   D,A
+        RET
+
+;------------------------------------------------------------------
+; r3d_div32 - DE:HL / BC, unsigned, restoring, sixteen steps
+;
+; Entry : DE = the high word, HL = the low word, BC = the divisor,
+;         which must be nonzero and no more than 32767
+; Exit  : HL = the quotient, 0xFFFF if it would not fit; DE = the
+;         remainder. Trash: AF, IX low.
+;------------------------------------------------------------------
+
+r3d_div32:
+        LD   A,D            ; the quotient has to fit in sixteen bits
+        CP   B
+        JR   C,r3d_dv0
+        JR   NZ,r3d_dsat
+        LD   A,E
+        CP   C
+        JR   C,r3d_dv0
+r3d_dsat:
+        LD   HL,0xFFFF
+        RET
+r3d_dv0:
+        DUP  16             ; unrolled: the loop counter cost as much as
+        ADD  HL,HL          ; the subtraction it was counting
+        RL   E
+        RL   D
+        LD   A,E
+        SUB  C
+        LD   E,A
+        LD   A,D
+        SBC  A,B
+        LD   D,A
+        JR   NC,$+10
+        LD   A,E
+        ADD  A,C
+        LD   E,A
+        LD   A,D
+        ADC  A,B
+        LD   D,A
+        JR   $+3
+        INC  L
+        EDUP
+        RET
+
+;------------------------------------------------------------------
+; r3d_umul16 - BC * DE, unsigned, into the four bytes at r3d_f32
+;
+; Four quarter-square multiplies and the usual cross terms.
+;------------------------------------------------------------------
+
+r3d_umul16:
+        LD   (r3d_ua),BC
+        LD   (r3d_ub),DE
+        LD   A,C            ; bl * dl -> the low word
+        LD   B,A
+        LD   A,(r3d_ub)
+        LD   C,A
+        CALL qsmul8
+        LD   (r3d_f32),DE
+
+        LD   A,(r3d_ua)     ; bl * dh
+        LD   B,A
+        LD   A,(r3d_ub+1)
+        LD   C,A
+        CALL qsmul8
+        LD   (r3d_um),DE
+
+        LD   A,(r3d_ua+1)   ; + bh * dl, both eight bits up
+        LD   B,A
+        LD   A,(r3d_ub)
+        LD   C,A
+        CALL qsmul8
+        LD   HL,(r3d_um)
+        ADD  HL,DE
+        LD   (r3d_um),HL
+        LD   A,0
+        ADC  A,0
+        LD   (r3d_umc),A
+
+        LD   A,(r3d_ua+1)   ; bh * dh -> the high word
+        LD   B,A
+        LD   A,(r3d_ub+1)
+        LD   C,A
+        CALL qsmul8
+        LD   (r3d_f32+2),DE
+
+        LD   HL,(r3d_um)    ; fold the cross terms in
+        LD   A,(r3d_f32+1)
+        ADD  A,L
+        LD   (r3d_f32+1),A
+        LD   A,(r3d_f32+2)
+        ADC  A,H
+        LD   (r3d_f32+2),A
+        LD   A,(r3d_f32+3)
+        ADC  A,0
+        LD   (r3d_f32+3),A
+        LD   A,(r3d_umc)
+        OR   A
+        RET  Z
+        LD   A,(r3d_f32+3)
+        INC  A
+        LD   (r3d_f32+3),A
+        RET
+
+;------------------------------------------------------------------
+; r3d_mulf - (HL * (r3d_t)) >> 16, signed by an unsigned fraction
+;
+; The whole 32-bit product is formed and negated if HL was, so the
+; answer truncates exactly the way an arithmetic shift does.
+;------------------------------------------------------------------
+
+r3d_mulf:
+        LD   A,H
+        RLA
+        SBC  A,A
+        LD   (r3d_fsgn),A
+        OR   A
+        JR   Z,r3d_mf1
+        EX   DE,HL          ; take the magnitude
+        LD   HL,0
+        OR   A
+        SBC  HL,DE
+r3d_mf1:
+        LD   B,H
+        LD   C,L
+        LD   DE,(r3d_t)
+        CALL r3d_umul16
+        LD   A,(r3d_fsgn)
+        OR   A
+        JR   Z,r3d_mf2
+        LD   HL,0           ; put the sign back, all thirty two bits
+        LD   DE,(r3d_f32)
+        OR   A
+        SBC  HL,DE
+        LD   (r3d_f32),HL
+        LD   HL,0
+        LD   DE,(r3d_f32+2)
+        SBC  HL,DE
+        LD   (r3d_f32+2),HL
+r3d_mf2:
+        LD   HL,(r3d_f32+2)
+        RET
+
+;------------------------------------------------------------------
+; r3d_proj - one view space point to a screen x and a wall half height
+;
+;   h  = R3D_HSCALE / vz            sx = 128 + (vx << 7) / vz
+;
+; sx is left as a full signed 16-bit value; the caller clamps it to
+; the screen by interpolating h, which is legitimate because h is
+; affine in screen x.
+;------------------------------------------------------------------
+
+r3d_proj:
+        LD   HL,(r3d_pvz)   ; never divide by less than the near plane
+        LD   DE,R3D_NEAR
+        OR   A
+        SBC  HL,DE
+        JP   P,r3d_pj0
+        LD   HL,0
+r3d_pj0:
+        ADD  HL,DE
+        LD   B,H
+        LD   C,L
+        PUSH BC
+        LD   HL,R3D_HSCALE
+        LD   DE,0
+        CALL r3d_div32
+        LD   A,H
+        OR   A
+        JR   Z,r3d_pj1
+        LD   L,255          ; a wall right in front of the eye
+r3d_pj1:
+        LD   A,L
+        LD   (r3d_ph),A
+
+        LD   HL,(r3d_pvx)
+        LD   A,H
+        RLA
+        SBC  A,A
+        LD   (r3d_psgn),A
+        OR   A
+        JR   Z,r3d_pj2
+        EX   DE,HL
+        LD   HL,0
+        OR   A
+        SBC  HL,DE
+r3d_pj2:
+        LD   DE,0           ; DE:HL = |vx| << 7
+        LD   B,7
+r3d_pj3:
+        ADD  HL,HL
+        RL   E
+        RL   D
+        DJNZ r3d_pj3
+        POP  BC
+        CALL r3d_div32
+        LD   A,(r3d_psgn)
+        OR   A
+        JR   Z,r3d_pj4
+        EX   DE,HL
+        LD   HL,0
+        OR   A
+        SBC  HL,DE
+r3d_pj4:
+        LD   DE,128
+        ADD  HL,DE
+        LD   (r3d_psx),HL
+        RET
+
+;------------------------------------------------------------------
+; r3d_onewall - clip, project and draw the wall (r3d_wall)
+;------------------------------------------------------------------
+
+r3d_onewall:
+        LD   A,(r3d_wall)   ; the two view space ends
+        CALL r3d_getv
+        LD   (r3d_p0x),BC
+        LD   (r3d_p0z),DE
+        LD   A,(r3d_wall)
+        INC  A
+        LD   HL,r3d_nw
+        CP   (HL)
+        JR   C,r3d_ow1
+        XOR  A
+r3d_ow1:
+        CALL r3d_getv
+        LD   (r3d_p1x),BC
+        LD   (r3d_p1z),DE
+
+        LD   HL,(r3d_p0z)   ; the near plane
+        LD   DE,R3D_NEAR
+        OR   A
+        SBC  HL,DE
+        LD   (r3d_d0),HL
+        LD   HL,(r3d_p1z)
+        OR   A
+        SBC  HL,DE
+        LD   (r3d_d1),HL
+        LD   A,(r3d_d0+1)
+        LD   B,A
+        LD   A,(r3d_d1+1)
+        AND  B
+        RLA
+        RET  C              ; both ends behind it
+        LD   A,(r3d_d0+1)
+        RLA
+        JR   NC,r3d_ow2
+        CALL r3d_clip0
+        JR   r3d_ow3
+r3d_ow2:
+        LD   A,(r3d_d1+1)
+        RLA
+        JR   NC,r3d_ow3
+        CALL r3d_clip1
+r3d_ow3:
+        LD   HL,(r3d_p0x)   ; project both ends
+        LD   (r3d_pvx),HL
+        LD   HL,(r3d_p0z)
+        LD   (r3d_pvz),HL
+        CALL r3d_proj
+        LD   HL,(r3d_psx)
+        LD   (r3d_sx0),HL
+        LD   A,(r3d_ph)
+        LD   (r3d_h0),A
+        LD   HL,(r3d_p1x)
+        LD   (r3d_pvx),HL
+        LD   HL,(r3d_p1z)
+        LD   (r3d_pvz),HL
+        CALL r3d_proj
+        LD   HL,(r3d_psx)
+        LD   (r3d_sx1),HL
+        LD   A,(r3d_ph)
+        LD   (r3d_h1),A
+
+        LD   HL,(r3d_sx1)   ; anything left on screen?
+        DEC  HL
+        BIT  7,H
+        RET  NZ             ; sx1 <= 0
+        LD   HL,(r3d_sx0)
+        LD   DE,256
+        OR   A
+        SBC  HL,DE
+        RET  P              ; sx0 >= 256
+        LD   HL,(r3d_sx1)
+        LD   DE,(r3d_sx0)
+        OR   A
+        SBC  HL,DE
+        RET  Z
+        RET  M
+        LD   (r3d_sxd),HL
+
+        LD   HL,(r3d_sx0)   ; clamp the left end onto the screen
+        BIT  7,H
+        JR   Z,r3d_ow4
+        LD   DE,(r3d_sx0)
+        LD   HL,0
+        OR   A
+        SBC  HL,DE
+        EX   DE,HL
+        LD   HL,0
+        LD   BC,(r3d_sxd)
+        CALL r3d_div32
+        LD   (r3d_t),HL
+        LD   A,(r3d_h1)
+        LD   L,A
+        LD   H,0
+        LD   A,(r3d_h0)
+        LD   E,A
+        LD   D,0
+        OR   A
+        SBC  HL,DE
+        CALL r3d_mulf
+        LD   A,(r3d_h0)
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   A,L
+        LD   (r3d_h0),A
+        LD   HL,0
+        LD   (r3d_sx0),HL
+r3d_ow4:
+        LD   HL,(r3d_sx1)   ; and the right end
+        LD   DE,256
+        OR   A
+        SBC  HL,DE
+        JR   Z,r3d_ow5
+        JP   M,r3d_ow5
+        EX   DE,HL
+        LD   HL,0
+        LD   BC,(r3d_sxd)
+        CALL r3d_div32
+        LD   (r3d_t),HL
+        LD   A,(r3d_h0)
+        LD   L,A
+        LD   H,0
+        LD   A,(r3d_h1)
+        LD   E,A
+        LD   D,0
+        OR   A
+        SBC  HL,DE
+        CALL r3d_mulf
+        LD   A,(r3d_h1)
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   A,L
+        LD   (r3d_h1),A
+        LD   HL,256
+        LD   (r3d_sx1),HL
+r3d_ow5:
+        LD   HL,(r3d_sx0)   ; snap to even byte columns, four pixels
+        CALL r3d_snap
+        LD   (r3d_sbl),A
+        LD   HL,(r3d_sx1)
+        CALL r3d_snap
+        DEC  A
+        LD   (r3d_sbr),A
+        LD   HL,r3d_sbl
+        CP   (HL)
+        RET  C              ; nothing left of it
+
+        LD   A,(r3d_h0)     ; the strip's shade, by distance
+        LD   (r3d_shl),A
+        LD   B,A
+        LD   A,(r3d_h1)
+        LD   (r3d_shr),A
+        ADD  A,B
+        LD   L,A
+        LD   A,0
+        ADC  A,0
+        LD   H,A
+        ADD  HL,HL
+        ADD  HL,HL
+        LD   A,H            ; (h0 + h1) >> 6
+        CP   R3D_LEVELS
+        JR   C,r3d_ow6
+        LD   A,R3D_LEVELS - 1
+r3d_ow6:
+        LD   E,A
+        LD   A,(r3d_wall)
+        LD   L,A
+        LD   H,0
+        LD   BC,r3d_rc
+        ADD  HL,BC
+        LD   A,(HL)
+        ADD  A,E
+        AND  15
+        LD   C,A
+        RLCA
+        RLCA
+        RLCA
+        RLCA
+        OR   C
+        JP   r3d_addstrip
+
+;------------------------------------------------------------------
+; r3d_getv - view space vertex A into BC (x) and DE (z)
+;------------------------------------------------------------------
+
+r3d_getv:
+        ADD  A,A
+        ADD  A,A
+        LD   L,A
+        LD   H,0
+        LD   BC,r3d_vvx
+        ADD  HL,BC
+        LD   C,(HL)
+        INC  HL
+        LD   B,(HL)
+        INC  HL
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        RET
+
+;------------------------------------------------------------------
+; r3d_snap - screen x in HL to an even byte column in A
+;------------------------------------------------------------------
+
+r3d_snap:
+        LD   DE,2
+        ADD  HL,DE
+        SRL  H
+        RR   L
+        SRL  H
+        RR   L
+        ADD  HL,HL
+        LD   A,L
+        RET
+
+;------------------------------------------------------------------
+; r3d_clip0 / r3d_clip1 - pull whichever end is behind the near plane
+; onto it, along the wall
+;------------------------------------------------------------------
+
+r3d_clip0:
+        LD   HL,(r3d_d1)
+        LD   DE,(r3d_d0)
+        OR   A
+        SBC  HL,DE          ; d1 - d0, positive
+        LD   B,H
+        LD   C,L
+        LD   HL,0
+        LD   DE,(r3d_d0)
+        OR   A
+        SBC  HL,DE          ; -d0, positive and less than d1 - d0
+        EX   DE,HL
+        LD   HL,0
+        CALL r3d_div32      ; t = -d0 * 65536 / (d1 - d0)
+        LD   (r3d_t),HL
+        LD   HL,(r3d_p1x)
+        LD   DE,(r3d_p0x)
+        OR   A
+        SBC  HL,DE
+        CALL r3d_mulf
+        LD   DE,(r3d_p0x)
+        ADD  HL,DE
+        LD   (r3d_p0x),HL
+        LD   HL,(r3d_p1z)
+        LD   DE,(r3d_p0z)
+        OR   A
+        SBC  HL,DE
+        CALL r3d_mulf
+        LD   DE,(r3d_p0z)
+        ADD  HL,DE
+        LD   (r3d_p0z),HL
+        RET
+
+r3d_clip1:
+        LD   HL,(r3d_d0)
+        LD   DE,(r3d_d1)
+        OR   A
+        SBC  HL,DE
+        LD   B,H
+        LD   C,L
+        LD   HL,0
+        LD   DE,(r3d_d1)
+        OR   A
+        SBC  HL,DE
+        EX   DE,HL
+        LD   HL,0
+        CALL r3d_div32
+        LD   (r3d_t),HL
+        LD   HL,(r3d_p0x)
+        LD   DE,(r3d_p1x)
+        OR   A
+        SBC  HL,DE
+        CALL r3d_mulf
+        LD   DE,(r3d_p1x)
+        ADD  HL,DE
+        LD   (r3d_p1x),HL
+        LD   HL,(r3d_p0z)
+        LD   DE,(r3d_p1z)
+        OR   A
+        SBC  HL,DE
+        CALL r3d_mulf
+        LD   DE,(r3d_p1z)
+        ADD  HL,DE
+        LD   (r3d_p1z),HL
+        RET
+
+;------------------------------------------------------------------
+; r3d_addstrip - record one wall's strip for the rasteriser
+;
+; Entry : (r3d_sbl), (r3d_sbr) the byte columns, an even run
+;         (r3d_shl), (r3d_shr) the wall half heights at the two ends
+;         A = the wall's colour, both nibbles
+;
+; The DDA that walks the wall's edge down the viewport is set up here:
+;
+;   inc = n*256 / |hl - hr| ,  c(j) = min(acc >> 8, n) ,  acc += inc
+;
+; with j the distance from the horizon, c how many of the strip's n
+; columns the wall covers there, and zeros the rows above it entirely.
+;------------------------------------------------------------------
+
+R3D_ST:         EQU 8           ; bytes of state a strip needs
+
+r3d_addstrip:
+        LD   (r3d_swc),A
+        LD   A,(r3d_sbr)
+        LD   B,A
+        LD   A,(r3d_sbl)
+        LD   C,A
+        LD   A,B
+        SUB  C
+        INC  A
+        LD   (r3d_sn),A         ; n columns, always even
+
+        LD   A,(r3d_shl)
+        LD   B,A
+        LD   A,(r3d_shr)
+        LD   C,A
+        SUB  B
+        JR   NC,r3d_asR
+        NEG                     ; the wall recedes to the right, so its
+        LD   E,A                ; near end and its pixels are on the left
+        LD   A,B
+        LD   (r3d_shmax),A
+        LD   A,1
+        JR   r3d_asD
+r3d_asR:
+        LD   E,A
+        LD   A,C
+        LD   (r3d_shmax),A
+        XOR  A
+r3d_asD:
+        LD   (r3d_swleft),A
+        LD   A,E
+        OR   A
+        JR   NZ,r3d_asD1
+        INC  A                  ; a wall seen square on gets a slope of one
+r3d_asD1:
+        LD   (r3d_sd),A
+
+        LD   A,(r3d_sn)         ; inc = n*256 / d
+        LD   H,A
+        LD   L,0
+        LD   DE,0
+        LD   A,(r3d_sd)
+        LD   C,A
+        LD   B,0
+        CALL r3d_div32
+        LD   (r3d_sinc),HL
+
+        XOR  A
+        LD   (r3d_szero),A
+        LD   A,(r3d_shmax)
+        SUB  R3D_HALF - 1       ; k = hmax - 71
+        JR   Z,r3d_asK0
+        JR   NC,r3d_asKP
+r3d_asK0:                       ; the wall stops short of the top of the
+        LD   A,(r3d_shmax)      ; viewport: 72 - hmax rows of background
+        LD   B,A
+        LD   A,R3D_HALF
+        SUB  B
+        LD   (r3d_szero),A
+        LD   HL,(r3d_sinc)
+        JR   r3d_asA
+r3d_asKP:
+        LD   B,A                ; k
+        LD   A,(r3d_sd)
+        CP   B
+        JR   Z,r3d_asKS
+        JR   C,r3d_asKS
+        LD   A,B
+        CALL r3d_mul8x16        ; acc = k * inc
+        JR   r3d_asA
+r3d_asKS:
+        LD   HL,0xFFFF
+r3d_asA:
+        LD   A,(r3d_ns)         ; -> this strip's slot
+        ADD  A,A
+        ADD  A,A
+        ADD  A,A
+        LD   E,A
+        LD   D,0
+        PUSH DE
+        LD   IY,r3d_stt
+        ADD  IY,DE
+        LD   (IY+0),L           ; acc
+        LD   (IY+1),H
+        LD   A,(r3d_sinc)
+        LD   (IY+2),A           ; inc
+        LD   A,(r3d_sinc+1)
+        LD   (IY+3),A
+        LD   A,(r3d_sn)
+        LD   (IY+4),A           ; n
+        LD   A,(r3d_szero)
+        LD   (IY+5),A           ; rows of pure background above the wall
+        LD   A,(r3d_swleft)
+        LD   (IY+6),A           ; which side of the run the wall is on
+
+        LD   A,(r3d_sbr)
+        LD   (IY+7),A           ; where it ends, for ranking it later
+        POP  DE                 ; and its own colour, kept beside it
+        SRL  E
+        SRL  E
+        SRL  E
+        LD   HL,r3d_wcol
+        ADD  HL,DE
+        LD   A,(r3d_swc)
+        LD   (HL),A
+r3d_asN:
+        LD   A,(r3d_ns)
+        INC  A
+        LD   (r3d_ns),A
+        RET
+
+;------------------------------------------------------------------
+; r3d_prep - turn every strip's DDA into a table the rasteriser can
+; read without arithmetic
+;
+; For each height level j and each strip it stores three bytes - the
+; entry into the run of PUSHes for the right hand run, whether the
+; split lands inside a pair, and the entry for the left hand run - laid
+; out level by level so that one row's worth is contiguous and can be
+; walked backwards, right to left across the screen, which is the
+; direction the stack pointer fills in.
+;------------------------------------------------------------------
+
+r3d_prep:
+        LD   A,(r3d_ns)
+        LD   B,A
+        ADD  A,A
+        ADD  A,B                ; 3 * ns, the table's stride
+        LD   (r3d_stride),A
+        LD   A,(r3d_ns)
+        LD   (r3d_pn),A
+        XOR  A
+        LD   (r3d_ps),A
+        LD   IY,r3d_stt
+r3d_pl:
+        CALL r3d_rank           ; where this strip comes on screen
+        LD   L,A
+        LD   H,0
+        PUSH HL
+        ADD  HL,HL              ; rank * 2, into the colour tables
+        PUSH HL
+        LD   DE,r3d_cu
+        ADD  HL,DE
+        LD   A,(r3d_scc)
+        LD   (r3d_pbg),A
+        CALL r3d_pcol
+        POP  HL
+        LD   DE,r3d_cd
+        ADD  HL,DE
+        LD   A,(r3d_sfc)
+        LD   (r3d_pbg),A
+        CALL r3d_pcol
+        POP  HL
+        LD   E,L                ; rank * 3, into the run table
+        LD   D,H
+        ADD  HL,HL
+        ADD  HL,DE
+        LD   DE,r3d_tab + 2
+        ADD  HL,DE
+        LD   (r3d_pw),HL
+        LD   A,(r3d_stride)     ; the step back up to the next triple's
+        ADD  A,2                ; last byte, the three writes having run
+        LD   E,A                ; down to its first
+        LD   D,0
+        LD   A,(IY+4)
+        LD   C,A                ; C = n
+        LD   A,(IY+5)
+        LD   (r3d_pz),A         ; rows of background above the wall
+        EXX
+        LD   L,(IY+0)           ; the shadow set keeps the accumulator
+        LD   H,(IY+1)
+        LD   E,(IY+2)
+        LD   D,(IY+3)
+        LD   C,(IY+4)
+        EXX
+        LD   A,(IY+6)
+        OR   A
+        JR   Z,r3d_pright
+        JR   r3d_pleft
+
+r3d_pright:                     ; the wall is the right hand run
+        LD   B,72
+r3d_pr1:
+        LD   A,(r3d_pz)
+        OR   A
+        JR   Z,r3d_pr2
+        DEC  A
+        LD   (r3d_pz),A
+        XOR  A                  ; wholly above the wall: c = 0
+        JR   r3d_pr3
+r3d_pr2:
+        EXX
+        LD   A,H                ; c = acc >> 8
+        ADD  HL,DE
+        JR   NC,r3d_pr2a
+        LD   HL,0xFFFF
+r3d_pr2a:
+        CP   C
+        JR   C,r3d_pr2b
+        LD   A,C
+r3d_pr2b:
+        EXX
+r3d_pr3:
+        SRL  A                  ; nr = c, its pairs and its odd byte
+        JR   C,r3d_prm
+        LD   IXL,A
+        LD   A,64
+        SUB  IXL
+        LD   (HL),A             ; the right hand run's entry
+        DEC  HL
+        LD   (HL),0             ; no odd byte
+        DEC  HL
+        LD   A,C
+        SUB  IXL
+        SUB  IXL                ; nl = n - nr
+        SRL  A
+        LD   IXL,A
+        LD   A,192
+        SUB  IXL
+        LD   (HL),A             ; the left hand run's entry
+        ADD  HL,DE
+        DJNZ r3d_pr1
+        JP   r3d_pnext
+r3d_prm:
+        LD   IXL,A
+        LD   A,64
+        SUB  IXL
+        LD   (HL),A
+        DEC  HL
+        LD   (HL),1             ; one pair carries both colours
+        DEC  HL
+        LD   A,C
+        SUB  IXL
+        SUB  IXL
+        DEC  A
+        DEC  A
+        SRL  A
+        LD   IXL,A
+        LD   A,192
+        SUB  IXL
+        LD   (HL),A
+        ADD  HL,DE
+        DJNZ r3d_pr1
+        JP   r3d_pnext
+
+r3d_pleft:                      ; the wall is the left hand run
+        LD   B,72
+r3d_pf1:
+        LD   A,(r3d_pz)
+        OR   A
+        JR   Z,r3d_pf2
+        DEC  A
+        LD   (r3d_pz),A
+        XOR  A
+        JR   r3d_pf3
+r3d_pf2:
+        EXX
+        LD   A,H
+        ADD  HL,DE
+        JR   NC,r3d_pf2a
+        LD   HL,0xFFFF
+r3d_pf2a:
+        CP   C
+        JR   C,r3d_pf2b
+        LD   A,C
+r3d_pf2b:
+        EXX
+r3d_pf3:
+        LD   IXH,A              ; c, which is nl here
+        LD   A,C
+        SUB  IXH                ; nr = n - c
+        SRL  A
+        JR   C,r3d_pfm
+        LD   IXL,A
+        LD   A,64
+        SUB  IXL
+        LD   (HL),A
+        DEC  HL
+        LD   (HL),0
+        DEC  HL
+        LD   A,IXH
+        SRL  A
+        LD   IXL,A
+        LD   A,192
+        SUB  IXL
+        LD   (HL),A
+        ADD  HL,DE
+        DJNZ r3d_pf1
+        JP   r3d_pnext
+r3d_pfm:
+        LD   IXL,A
+        LD   A,64
+        SUB  IXL
+        LD   (HL),A
+        DEC  HL
+        LD   (HL),1
+        DEC  HL
+        LD   A,IXH
+        DEC  A                  ; the mixed pair took a byte off it
+        SRL  A
+        LD   IXL,A
+        LD   A,192
+        SUB  IXL
+        LD   (HL),A
+        ADD  HL,DE
+        DJNZ r3d_pf1
+
+r3d_pnext:
+        LD   DE,R3D_ST
+        ADD  IY,DE
+        LD   A,(r3d_ps)
+        INC  A
+        LD   (r3d_ps),A
+        LD   A,(r3d_pn)
+        DEC  A
+        LD   (r3d_pn),A
+        JP   NZ,r3d_pl
+        RET
+
+;------------------------------------------------------------------
+; r3d_rank - how many strips end to the left of strip (r3d_ps)
+;
+; Walls come out of the room in the order they are wound, which is a
+; rotation of their order on screen; the rasteriser wants them in
+; screen order, so each is placed by how many others end before it.
+;------------------------------------------------------------------
+
+r3d_rank:
+        LD   A,(r3d_ps)
+        ADD  A,A
+        ADD  A,A
+        ADD  A,A
+        LD   L,A
+        LD   H,0
+        LD   DE,r3d_stt + 7
+        ADD  HL,DE
+        LD   C,(HL)             ; this strip's right hand column
+        LD   HL,r3d_stt + 7
+        LD   A,(r3d_ns)
+        LD   B,A
+        LD   E,0
+r3d_rk1:
+        LD   A,(HL)
+        CP   C
+        JR   NC,r3d_rk2
+        INC  E
+r3d_rk2:
+        LD   A,R3D_ST
+        ADD  A,L
+        LD   L,A
+        JR   NC,r3d_rk3
+        INC  H
+r3d_rk3:
+        DJNZ r3d_rk1
+        LD   A,E
+        RET
+
+;------------------------------------------------------------------
+; r3d_pcol - the two colours this strip shows in one half of the row
+;
+; The left and right runs are the wall and the background in one order
+; or the other, depending on which way the wall recedes.
+;
+; Entry : HL -> the pair, (r3d_pbg) the background colour byte
+;------------------------------------------------------------------
+
+r3d_pcol:
+        PUSH HL
+        LD   A,(r3d_ps)
+        LD   L,A
+        LD   H,0
+        LD   DE,r3d_wcol
+        ADD  HL,DE
+        LD   C,(HL)             ; the wall's own colour
+        POP  HL
+        LD   A,(IY+6)
+        OR   A
+        LD   A,(r3d_pbg)
+        JR   Z,r3d_pc1
+        LD   (HL),C             ; the wall is the left hand run
+        INC  HL
+        LD   (HL),A
+        RET
+r3d_pc1:
+        LD   (HL),A             ; or the right hand one
+        INC  HL
+        LD   (HL),C
+        RET
+
+;------------------------------------------------------------------
+; r3d_raster - draw every strip, a scanline at a time
+;
+; Row order, not strip order. A strip drawn on its own pays 144 row
+; setups however narrow it is; done this way the whole frame pays 144,
+; and each row is one descending walk of the stack pointer across the
+; strips, which tile it exactly.
+;
+; The viewport is symmetric about the horizon, so one pass over
+; j = 71..0 draws two scanlines - 71-j above and 72+j below. They
+; split in the same places and differ only in whether the rest of a
+; run is ceiling or floor, which is all the two colour tables hold.
+;------------------------------------------------------------------
+
+r3d_raster:
+        LD   A,(r3d_ns)
+        OR   A
+        RET  Z
+        CALL r3d_prep
+
+        LD   A,(r3d_ns)     ; the colour tables run backwards from here
+        ADD  A,A
+        LD   E,A
+        LD   D,0
+        LD   HL,r3d_cu
+        ADD  HL,DE
+        DEC  HL
+        LD   (r3d_cpu),HL
+        LD   HL,r3d_cd
+        ADD  HL,DE
+        DEC  HL
+        LD   (r3d_cpd),HL
+
+        LD   A,(r3d_back)   ; and the two row pointers, one past column 127
+        LD   H,A
+        LD   L,0
+        LD   DE,R3D_TOP * 128 + 128
+        ADD  HL,DE
+        LD   (r3d_spu),HL
+        LD   DE,143 * 128
+        ADD  HL,DE
+        LD   (r3d_spd),HL
+
+        LD   HL,r3d_tab     ; the first level's triples, last byte first
+        LD   A,(r3d_stride)
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        DEC  HL
+        LD   (r3d_tp),HL
+
+        LD   A,r3d_pushes / 256
+        LD   IXH,A
+        DI
+        LD   (r3d_sp),SP
+        LD   A,R3D_HALF
+        LD   (r3d_sj),A
+r3d_rloop:
+        LD   HL,(r3d_spu)   ; the row above the horizon, ceiling behind
+        LD   SP,HL
+        LD   DE,(r3d_cpu)
+        LD   A,r3d_cu & 255
+        DEC  A
+        LD   (r3d_clim),A
+        LD   IY,r3d_rl1
+        JP   r3d_rowout
+r3d_rl1:
+        LD   HL,(r3d_spd)   ; and its mirror below, floor behind
+        LD   SP,HL
+        LD   DE,(r3d_cpd)
+        LD   A,r3d_cd & 255
+        DEC  A
+        LD   (r3d_clim),A
+        LD   IY,r3d_rl2
+        JP   r3d_rowout
+r3d_rl2:
+        LD   HL,(r3d_tp)
+        LD   A,(r3d_stride)
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   (r3d_tp),HL
+        LD   HL,(r3d_spu)
+        LD   DE,128
+        ADD  HL,DE
+        LD   (r3d_spu),HL
+        LD   HL,(r3d_spd)
+        LD   DE,-128
+        ADD  HL,DE
+        LD   (r3d_spd),HL
+        LD   A,(r3d_sj)
+        DEC  A
+        LD   (r3d_sj),A
+        JP   NZ,r3d_rloop
+        LD   SP,(r3d_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; r3d_rowout - one scanline, right to left across every strip
+;
+; Entered by JP with SP one past the row's last byte and IY where to
+; come back to, because SP is the write pointer and cannot carry a
+; return address. Everything it needs is precomputed: three bytes a
+; strip from r3d_prep and two colours from the row half's table.
+;------------------------------------------------------------------
+
+r3d_rowout:
+        LD   HL,(r3d_tp)
+r3d_ro1:
+        LD   A,(HL)         ; the right hand run
+        DEC  HL
+        LD   IXL,A
+        LD   A,(DE)
+        DEC  DE
+        LD   B,A
+        LD   C,A
+        JP   (IX)
+r3d_roA:
+        LD   A,(HL)         ; does the split land inside a pair?
+        DEC  HL
+        OR   A
+        JR   Z,r3d_roB
+        LD   A,(DE)         ; then one pair carries a colour each side
+        LD   C,A
+        PUSH BC
+r3d_roB:
+        LD   A,(DE)         ; the left hand run
+        DEC  DE
+        LD   B,A
+        LD   C,A
+        LD   A,(HL)
+        DEC  HL
+        LD   IXL,A
+        JP   (IX)
+r3d_roC:
+        LD   A,(r3d_clim)
+        CP   E
+        JP   NZ,r3d_ro1
+        JP   (IY)
+
+;------------------------------------------------------------------
+; r3d_pushes - two runs of 64 PUSH BCs, entered n from the end to
+; write 2n bytes of BC downwards from SP: two bytes every 11 T-states.
+; Two of them so that each can come back to its own place without an
+; index register, and both in one page so that only the low byte of
+; the entry has to be worked out.
+;------------------------------------------------------------------
+
+        ALIGN 256
+r3d_pushes:
+        DEFS 64,0xC5        ; PUSH BC, sixty four times
+        JP   r3d_roA
+        DEFS 128 - 67,0xC5
+        DEFS 64,0xC5
+        JP   r3d_roC
+
+;------------------------------------------------------------------
+; r3d_mul8x16 - A * (r3d_sinc), the product taken to fit sixteen bits
+;------------------------------------------------------------------
+
+r3d_mul8x16:
+        LD   C,A
+        LD   A,(r3d_sinc)
+        LD   B,A
+        CALL qsmul8
+        PUSH DE
+        LD   A,(r3d_sinc+1)
+        LD   B,A
+        CALL qsmul8
+        POP  HL
+        LD   A,H
+        ADD  A,E
+        LD   H,A
+        RET
+
+;------------------------------------------------------------------
+; The room. Convex, camera inside, wound so the walls come out left to
+; right on screen. r3d_rc is where each wall's colour ramp starts.
+;------------------------------------------------------------------
+
+r3d_nw:         DEFB 5
+r3d_rx:         DEFW  160,110, 160,-160, -60,-160, -160,-70, -160,110
+r3d_rc:         DEFB 1,8,1,8,1
+r3d_cx:         DEFW 0
+r3d_cz:         DEFW 0
+r3d_ca:         DEFB 0
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+r3d_back:       DEFB R3D_BUF0
+r3d_front:      DEFB R3D_BUF1
+r3d_scc:        DEFB 0xEE       ; ceiling colour byte
+r3d_sfc:        DEFB 0x77       ; floor colour byte
+r3d_sa:         DEFS 1
+r3d_co:         DEFS 1
+r3d_xn:         DEFS 1
+r3d_xp:         DEFS 2
+r3d_xq:         DEFS 2
+r3d_dx:         DEFS 2
+r3d_dz:         DEFS 2
+r3d_m7c:        DEFS 1
+r3d_m7l:        DEFS 1
+r3d_m7p:        DEFS 2
+r3d_ua:         DEFS 2
+r3d_ub:         DEFS 2
+r3d_um:         DEFS 2
+r3d_umc:        DEFS 1
+r3d_f32:        DEFS 4
+r3d_fsgn:       DEFS 1
+r3d_t:          DEFS 2
+r3d_pvx:        DEFS 2
+r3d_pvz:        DEFS 2
+r3d_psx:        DEFS 2
+r3d_ph:         DEFS 1
+r3d_psgn:       DEFS 1
+r3d_wall:       DEFS 1
+r3d_p0x:        DEFS 2
+r3d_p0z:        DEFS 2
+r3d_p1x:        DEFS 2
+r3d_p1z:        DEFS 2
+r3d_d0:         DEFS 2
+r3d_d1:         DEFS 2
+r3d_sx0:        DEFS 2
+r3d_sx1:        DEFS 2
+r3d_sxd:        DEFS 2
+r3d_h0:         DEFS 1
+r3d_h1:         DEFS 1
+r3d_sbl:        DEFS 1
+r3d_sbr:        DEFS 1
+r3d_shl:        DEFS 1
+r3d_shr:        DEFS 1
+r3d_swc:        DEFS 1
+r3d_sn:         DEFS 1
+r3d_sd:         DEFS 1
+r3d_shmax:      DEFS 1
+r3d_swleft:     DEFS 1
+r3d_sinc:       DEFS 2
+r3d_sacc:       DEFS 2
+r3d_szero:      DEFS 1
+r3d_sj:         DEFS 1
+r3d_spu:        DEFS 2
+r3d_spd:        DEFS 2
+r3d_snr:        DEFS 1
+r3d_snl:        DEFS 1
+r3d_src:        DEFS 1
+r3d_slc:        DEFS 1
+r3d_sp:         DEFS 2
+r3d_ns:         DEFS 1
+r3d_stride:     DEFS 1
+r3d_tsize:      DEFS 1
+r3d_pn:         DEFS 1
+r3d_pz:         DEFS 1
+r3d_pw:         DEFS 2
+r3d_tp:         DEFS 2
+r3d_cp:         DEFS 2
+r3d_cpu:        DEFS 2
+r3d_cpd:        DEFS 2
+r3d_clim:       DEFS 1
+r3d_ps:         DEFS 1
+r3d_pbg:        DEFS 1
+r3d_wcol:       DEFS R3D_MAXW
+r3d_vvx:        DEFS 4 * R3D_MAXW
+r3d_stt:        DEFS R3D_ST * R3D_MAXW
+r3d_cu:         DEFS 2 * R3D_MAXW
+r3d_cd:         DEFS 2 * R3D_MAXW
+r3d_tab:        DEFS 72 * 3 * R3D_MAXW
+
+;------------------------------------------------------------------
+; sin(2*pi*i/256) * 127, signed. Generated; must be page-aligned.
+;------------------------------------------------------------------
+
+        ALIGN 256
+r3d_sin:
+        DEFB 0,3,6,9,12,16,19,22,25,28,31,34,37,40,43,46
+        DEFB 49,51,54,57,60,63,65,68,71,73,76,78,81,83,85,88
+        DEFB 90,92,94,96,98,100,102,104,106,107,109,111,112,113,115,116
+        DEFB 117,118,120,121,122,122,123,124,125,125,126,126,126,127,127,127
+        DEFB 127,127,127,127,126,126,126,125,125,124,123,122,122,121,120,118
+        DEFB 117,116,115,113,112,111,109,107,106,104,102,100,98,96,94,92
+        DEFB 90,88,85,83,81,78,76,73,71,68,65,63,60,57,54,51
+        DEFB 49,46,43,40,37,34,31,28,25,22,19,16,12,9,6,3
+        DEFB 0,-3,-6,-9,-12,-16,-19,-22,-25,-28,-31,-34,-37,-40,-43,-46
+        DEFB -49,-51,-54,-57,-60,-63,-65,-68,-71,-73,-76,-78,-81,-83,-85,-88
+        DEFB -90,-92,-94,-96,-98,-100,-102,-104,-106,-107,-109,-111,-112,-113,-115,-116
+        DEFB -117,-118,-120,-121,-122,-122,-123,-124,-125,-125,-126,-126,-126,-127,-127,-127
+        DEFB -127,-127,-127,-127,-126,-126,-126,-125,-125,-124,-123,-122,-122,-121,-120,-118
+        DEFB -117,-116,-115,-113,-112,-111,-109,-107,-106,-104,-102,-100,-98,-96,-94,-92
+        DEFB -90,-88,-85,-83,-81,-78,-76,-73,-71,-68,-65,-63,-60,-57,-54,-51
+        DEFB -49,-46,-43,-40,-37,-34,-31,-28,-25,-22,-19,-16,-12,-9,-6,-3
+
+r3d_end:
+R3D_SIZE:       EQU r3d_end - r3d_init
