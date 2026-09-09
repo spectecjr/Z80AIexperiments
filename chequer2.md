@@ -73,10 +73,13 @@ The runs are static data rather than generated at init, which is why
 |---|---|---|---|---|
 | `chequer` | 4 px | 4 px | 92,404 | 50 Hz, 1.3K of run |
 | **`chequer2`** | **1 px** | 4 px | **104,301** | **50 Hz, 5.3K of run** |
+| `chequer3` | 1 px | 1 px | 110,556 | 50 Hz, 12K of run |
 | `harrier` | 1 px | 1 px | 221,420 | 25 Hz, no run bank |
 
-`chequer2` is the one to use unless memory is tight: the phase is what moves
-when the camera slides, and the width is what the eye does not see.
+`chequer3.z80s` has since taken the width off the grid as well, for 110,556
+T-states — still a 50 Hz routine, at 12K of run. Prefer it unless
+that memory is wanted for something else; this file is the cheap middle,
+and `chequer` the cheapest.
 
 ## Invariants
 

@@ -42,12 +42,14 @@ about which of those it is.
 |---|---|---|---|---|
 | `chequer.z80s` | 4 px | 4 px | 92,404 | 50 Hz |
 | `chequer2.z80s` | **1 px** | 4 px | 104,301 | 50 Hz |
+| `chequer3.z80s` | **1 px** | **1 px** | 110,556 | 50 Hz |
 | `harrier.z80s` | 1 px | 1 px | 221,420 | 25 Hz |
 
-`chequer2` is the one to use unless memory is tight - four compiled runs
-per square width instead of one, so the phase is exact and a scanline is
-still one dispatch. See `chequer.md`, `chequer2.md` and `harrier.md`.
-What follows is the original note.
+`chequer3` is the one to use: it draws harrier's screen, bit for bit, in
+half the time, and still fits a 50 Hz frame. It costs 12K of compiled run,
+which is the only reason to reach for one of the others. See `chequer.md`,
+`chequer2.md`, `chequer3.md` and `harrier.md`. What follows is the original
+note.
 
 An infinite checkerboard plane, fixed camera height, scrolling horizontally
 and vertically. Fixed Y-height for now; a moving camera height is a later

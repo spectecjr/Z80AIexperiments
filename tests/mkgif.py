@@ -363,6 +363,39 @@ def harrier(outdir, seconds=6):
     report(p, size, n, durs, secs, got, bad)
 
 
+def chequer3(outdir, seconds=8):
+    """chequer3 at its measured rate: 110,556 T-states a frame, 50 Hz.
+
+    harrier's screen - every boundary on its exact pixel - drawn out of
+    compiled runs instead of a dispatch a square, in half the time.
+    Compare demo/harrier.gif, which is the same board at 25 Hz.
+    """
+    import math
+    b = Bench("harness_chq3.asm", org=0)
+    s = b.syms
+    b.call_regs(s["chq3_init"])
+    fog = b.peek(s["chq3_fog"], 2 * 192)
+    haze = b.peek(s["chq3_hazec"], 192)
+    n = int(seconds * 50)
+    frames, pars, ts = [], [], []
+    for t in range(n):
+        camx = int(1400 * math.sin(2 * math.pi * t / 190))
+        camz = (t * 26) & 0xFFFF
+        b.poke(s["chq3_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["chq3_camz"], camz.to_bytes(2, "little"))
+        into = b.peek(s["chq3_back"], 1)[0]
+        tt, _ = b.call_regs(s["chq3_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+        pars.append(list(b.peek(s["chq3_par"], 192)))
+    idx, pal = copper(frames, pars, fog, haze)
+    p = "%s/chequer3.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, idx, pal, durs)
+    got, bad, secs = check_gif(p, idx, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 ROTO_PAL = ([(0, 0, 0)]
             + [(30 + 30 * i, 10 + 12 * i, 60 + 26 * i) for i in range(7)]
             + [(40 + 28 * i, 30 + 26 * i, 20 + 10 * i) for i in range(8)])
@@ -490,6 +523,7 @@ if __name__ == "__main__":
     chequer(d)
     chequer2(d)
     harrier(d)
+    chequer3(d)
     twist(d)
     roto(d)
     vox(d)

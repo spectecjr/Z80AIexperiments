@@ -1,0 +1,299 @@
+;------------------------------------------------------------------
+; chequer3.z80s - the Space Harrier floor, width and phase both exact
+;
+;   chq3_init    fill both buffers and the haze, once
+;   chq3_frame   draw from (chq3_camx, chq3_camz) and flip
+;
+; chequer.z80s draws a scanline as one compiled run of PUSHes, which
+; is one dispatch a scanline however many squares it holds - but a
+; PUSH is four pixels, so both the width of a square and the phase
+; quantise to four. chequer2.z80s took the phase off that grid with
+; four runs a width. harrier.z80s took both off it by dispatching once
+; a square instead of once a scanline, and pays about twice the price.
+;
+; This draws harrier's screen - the same bytes, checked against its
+; model at every camera position - out of compiled runs, in half the
+; time: 110,556 T-states against 221,420, which is 92% of a 50 Hz
+; frame where harrier is a 25 Hz routine. Three things buy that:
+;
+;   THE ENTRY. The phase runs 0..p-1 and a PUSH is four pixels, so
+;   phase >> 2 says which PUSH of the run a scanline starts at, and it
+;   needs no wrapping at all: the run is built so that entry always
+;   lands inside it. One table of three bytes an entry holds the
+;   address to jump to and the row's last byte to go with it.
+;
+;   THE STACK. Two of the remaining pixels of phase are one whole
+;   byte, so starting SP one byte down the row shifts the run two
+;   pixels for the price of not doing an INC SP. That halves the
+;   number of runs, which is what makes them fit at all. What it costs
+;   is the row's last byte, which the shifted run no longer reaches,
+;   so the row loop stores it - and where the run does reach it, that
+;   store is patched to a LD A,n and thrown away.
+;
+;   SIX VALUES. A run pushes BC, DE, HL, AF, IX or IY - two colours
+;   and up to four boundaries. An odd width needs all four boundaries,
+;   because its squares walk through every offset inside a PUSH; an
+;   even one needs two. AF IS A COLOUR, so F is POPped once a scanline
+;   and nothing between that POP and the run may touch the flags.
+;
+; It costs 8,722 bytes of run and 3,204 of entry table, which does not
+; fit in one piece: the memory either side of the screen buffers takes
+; it in two, and it stops at 0xFE00 to leave the stack somewhere.
+;
+; The palette does the depth stripes exactly as chequer.md describes,
+; and forward motion still costs nothing in pixels. Read chequer.md
+; first, then chequer2.md.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+CHQ3_RUNS:      EQU 0xE000      ; where the runs above the buffers go
+CHQ3_BUF0:      EQU 0x80
+CHQ3_BUF1:      EQU 0x20
+CHQ3_C1:        EQU 0x1111      ; the two colour indices, both nibbles
+CHQ3_C2:        EQU 0x2222
+
+;------------------------------------------------------------------
+; chq3_init - sky, haze, and the rows the frame draws over
+;------------------------------------------------------------------
+
+chq3_init:
+        LD   A,CHQ3_BUF0
+        LD   (chq3_back),A
+        LD   A,CHQ3_BUF1
+        LD   (chq3_front),A
+        LD   H,CHQ3_BUF0
+        CALL chq3_fill
+        LD   H,CHQ3_BUF1
+        ; fall through
+
+chq3_fill:
+        LD   L,0
+        PUSH HL
+        LD   D,0x60
+chq3_f1:
+        LD   B,0
+chq3_f2:
+        LD   (HL),CHQ3_C1 & 255
+        INC  HL
+        DJNZ chq3_f2
+        DEC  D
+        JR   NZ,chq3_f1
+        POP  HL                 ; then the haze, over the rows too far
+        LD   DE,(CHQ3_HZ + 1) * 128     ; away to draw a board on
+        ADD  HL,DE
+        LD   D,CHQ3_TOP - CHQ3_HZ - 1
+chq3_f3:
+        LD   B,128
+chq3_f4:
+        LD   (HL),CHQ3_HAZE
+        INC  HL
+        DJNZ chq3_f4
+        DEC  D
+        JR   NZ,chq3_f3
+        RET
+
+;------------------------------------------------------------------
+; chq3_frame - one frame
+;------------------------------------------------------------------
+
+chq3_frame:
+        CALL chq3_par8
+        CALL chq3_floor
+        LD   A,(chq3_back)
+        LD   B,A
+        LD   A,(chq3_front)
+        LD   (chq3_back),A
+        LD   A,B
+        LD   (chq3_front),A
+        RET
+
+;------------------------------------------------------------------
+; chq3_par8 - which way round the palette goes on each scanline
+;------------------------------------------------------------------
+
+chq3_par8:
+        LD   A,(chq3_camz)
+        LD   (chq3_pz1+1),A
+        LD   A,(chq3_camz+1)
+        LD   (chq3_pz2+1),A
+        LD   HL,chq3_ztab + 2 * (CHQ3_HZ + 1)
+        LD   DE,chq3_par + CHQ3_HZ + 1
+        LD   B,191 - CHQ3_HZ
+chq3_p1:
+        LD   A,(HL)
+        INC  HL
+chq3_pz1:
+        ADD  A,0
+        LD   A,(HL)
+        INC  HL
+chq3_pz2:
+        ADC  A,0
+        AND  1
+        LD   (DE),A
+        INC  DE
+        DJNZ chq3_p1
+        RET
+
+;------------------------------------------------------------------
+; chq3_floor - the board, bottom row upwards, a band of rows a width
+;
+; The camera's offset scaled to a square is camx * p / 256, and the
+; bands come widest first with p one smaller each time, so the whole
+; of it is one subtraction of camx a band. What that offset says is
+; which run to enter (the odd pixel of it), whether the stack pointer
+; shifts (the next pixel), and where in the run to enter (the rest).
+;------------------------------------------------------------------
+
+chq3_floor:
+        DI
+        LD   (chq3_sp),SP
+        LD   A,(chq3_camx)      ; the camera inside one square, times
+        LD   L,A                ; the widest square and one more, so
+        LD   H,0                ; that the first band's subtraction
+        LD   (chq3_cx),HL       ; leaves it times the widest
+        LD   B,H
+        LD   C,A
+        DUP  6
+        ADD  HL,HL
+        EDUP
+        ADD  HL,BC
+        LD   (chq3_acc),HL
+        LD   HL,chq3_band
+        LD   (chq3_bp+1),HL
+        LD   A,(chq3_back)
+        ADD  A,0x60
+        EXX
+        LD   H,A                ; the last byte of the last row, which
+        LD   L,0                ; is where a row's stack pointer starts
+        DEC  HL                 ; from and what a shifted run leaves
+        LD   DE,-128            ; for the row loop to store
+        EXX
+
+chq3_b1:
+        LD   HL,(chq3_acc)      ; the phase for this band, in pixels:
+        LD   BC,(chq3_cx)       ; one camx less than the band below
+        OR   A
+        SBC  HL,BC
+        LD   (chq3_acc),HL
+        LD   A,H
+        EX   AF,AF'             ; parked; HL is wanted for the table
+chq3_bp:
+        LD   HL,chq3_band       ; patched: this band's entry
+        LD   A,(HL)             ; the rows it covers
+        OR   A
+        JP   Z,chq3_bend
+        EXX
+        LD   B,A                ; the count lives with the row pointer
+        EXX
+        INC  HL
+        EX   AF,AF'
+        SRL  A                  ; the odd pixel of phase picks the run
+        JR   NC,chq3_b2
+        INC  HL
+        INC  HL
+chq3_b2:
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)             ; DE = the record for this run
+        INC  HL
+        JR   C,chq3_b3
+        INC  HL
+        INC  HL
+chq3_b3:
+        LD   (chq3_bp+1),HL     ; and on to the next band
+
+        SRL  A                  ; the next pixel of phase is a whole
+        LD   C,A                ; byte, which the stack pointer shifts
+        SBC  A,A                ; for the price of an INC SP - and if
+        CPL                     ; it does, the run no longer reaches
+        LD   B,A                ; the row's last byte, so the row loop
+        AND  0x33               ; stores it instead
+        LD   (chq3_shift),A
+        LD   A,B
+        AND  8
+        XOR  0x36
+        LD   (chq3_ed),A
+
+        EX   DE,HL              ; HL = the record: entries, then pairs
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)             ; DE = where each PUSH of phase enters
+        INC  HL
+        LD   A,C                ; three bytes an entry
+        ADD  A,A
+        ADD  A,C
+        ADD  A,E
+        LD   E,A
+        JR   NC,chq3_b4
+        INC  D
+chq3_b4:
+        LD   A,(DE)             ; the run, entered where the phase says
+        LD   (chq3_j+1),A
+        INC  DE
+        LD   A,(DE)
+        LD   (chq3_j+2),A
+        INC  DE
+        LD   A,(DE)             ; and the row's last byte to go with it
+        LD   (chq3_ed+1),A
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        LD   (chq3_lsp+1),DE    ; what the run wants in its four pairs
+        LD   BC,CHQ3_C1         ; the two colours, which every run
+        LD   DE,CHQ3_C2         ; pushes and nothing may disturb
+        JP   chq3_l2
+
+chq3_l1:
+        EXX                     ; the row pointer and the count are in
+chq3_l2:                        ; the other set, so the loop turns
+chq3_lsp:                       ; round in it and swaps back to draw
+        LD   SP,0               ; patched: the four pairs a run pushes,
+        POP  HL                 ; of which only a POP can load AF - so
+        POP  IX                 ; from there to the run nothing may
+        POP  IY                 ; touch the flags
+        POP  AF
+        EXX
+        LD   SP,HL              ; the runs fill rightwards to leftwards
+chq3_shift:
+        INC  SP                 ; patched: NOP, when the run is shifted
+        EXX
+chq3_j:
+        JP   0                  ; patched: the run for this band
+chq3_ret:
+        EXX
+chq3_ed:
+        LD   (HL),0             ; the row's last byte. Patched to LD A,n
+        ADD  HL,DE              ; where the run reaches it itself
+        DJNZ chq3_l1
+        EXX                     ; the band code wants the main set back
+        JP   chq3_b1
+
+chq3_bend:
+        EXX                     ; the top run spilled into the haze row
+        LD   SP,HL              ; above it; put that back
+        INC  SP
+        EXX
+        LD   BC,CHQ3_HAZE * 0x101
+        DUP  CHQ3_SPILL
+        PUSH BC
+        EDUP
+        LD   SP,(chq3_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+chq3_back:      DEFB CHQ3_BUF0
+chq3_front:     DEFB CHQ3_BUF1
+chq3_camx:      DEFW 0
+chq3_camz:      DEFW 0
+chq3_sp:        DEFS 2
+chq3_cx:        DEFS 2
+chq3_acc:       DEFS 2
+chq3_ph:        DEFS 1
+
+        ALIGN 256
+chq3_par:       DEFS 192

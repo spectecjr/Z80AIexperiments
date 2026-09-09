@@ -5,6 +5,13 @@ The Space Harrier floor again, with every boundary on its exact pixel.
 does not. It costs about twice as much — a 25 Hz routine where the other is
 a 50 Hz one — so **keep both**.
 
+> **`chequer3.z80s` now draws this same screen, bit for bit, in half the
+> time** — 110,556 T-states against 221,420 — by going back to a compiled
+> run a scanline and finding room for the exact width in it. Prefer it
+> unless its 12K of run bank is wanted elsewhere. This file is still the
+> readable statement of what the board *is*, and its model is what
+> chequer3 is tested against.
+
 Verified bit-exact against `tests/harrier.py`, pixels and parities, over 28
 camera positions.
 
