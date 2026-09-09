@@ -149,6 +149,39 @@ harmless.
 
 ---
 
+## 4. Voxel landscape — **modelled, not yet on the Z80**
+
+`tests/vox.py` is the model and it renders correctly (a landscape, a
+horizon buffer, no overdraw). What stopped it being written in assembly
+this session was working out what a *sample* costs, and it is dearer than
+this entry assumed:
+
+    x += dx, y += dy          60 T-states, two 16-bit adds
+    map address from x and y  41, with the map 256 bytes and page aligned
+    height to screen row      11, one table lookup
+    compare with the horizon  ~15
+    fill, when it rises       ~15 a byte, going upwards
+
+which is about 150 T-states a sample before anything is drawn. At 64
+columns of four pixels and 16 steps out that is 154,000, plus 12,288 bytes
+of column at ~15 T each - call it 340,000, or 17 Hz. Viable, and worth
+building, but not the free lunch this entry implied.
+
+The three decisions that make the sample as cheap as that, all found while
+modelling and all worth keeping:
+
+- **A 16x16 map, page aligned**, so a cell's address is one byte - exactly
+  `roto`'s texel trick. The world tiles every 16 cells, which at three
+  cells a step and 16 steps repeats three times across the view. A 32x32
+  map costs another six instructions a sample.
+- **y in 4.12**, so its row is already in the top nibble of its high byte
+  and needs no shifting - also `roto`'s.
+- **Sixteen height levels and sixteen steps**, so the height-to-row table
+  is indexed by `(h & 0xF0) | z` - the height needs no shift at all, and
+  the table is one page.
+
+The original entry follows.
+
 ## 4. Voxel landscape
 
 Comanche-style heightmap, front to back with one horizon byte a column.
