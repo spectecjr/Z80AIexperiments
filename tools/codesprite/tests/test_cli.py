@@ -243,3 +243,29 @@ def test_contradictory_stack_options_are_refused(tmp_path):
     with pytest.raises(SystemExit):
         main(["compile", str(path), "--name", "s", "--out-dir", str(tmp_path / "o"),
               "--stack", "none", "--mode", "stack"])
+
+
+def test_scratchpad_contract_is_documented(tmp_path):
+    path = tmp_path / "s.txt"
+    path.write_text("7777\n7777\n")
+    out = tmp_path / "out"
+    main(["compile", str(path), "--name", "s", "--out-dir", str(out),
+          "--routines", "save,restore", "--x-align", "2"])
+
+    for routine in ("save", "restore"):
+        text = (out / f"s_{routine}_single_xe.z80s").read_text()
+        assert "DE = this instance's scratchpad" in text
+        assert f"s_{routine}_single_xe_scratch_bytes EQU 4" in text
+        assert "LD DE,$" not in text  # the address is not baked in
+
+
+def test_fixed_scratch_bakes_the_address_in(tmp_path):
+    path = tmp_path / "s.txt"
+    path.write_text("7777\n7777\n")
+    out = tmp_path / "out"
+    main(["compile", str(path), "--name", "s", "--out-dir", str(out),
+          "--routines", "save", "--x-align", "2", "--scratch", "fixed",
+          "--scratch-base", "0xE000"])
+    text = (out / "s_save_single_xe.z80s").read_text()
+    assert "LD DE,$E000" in text
+    assert "scratchpad: 4 bytes at $E000" in text

@@ -6,6 +6,10 @@ Three routines share one shape - the byte span each sprite row touches:
 ``restore``    scratch      -> screen span
 ``restore_bb`` back buffer  -> screen span, at a fixed offset from the screen
 
+The scratchpad is normally passed in DE, so each sprite instance owns its
+own save area and one compiled routine serves them all; ``--scratch
+fixed`` bakes a single address in instead.
+
 The scratch layout is dense: row spans are concatenated in row order, so
 the scratch pointer only ever runs forwards and never needs re-seating.
 That is what makes ``LDI`` chains a good fit - 16T a byte with both
@@ -67,6 +71,7 @@ def _ldi_chain(
     *,
     to_screen: bool,
     source_delta: int | None = None,
+    scratch_in_de: bool = False,
 ) -> Program:
     """Copy each span with an unrolled LDI chain.
 
@@ -86,16 +91,21 @@ def _ldi_chain(
     # even under register relocation - but with the anchor in HL it has to be
     # parked in DE first.
     if to_screen:
-        if context.reloc is Reloc.REGISTER:
-            program.add(isa.Simple("EX DE,HL"))  # DE = anchor, HL free
-            screen_in_de = True
+        screen_in_de = True
+        if scratch_in_de:
+            # Caller passed the scratchpad in DE (and, under register
+            # relocation, the screen anchor in HL): one exchange puts the
+            # source in HL and the destination in DE, which is what LDI wants.
+            program.add(isa.Simple("EX DE,HL"))
         else:
-            screen_in_de = True
-        if source_delta is None:
-            program.add(isa.LdPairImm("HL", scratch_base))
+            if context.reloc is Reloc.REGISTER:
+                program.add(isa.Simple("EX DE,HL"))  # DE = anchor, HL free
+            if source_delta is None:
+                program.add(isa.LdPairImm("HL", scratch_base))
     else:
-        program.add(isa.LdPairImm("DE", scratch_base))
         screen_in_de = False
+        if not scratch_in_de:
+            program.add(isa.LdPairImm("DE", scratch_base))
 
     for span in spans:
         target = context.address_at(span.row, span.first_col)
@@ -191,12 +201,27 @@ def generate_copy(
     to_screen: bool,
     source_delta: int | None = None,
     allow_bounce: bool = True,
+    scratch_in_de: bool = False,
 ) -> Program:
-    """Generate the cheaper of the two copy strategies."""
+    """Generate the cheaper of the two copy strategies.
+
+    ``scratch_in_de`` takes the scratchpad address from DE at run time
+    instead of baking one in, so every sprite instance can own its own
+    save area.  It costs nothing - the pointer had to be loaded either
+    way - and is what lets one compiled routine serve many instances.
+    """
     spans = spans_of(packed)
     ldi = _ldi_chain(
-        spans, context, scratch_base, to_screen=to_screen, source_delta=source_delta
+        spans,
+        context,
+        scratch_base,
+        to_screen=to_screen,
+        source_delta=source_delta,
+        scratch_in_de=scratch_in_de,
     )
+    if scratch_in_de:
+        # The bounce needs the scratch address as an immediate in LD SP,nn.
+        return ldi
     if not context.allow_stack:
         return ldi  # the bounce moves data through SP
     if source_delta is not None and context.reloc is Reloc.REGISTER:

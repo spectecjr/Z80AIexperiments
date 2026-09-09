@@ -96,6 +96,7 @@ move_ship:
                 ; display file while it runs.  SP itself is always restored
                 ; by the routine, so nesting calls like this is safe.
                 DI
+                LD   DE,ship_pad                    ; this instance's area
                 CALL spr_ship_save_single_xe_ye     ; keep the background
                 CALL spr_ship_draw_single_xe_ye     ; draw the ship
                 EI
@@ -103,6 +104,7 @@ move_ship:
                 HALT                                ; wait for the frame
 
                 DI
+                LD   DE,ship_pad
                 CALL spr_ship_restore_single_xe_ye  ; put it back
                 EI
 
@@ -113,6 +115,13 @@ move_ship:
                 CP   240
                 JP   NZ,.step
                 RET
+
+;-----------------------------------------------------------------------
+; Each sprite instance owns its save area; the routine takes its address
+; in DE, so one compiled routine serves as many instances as you like.
+; The size it needs is <label>_scratch_bytes.
+;-----------------------------------------------------------------------
+ship_pad:       DEFS spr_ship_save_single_xe_ye_scratch_bytes
 
 ;-----------------------------------------------------------------------
 main:

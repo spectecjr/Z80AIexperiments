@@ -268,6 +268,18 @@ Recorded as they were made, so this document stays a usable design record.
 * **`emit/parse.py` was added**: emitted text is parsed back and re-encoded,
   so a mistake in how an instruction prints is caught, not only how it
   encodes.
+* **Scratchpads are passed in, not baked in.**  ``save`` and ``restore``
+  take the scratch address in DE (``--scratch register``, the default), so
+  each sprite instance owns its own area and one compiled routine serves
+  them all.  It costs nothing - the pointer had to be loaded either way -
+  and saves two bytes per routine.  ``<label>_scratch_bytes`` says how much
+  an instance needs.  ``--scratch fixed`` restores the old behaviour.
+* **The target memory map is confirmed**: code, data and stack in
+  ``$0000-$7FFF`` so interrupts stay serviceable; the display file paged in
+  whole at ``$8000-$DFFF``; ``$E000-$FFFF`` free in the same page.  Sprite
+  code may be duplicated across paged banks with trampolines - generated
+  routines do not care where they sit, beyond needing to be in RAM.  Mode 4
+  putting the left pixel in the high nibble is confirmed too.
 * **Optimisation is not yet a search.**  M6 is outstanding; today
   `optimize/evaluate.py` generates eight candidate plans and keeps the
   cheapest, which is honest but is not the annealer the plan describes.

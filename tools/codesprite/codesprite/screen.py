@@ -5,9 +5,21 @@ LEFT pixel in the HIGH nibble.  Rows are 128 bytes and strictly linear:
 
     addr(y, x) = base + y * 128 + x // 2
 
-The whole display file is 24576 bytes.  With the conventional base of
-0x8000 the screen occupies 0x8000..0xDFFF, which leaves 0xE000..0xFFFF
-(8 KiB) inside the same paged-in 32K half for scratch use.
+The whole display file is 24576 bytes.  The target memory map is:
+
+    0x0000..0x7FFF   code, data and the stack, in the low 32K half, so
+                     interrupts can be serviced while sprites draw.  Sprite
+                     code may be duplicated across paged banks here, with
+                     trampolines between them; nothing in the generated code
+                     cares where it sits, beyond needing to be in RAM (a
+                     patched routine rewrites its own immediates).
+    0x8000..0xDFFF   the display file, paged in whole (HMPR = VMPR) so that
+                     the row-stepping tricks below hold across it.
+    0xE000..0xFFFF   8 KiB left over in the same page, free for common code
+                     or for cached restore data.
+
+Save/restore scratchpads are normally passed in at run time rather than
+baked in, so each sprite instance can own its area wherever it likes.
 
 Two consequences of the 128-byte stride are used all over the code
 generator:

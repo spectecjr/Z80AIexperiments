@@ -85,6 +85,14 @@ def build_parser() -> argparse.ArgumentParser:
     )
     compile_p.add_argument("--clip", default="none", choices=["none", "y-spill", "y-entry"])
     compile_p.add_argument("--screen-base", type=_auto_int, default=0x8000)
+    compile_p.add_argument(
+        "--scratch",
+        default="register",
+        choices=["register", "fixed"],
+        help="where save/restore keep the background: an address the caller "
+        "passes in DE (default, so each sprite instance owns its own area), "
+        "or the single fixed --scratch-base",
+    )
     compile_p.add_argument("--scratch-base", type=_auto_int, default=0xE000)
     compile_p.add_argument("--backbuffer-base", type=_auto_int)
     compile_p.add_argument("--at", default="0,0", help="fixed draw position x,y for --reloc none")
@@ -198,7 +206,8 @@ def command_compile(args: argparse.Namespace) -> int:
 
     for phase in phases:
         packed = sprite.pack(phase)
-        layout.check_scratch(scratch_size(packed))
+        if args.scratch == "fixed":
+            layout.check_scratch(scratch_size(packed))
         for parity in parities:
             if reloc is Reloc.NONE:
                 # Addresses are baked in, so compile for the requested spot;
@@ -317,14 +326,25 @@ def build_variant(
     else:
         to_screen = routine != "save"
         delta = layout.backbuffer_delta if routine == "restore_bb" else None
+        scratch_in_de = args.scratch == "register" and routine != "restore_bb"
         program = generate_copy(
-            packed, context, args.scratch_base, to_screen=to_screen, source_delta=delta
+            packed,
+            context,
+            args.scratch_base,
+            to_screen=to_screen,
+            source_delta=delta,
+            scratch_in_de=scratch_in_de,
         )
-        notes.append(
-            f"scratch: {scratch_size(packed)} bytes at ${args.scratch_base:04X}"
-            if routine != "restore_bb"
-            else f"back buffer at ${args.backbuffer_base:04X}"
-        )
+        if routine == "restore_bb":
+            notes.append(f"back buffer at ${args.backbuffer_base:04X}")
+        elif scratch_in_de:
+            notes.append(
+                f"scratchpad: {scratch_size(packed)} bytes, address passed in DE"
+            )
+        else:
+            notes.append(
+                f"scratchpad: {scratch_size(packed)} bytes at ${args.scratch_base:04X}"
+            )
 
     if reloc is Reloc.PATCH:
         program = label_patch_sites(program)
@@ -347,6 +367,8 @@ def build_variant(
         palette=palette if routine == "draw" else None,
         lower_bound=lower_bound(packed) if routine == "draw" else None,
         compiled_at=(x, y),
+        scratch_in_de=routine in ("save", "restore") and args.scratch == "register",
+        scratch_bytes=scratch_size(packed),
         notes=notes,
     )
     if not args.no_verify:

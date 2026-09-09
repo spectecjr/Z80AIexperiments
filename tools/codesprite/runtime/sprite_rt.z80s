@@ -18,8 +18,13 @@
 ;   so dispatch on (x&1, y&1) - SPR_DISPATCH below does that.
 ;-----------------------------------------------------------------------
 
+; Memory map this assumes:
+;   $0000-$7FFF  code, data and stack (so interrupts can be serviced)
+;   $8000-$DFFF  the display file, paged in whole (HMPR = VMPR)
+;   $E000-$FFFF  free in the same page: common code, or cached restore data
 SPR_SCREEN      EQU $8000       ; display file base; must be 256-byte aligned
-SPR_SCRATCH     EQU $E000       ; save/restore scratch, just past the screen
+SPR_SCRATCH     EQU $E000       ; a default scratch area; save/restore
+                                ; normally take the address in DE instead
 
 ;-----------------------------------------------------------------------
 ; SPR_ADDR - HL = screen address of pixel (x, y)
@@ -62,6 +67,18 @@ SPR_SCRATCH     EQU $E000       ; save/restore scratch, just past the screen
                 LD   D,H                ; [4T]  D = high byte
                 ENDM
 
+;-----------------------------------------------------------------------
+; Save and restore take the scratchpad address in DE, so each sprite
+; instance owns its own area:
+;
+;       LD   DE,my_instance_pad
+;       CALL spr_ship_save_single_xe_ye      ; keep what is under it
+;       ...
+;       LD   DE,my_instance_pad
+;       CALL spr_ship_restore_single_xe_ye   ; put it back
+;
+; The number of bytes an instance needs is <label>_scratch_bytes.
+;
 ;-----------------------------------------------------------------------
 ; SPR_AT name, form - move a patched sprite, then draw it
 ;

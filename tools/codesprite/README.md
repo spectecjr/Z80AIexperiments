@@ -58,6 +58,7 @@ project includes only what it uses.
 | `--reloc` | `none` (fixed) · `patch` (self-modifying setpos) · `register` (HL) |
 | `--clip` | `none` today; `y-spill`/`y-entry` are M7 |
 | `--mode` | `best` (cost every candidate plan) · `hl` · `stack` · `ix` · `auto` |
+| `--scratch` | `register` (save/restore take the pad address in DE) · `fixed` |
 | `--stack` | `allow` writing through SP (fastest) · `none` (never touches SP) |
 | `--interrupts` | `caller` (you DI/EI around a batch) · `di` (routine guards itself) |
 
@@ -104,19 +105,26 @@ Measured, nominal T-states, verified in the emulator:
 | ring 16×16 | 96 | 1570 | 1480 | 15.4 |
 | ship 14×12 | 55 | 1012 | 1012 | 18.4 |
 
-## Open questions for the target machine
+## Target memory map
 
-These are assumptions the generator makes; correcting any of them is
-cheap, and each is isolated to one place:
+    $0000-$7FFF   code, data and stack, so interrupts can be serviced while
+                  sprites draw.  Sprite code may be duplicated across paged
+                  banks with trampolines between them; generated routines
+                  do not care where they sit, beyond needing to be in RAM
+                  (a patched routine rewrites its own immediates).
+    $8000-$DFFF   the display file, paged in whole (HMPR = VMPR).  Every
+                  row-stepping trick depends on those 24K being contiguous.
+    $E000-$FFFF   free in the same page: common code, or cached restore data.
 
-* **Screen at `$8000`, contiguous** (`HMPR = VMPR`), leaving `$E000-$FFFF`
-  for save/restore scratch. Everything about row stepping depends on the
-  24K display file being contiguous in the CPU's address space
-  (`codesprite/screen.py`).
-* **Where the generated code lives**, and that it is paged in throughout —
-  patched routines rewrite their own immediates, so they cannot be in ROM.
-* **CLUT byte encoding**, if you want palettes emitted as SAM colour
-  bytes rather than RGB comments.
+Save/restore take their scratchpad address in `DE` by default, so each
+sprite instance owns its own area; `<label>_scratch_bytes` says how much
+it needs. `--scratch fixed` bakes one address in instead.
+
+### Still unconfirmed
+
+* **CLUT byte encoding** — until then palettes are emitted as RGB
+  comments rather than SAM colour bytes.
+* **Getting a binary into SimCoupe** for end-to-end testing.
 
 ## Register and interrupt contract
 
@@ -130,7 +138,10 @@ itself by default: the expected shape is one `DI` before a batch of
 sprites and one `EI` after. Every generated file states which it is, in
 the header comment and as `<label>_uses_stack EQU 0|1`, and the size
 table has a `stack` column. `--stack none` builds routines that never
-touch SP at all, at some cost in speed.
+touch SP at all — but it is a real cost, not a small one: a solid 16×16
+sprite goes from 912T to about 1490T, since `PUSH` at 5.5T a byte is the
+only thing that beats a register-cached `LD (HL),r` at about 11T. Keep it
+for routines that genuinely must run with interrupts live.
 
 ## Layout
 

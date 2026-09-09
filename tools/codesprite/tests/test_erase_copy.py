@@ -189,3 +189,86 @@ def test_restore_from_back_buffer():
         for index in range(span.length):
             address = SCREEN.addr_byte(20 + span.row, 10 // 2 + span.first_col + index)
             assert cpu2.memory[address] == cpu2.memory[(address + delta) & 0xFFFF]
+
+
+# -- caller-supplied scratchpads --------------------------------------------
+
+
+def _run_with_registers(program, memory, **registers):
+    from codesprite.verify import run_program
+
+    cpu, _t, _r = run_program(program, memory, registers=registers)
+    return cpu
+
+
+def test_one_routine_serves_several_instances_with_their_own_scratch():
+    """The point of a passed-in scratchpad: two sprites, one save routine,
+    two independent backgrounds, restored in either order."""
+    sprite = Sprite([[6] * 8 for _ in range(4)])
+    packed = sprite.pack(0)
+    ctx_a = DrawContext(SCREEN, x=0, y=0, reloc=Reloc.REGISTER, label="t")
+    ctx_b = DrawContext(SCREEN, x=40, y=60, reloc=Reloc.REGISTER, label="t")
+
+    save = generate_copy(packed, ctx_a, 0, to_screen=False, scratch_in_de=True)
+    restore = generate_copy(packed, ctx_a, 0, to_screen=True, scratch_in_de=True)
+    draw = generate_draw(baseline_plan(packed, mode="auto"), ctx_a)
+    draw_b = generate_draw(baseline_plan(packed, mode="auto"), ctx_b)
+
+    memory = noise_image(0, SCREEN)
+    original = bytes(memory[SCREEN.base : SCREEN.base + SCREEN_BYTES])
+
+    scratch_a, scratch_b = 0x6000, 0x6100
+
+    def anchor(x, y):
+        address = SCREEN.addr_byte(y, x // 2)
+        return {"h": address >> 8, "l": address & 0xFF}
+
+    # Save both backgrounds into separate pads, then draw over both.
+    cpu = _run_with_registers(save, memory, **anchor(0, 0), d=scratch_a >> 8,
+                              e=scratch_a & 0xFF)
+    cpu = _run_with_registers(save, cpu.memory, **anchor(40, 60),
+                              d=scratch_b >> 8, e=scratch_b & 0xFF)
+    cpu = _run_with_registers(draw, cpu.memory, **anchor(0, 0))
+    cpu = _run_with_registers(draw_b, cpu.memory, **anchor(40, 60))
+    assert bytes(cpu.memory[SCREEN.base : SCREEN.base + SCREEN_BYTES]) != original
+
+    # Restore in the opposite order; both pads must still be intact.
+    cpu = _run_with_registers(restore, cpu.memory, **anchor(40, 60),
+                              d=scratch_b >> 8, e=scratch_b & 0xFF)
+    cpu = _run_with_registers(restore, cpu.memory, **anchor(0, 0),
+                              d=scratch_a >> 8, e=scratch_a & 0xFF)
+    assert bytes(cpu.memory[SCREEN.base : SCREEN.base + SCREEN_BYTES]) == original
+
+
+def test_passed_in_scratch_costs_no_more_than_a_baked_one():
+    sprite = Sprite([[3] * 12 for _ in range(6)])
+    packed = sprite.pack(0)
+    ctx = DrawContext(SCREEN, reloc=Reloc.NONE, label="t")
+    fixed = generate_copy(packed, ctx, SCRATCH, to_screen=False, allow_bounce=False)
+    passed = generate_copy(
+        packed, ctx, SCRATCH, to_screen=False, allow_bounce=False, scratch_in_de=True
+    )
+    assert passed.tstates <= fixed.tstates
+    assert passed.size < fixed.size  # one fewer immediate load
+
+
+@pytest.mark.parametrize("reloc", [Reloc.NONE, Reloc.PATCH, Reloc.REGISTER])
+def test_passed_in_scratch_round_trips_in_every_relocation_mode(reloc):
+    sprite = Sprite([[9, 8, 7, None, 6], [5, 4, 3, 2, 1]])
+    packed = sprite.pack(0)
+    ctx = DrawContext(SCREEN, x=20, y=30, reloc=reloc, label="t")
+    save = generate_copy(packed, ctx, 0, to_screen=False, scratch_in_de=True)
+    restore = generate_copy(packed, ctx, 0, to_screen=True, scratch_in_de=True)
+    draw = generate_draw(baseline_plan(packed, mode="auto"), ctx)
+
+    memory = noise_image(3, SCREEN)
+    original = bytes(memory[SCREEN.base : SCREEN.base + SCREEN_BYTES])
+    address = SCREEN.addr_byte(30, 20 // 2)
+    anchor = {"h": address >> 8, "l": address & 0xFF}
+    pad = {"d": 0x60, "e": 0x00}
+
+    cpu = _run_with_registers(save, memory, **anchor, **pad)
+    cpu = _run_with_registers(draw, cpu.memory, **anchor)
+    assert bytes(cpu.memory[SCREEN.base : SCREEN.base + SCREEN_BYTES]) != original
+    cpu = _run_with_registers(restore, cpu.memory, **anchor, **pad)
+    assert bytes(cpu.memory[SCREEN.base : SCREEN.base + SCREEN_BYTES]) == original

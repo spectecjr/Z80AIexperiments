@@ -48,6 +48,8 @@ class ModuleInfo:
     palette: list[tuple[int, int, int]] | None = None
     lower_bound: int | None = None
     compiled_at: tuple[int, int] | None = None
+    scratch_in_de: bool = False
+    scratch_bytes: int = 0
     notes: list[str] = field(default_factory=list)
 
     @property
@@ -61,8 +63,14 @@ class ModuleInfo:
 
 def _entry_contract(info: ModuleInfo) -> list[str]:
     """The register contract a caller has to honour, as comment lines."""
+    extra = []
+    if info.routine in ("save", "restore") and info.scratch_in_de:
+        extra = [
+            "Entry: DE = this instance's scratchpad "
+            f"({info.scratch_bytes} bytes needed).",
+        ]
     if info.reloc == "register":
-        return [
+        return extra + [
             "Entry: HL = address of the sprite's top-left screen byte.",
             f"       The routine assumes x is {'odd' if info.phase else 'even'}"
             + (
@@ -72,8 +80,8 @@ def _entry_contract(info: ModuleInfo) -> list[str]:
             ),
         ]
     if info.reloc == "patch":
-        return [
-            "Call setpos first, then the draw routine.",
+        return extra + [
+            "Call setpos first, then this routine.",
             "Entry to setpos: C = (y&1)*128 + x/2      (even sprite rows)",
             "                 B = ((y&1)^1)*128 + x/2  (odd sprite rows)",
             "                 D = screen_high + (y>>1)",
@@ -85,7 +93,10 @@ def _entry_contract(info: ModuleInfo) -> list[str]:
             ),
         ]
     at = info.compiled_at or (0, 0)
-    return [f"Fixed position: draws at x={at[0]}, y={at[1]}.  No entry values."]
+    return extra + [
+        f"Fixed position: draws at x={at[0]}, y={at[1]}."
+        + ("" if extra else "  No entry values.")
+    ]
 
 
 def render(
@@ -167,6 +178,11 @@ def render(
         f"{info.label}_uses_stack EQU {1 if uses_stack(program) else 0}"
         "   ; 1 = needs interrupts off"
     )
+    if info.routine in ("save", "restore"):
+        add(
+            f"{info.label}_scratch_bytes EQU {info.scratch_bytes}"
+            "   ; per instance"
+        )
     if setpos is not None and setpos.ops:
         add(f"{info.label}_setpos_tstates EQU {setpos.tstates}")
     add("")
