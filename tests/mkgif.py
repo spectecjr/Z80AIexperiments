@@ -309,9 +309,14 @@ def twist(outdir, seconds=6):
         pal.append(sam_rgb(v))
     n = seconds * 50
     frames, ts = [], []
+    import math
     for t in range(n):
-        b.poke(s["tw_ang"], bytes([(t * 3) & 255]))
-        b.poke(s["tw_delta"], bytes([(3 + (t // 60) % 5) & 255]))
+        # the waves travel down the ribbon while the whole thing turns,
+        # and the turn itself eases back and forth
+        b.poke(s["tw_ang"], bytes([(-t * 2) & 255]))
+        b.poke(s["tw_delta"],
+               bytes([int(t * 1.5 + 40 * math.sin(2 * math.pi * t / 260))
+                      & 255]))
         into = b.peek(s["tw_back"], 1)[0]
         tt, _ = b.call_regs(s["tw_frame"])
         ts.append(tt)

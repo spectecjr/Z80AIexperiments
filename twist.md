@@ -13,8 +13,8 @@ combinations.
 |---|---|
 | `tw_init` | the backdrop into both buffers, once |
 | `tw_frame` | draw at `(tw_ang, tw_delta)` and flip |
-| `tw_ang` | the angle at the top of the screen, 0..255 |
-| `tw_delta` | how much it turns per scanline |
+| `tw_ang` | where the top of the screen sits in `tw_shape` |
+| `tw_delta` | how far the whole ribbon is turned |
 
 ## Why it is here
 
@@ -22,6 +22,18 @@ It is the opposite of `wolf3d`. Every scanline is three or four horizontal
 runs of one colour, and a run goes at 5.5 T-states a byte off the stack
 pointer — the one thing this machine is genuinely good at. `wolf3d` pays 25
 T-states a byte because a texture forces column order; this pays 5.5.
+
+## The twist is a table
+
+`tw_shape` holds 256 angles — a steady turn with three waves running along
+it — laid down twice so 192 scanlines can start anywhere in it and read
+straight off the end without wrapping. `tw_ang` picks where the top of the
+screen sits in that shape and `tw_delta` turns the whole ribbon, so scrolling
+the first sends waves travelling down the ribbon while the second spins it.
+
+It costs 17 T-states a scanline over a constant step, and it is the
+difference between a screw and a whip. Anything that fits in 256 bytes and
+is periodic is a legal shape.
 
 ## The two ideas
 
@@ -51,8 +63,6 @@ gradient table in the loop.
 - `EXX` makes the *other* set active — load the row pointer after it, not
   before. (This was a bug: the pointer went into the shadow, `SP` was set
   from garbage, and the runs pushed over the low 8K.)
-- The angle steps *after* a scanline is drawn, not before, or the whole
-  ribbon is a row out of step with the model.
 - `tw_runlo`, `tw_runhi`, `tw_shl` and `tw_shr` are four **consecutive**
   pages, so one `INC H` walks between them. They must stay in that order and
   each be exactly 256 bytes.
@@ -64,12 +74,12 @@ gradient table in the loop.
 
 | | T-states |
 |---|---|
-| `tw_draw` | 102,289 — 192 scanlines, 533 each |
-| **`tw_frame`** | **102,376, and it does not vary** |
-| | **85% of the 120,000 a 50 Hz frame has** |
+| `tw_draw` | 105,603 — 192 scanlines, 550 each |
+| **`tw_frame`** | **105,690, and it does not vary** |
+| | **88% of the 120,000 a 50 Hz frame has** |
 | `tw_init` | 1,428,973 once |
 
-352 of the 533 is the 32 `PUSH`es; the rest is two table lookups, the angle
+352 of the 550 is the 32 `PUSH`es; the rest is two table lookups, the angle
 step and the loop. The optimisation pass took it from 118,107 — the angle
 into the alternate set, the backdrop into the palette, and the loop tail
 folded into one `EXX`.

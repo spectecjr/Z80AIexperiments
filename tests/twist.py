@@ -64,7 +64,17 @@ def pushes(a):
     return out
 
 
-def frame(base, delta):
+SHAPE = [int(round(3 * i + 52 * math.sin(2 * math.pi * i / 256)
+                   + 21 * math.sin(2 * math.pi * i * 3 / 256)
+                   + 9 * math.sin(2 * math.pi * i * 7 / 256))) & 255
+         for i in range(256)] * 2
+"""The twist down the ribbon: a steady turn with three waves running
+along it. Two copies, so 192 scanlines can start anywhere in it and
+read straight off the end without wrapping. Scrolling the start sends
+the waves travelling down the ribbon; the rotation turns the lot."""
+
+
+def frame(shift, rot):
     """The band, one scanline at a time.
 
     The backdrop is colour index 1 whatever row it is on, and the
@@ -73,8 +83,8 @@ def frame(base, delta):
     the inner loop.
     """
     buf = bytearray(STRIDE * H)
-    a = base
     for y in range(H):
+        a = (SHAPE[shift + y] + rot) & 255
         _, _, _, sl, sr = geom(a & 255)
         col = [BG * 0x11, sl * 0x11, sr * 0x11]
         p = pushes(a & 63)
@@ -82,5 +92,4 @@ def frame(base, delta):
             v = col[p[m]]
             buf[y * STRIDE + BX + BW - 2 - 2 * m] = v
             buf[y * STRIDE + BX + BW - 1 - 2 * m] = v
-        a = (a + delta) & 255
     return buf

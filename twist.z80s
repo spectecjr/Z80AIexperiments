@@ -15,6 +15,14 @@
 ; trick, and here it is worth 37 T-states a scanline over reading a
 ; gradient table in the loop.
 ;
+; THE TWIST IS A TABLE, not a constant step. tw_shape holds 256 angles
+; with a steady turn and three waves running along it, twice over so
+; that 192 scanlines can start anywhere in it. tw_ang picks where the
+; ribbon starts in that shape and tw_delta turns the whole thing, so
+; scrolling the first sends waves travelling down the ribbon while the
+; second spins it. It costs 17 T-states a scanline over a constant
+; step, and it is the difference between a screw and a whip.
+;
 ; A SCANLINE IS ONE JUMP. The whole line - backdrop, left face, right
 ; face, backdrop - is a single compiled run of 32 PUSHes with the
 ; silhouette baked into which register each pushes: HL for the
@@ -91,17 +99,27 @@ tw_draw:
         DI
         LD   (tw_sp),SP
         LD   A,(tw_delta)
-        LD   (tw_st+1),A
-        EXX                     ; the row pointer, its step, the scanline
-        LD   A,(tw_back)        ; count and the angle all live in the
-        LD   H,A                ; other set: the main one is three
-        LD   L,TW_BX + TW_BW    ; colours and nothing else
+        LD   (tw_st+1),A        ; the ribbon's own rotation this frame
+        LD   HL,tw_shape        ; and where in the twist it starts
+        LD   A,(tw_ang)
+        ADD  A,L
+        LD   L,A
+        JR   NC,tw_d1
+        INC  H
+tw_d1:
+        PUSH HL
+        POP  IY
+        EXX                     ; the row pointer, its step and the
+        LD   A,(tw_back)        ; scanline count live in the other set:
+        LD   H,A                ; the main one is three colours and
+        LD   L,TW_BX + TW_BW    ; nothing else
         LD   DE,128
         LD   B,192
-        LD   A,(tw_ang)
-        LD   C,A
 tw_l1:
-        LD   A,C                ; the angle this scanline is turned to
+        LD   A,(IY+0)           ; this scanline's place in the twist
+        INC  IY
+tw_st:
+        ADD  A,0                ; patched: and the whole ribbon's turn
         LD   SP,HL              ; the run fills rightwards to leftwards
         ADD  HL,DE              ; and the next row is 128 on
         EXX
@@ -125,10 +143,6 @@ tw_j:                           ; recolours per scanline
         JP   0                  ; patched: the run for this silhouette
 tw_next:
         EXX
-        LD   A,C                ; and the next one is turned a little more
-tw_st:
-        ADD  A,0                ; patched: how much it turns a scanline
-        LD   C,A
         DJNZ tw_l1
         EXX
         LD   SP,(tw_sp)
@@ -141,7 +155,8 @@ tw_st:
 
 tw_back:        DEFB TW_BUF0
 tw_front:       DEFB TW_BUF1
-tw_ang:         DEFB 0          ; the angle at the top of the screen
-tw_delta:       DEFB 3          ; and how much it turns a scanline
+tw_ang:         DEFB 0          ; where in tw_shape the top of the
+                                ; screen is
+tw_delta:       DEFB 3          ; and how far the whole ribbon is turned
 tw_a:           DEFS 1
 tw_sp:          DEFS 2

@@ -20,7 +20,7 @@ def main():
     bad = 0
     times = []
     for base in range(0, 256, 11):
-        for delta in (1, 3, 7):
+        for delta in (0, 37, 150):
             b.poke(s["tw_ang"], bytes([base]))
             b.poke(s["tw_delta"], bytes([delta]))
             into = b.peek(s["tw_back"], 1)[0]

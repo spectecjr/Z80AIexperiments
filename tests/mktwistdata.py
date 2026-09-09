@@ -65,7 +65,8 @@ def main(path):
              "\ntw_shl:\n" + defb(sh[0]),
              "\ntw_shr:\n" + defb(sh[1]),
              "\ntw_bg:\n" + defb([bg(y) for y in range(T.H)]),
-             "\ntw_ramp:\n" + defb([ramp(i) for i in range(8)])]
+             "\ntw_ramp:\n" + defb([ramp(i) for i in range(8)]),
+             "\ntw_shape:\n" + defb(T.SHAPE)]
     open(path, "w").write("\n".join(parts) + "\n")
     print("wrote %s: 64 runs of %d PUSHes, four pages of tables"
           % (path, 32))
