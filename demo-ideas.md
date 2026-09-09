@@ -208,6 +208,25 @@ not screen; 128×128 would not.
 
 More game-tech than demoscene, which is the only reason it is fourth.
 
+### 5. Room Maze - can we make the room render an actual simple maze?
+
+Same as the existing room kind of implementation, but now it actually renders a more complex room.
+
+### 6. Lit 3D Convex Shapes
+
+It'd be great if we could take the 3D Lit Cube renderer and see if we could use it to render the
+Entropy demo group logo. This is a simplified serif-Sigma made out of 45 degree angles. with a triangle
+with a hole cut out of the middle, entering the space to the left of the sigma. I'll provide an
+image later. The triangle is red, the sigma is white, and the entire form should be extruded by some
+amount so that it's not flat. The size of the object can be limited to 1/4 of the screen maximum in scale
+
+### 7. Bouncing cubes
+
+We can limit the scale of the cubes so that they only take up 1/8th of the screen maximum. Then we
+could render multiple cubes, and have them bounce with simple (integer math, no multiplication) physics
+and gravity against the walls (and possibly each other). We should also render the outline of the room
+they're bouncing around in, around the edge of the screen, and behind them for the other edges.
+
 ---
 
 ## Also considered, and why they rank lower
