@@ -1,0 +1,147 @@
+;------------------------------------------------------------------
+; twist.z80s - a twisting ribbon for the SAM Coupe
+;
+;   tw_init      fill both buffers with the backdrop, once
+;   tw_frame     draw the ribbon at (tw_ang, tw_delta) and flip
+;
+; A square cross-section turning about a vertical axis, with the angle
+; stepping down the screen so it twists. It is here because it is the
+; opposite of wolf3d: every scanline is three or four horizontal runs
+; of one colour, and a run goes at 5.5 T-states a byte off the stack
+; pointer, which is the one thing this machine is good at.
+;
+; The backdrop is one colour index whatever scanline it is on, and the
+; palette gives that index its own colour per scanline - chequer.z80s's
+; trick, and here it is worth 37 T-states a scanline over reading a
+; gradient table in the loop.
+;
+; A SCANLINE IS ONE JUMP. The whole line - backdrop, left face, right
+; face, backdrop - is a single compiled run of 32 PUSHes with the
+; silhouette baked into which register each pushes: HL for the
+; backdrop, BC and DE for the two faces. So there is no per-run
+; dispatch at all, and a scanline costs its PUSHes plus the twenty odd
+; T-states of working out which run it wants.
+;
+; THERE ARE ONLY 64 RUNS. A square looks the same every quarter turn,
+; so 64 silhouettes cover all 256 angles; what changes over a whole
+; turn is which physical face is on the left and what each is shaded,
+; and that is a pair of table lookups. 64 runs at 35 bytes is 2,240
+; bytes of generated code, against 8,960 if the symmetry were ignored.
+;
+; The colours are three registers, so the two faces can be shaded from
+; a ramp and the backdrop can be a different colour on every scanline
+; without any of it touching the compiled runs.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+TW_BUF0:        EQU 0x80
+TW_BUF1:        EQU 0x20
+TW_BGC:         EQU 0x1111      ; the backdrop, one colour index
+
+;------------------------------------------------------------------
+; tw_init - the backdrop into both buffers, gradient and all
+;------------------------------------------------------------------
+
+tw_init:
+        LD   A,TW_BUF0
+        LD   (tw_back),A
+        LD   A,TW_BUF1
+        LD   (tw_front),A
+        LD   H,TW_BUF0
+        CALL tw_bd
+        LD   H,TW_BUF1
+        ; fall through
+
+tw_bd:
+        LD   L,0
+        LD   D,0x60
+tw_bd1:
+        LD   B,0
+tw_bd2:
+        LD   (HL),TW_BGC & 255
+        INC  HL
+        DJNZ tw_bd2
+        DEC  D
+        JR   NZ,tw_bd1
+        RET
+
+;------------------------------------------------------------------
+; tw_frame - one frame
+;------------------------------------------------------------------
+
+tw_frame:
+        CALL tw_draw
+        LD   A,(tw_back)
+        LD   B,A
+        LD   A,(tw_front)
+        LD   (tw_back),A
+        LD   A,B
+        LD   (tw_front),A
+        RET
+
+;------------------------------------------------------------------
+; tw_draw - the ribbon, top row down
+;
+; The row pointer lives in the alternate set, because BC, DE and HL are
+; the three colours the runs push and cannot be disturbed.
+;------------------------------------------------------------------
+
+tw_draw:
+        DI
+        LD   (tw_sp),SP
+        LD   A,(tw_delta)
+        LD   (tw_st+1),A
+        EXX                     ; the row pointer, its step, the scanline
+        LD   A,(tw_back)        ; count and the angle all live in the
+        LD   H,A                ; other set: the main one is three
+        LD   L,TW_BX + TW_BW    ; colours and nothing else
+        LD   DE,128
+        LD   B,192
+        LD   A,(tw_ang)
+        LD   C,A
+tw_l1:
+        LD   A,C                ; the angle this scanline is turned to
+        LD   SP,HL              ; the run fills rightwards to leftwards
+        ADD  HL,DE              ; and the next row is 128 on
+        EXX
+        LD   L,A
+        LD   H,tw_runlo / 256
+        LD   A,(HL)             ; which compiled run that silhouette is
+        LD   (tw_j+1),A
+        INC  H
+        LD   A,(HL)
+        LD   (tw_j+2),A
+        INC  H
+        LD   A,(HL)             ; and what its two faces are shaded
+        LD   B,A
+        LD   C,A
+        INC  H
+        LD   A,(HL)
+        LD   D,A
+        LD   E,A
+        LD   HL,TW_BGC          ; the backdrop, which the palette
+tw_j:                           ; recolours per scanline
+        JP   0                  ; patched: the run for this silhouette
+tw_next:
+        EXX
+        LD   A,C                ; and the next one is turned a little more
+tw_st:
+        ADD  A,0                ; patched: how much it turns a scanline
+        LD   C,A
+        DJNZ tw_l1
+        EXX
+        LD   SP,(tw_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+tw_back:        DEFB TW_BUF0
+tw_front:       DEFB TW_BUF1
+tw_ang:         DEFB 0          ; the angle at the top of the screen
+tw_delta:       DEFB 3          ; and how much it turns a scanline
+tw_a:           DEFS 1
+tw_sp:          DEFS 2

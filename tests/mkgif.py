@@ -286,6 +286,44 @@ def chequer(outdir, seconds=6):
     report(p, size, n, durs, secs, got, bad)
 
 
+def twist(outdir, seconds=6):
+    """twist at its measured rate: 102,376 T-states a frame, 50 Hz.
+
+    The ribbon is one backdrop index and eight shades, so the gradient
+    behind it is palette work rather than pixels - the same as chequer
+    - and it is applied here the way the line interrupt would.
+    """
+    b = Bench("harness_twist.asm", org=0)
+    s = b.syms
+    b.call_regs(s["tw_init"])
+    bg = list(b.peek(s["tw_bg"], 192))
+    ramp = list(b.peek(s["tw_ramp"], 8))
+    pal = [(0, 0, 0)] * 16
+    for i, v in enumerate(ramp):
+        pal[8 + i] = sam_rgb(v)
+    rows = {}
+    for v in set(bg):
+        rows[v] = len(pal)
+        pal.append(sam_rgb(v))
+    n = seconds * 50
+    frames, ts = [], []
+    for t in range(n):
+        b.poke(s["tw_ang"], bytes([(t * 3) & 255]))
+        b.poke(s["tw_delta"], bytes([(3 + (t // 60) % 5) & 255]))
+        into = b.peek(s["tw_back"], 1)[0]
+        tt, _ = b.call_regs(s["tw_frame"])
+        ts.append(tt)
+        f = unpack(b.peek(BUF[into], 128 * 192))
+        for y in range(192):                # the backdrop's own colour
+            f[y][f[y] == 1] = rows[bg[y]]
+        frames.append(f)
+    p = "%s/twist.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, frames, pal, durs)
+    got, bad, secs = check_gif(p, frames, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 if __name__ == "__main__":
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
     cube(d)
@@ -294,3 +332,4 @@ if __name__ == "__main__":
     maze(d, harness="harness_wolf96.asm", name="maze96")
     maze(d, harness="harness_wolfwide.asm", name="mazewide")
     chequer(d)
+    twist(d)
