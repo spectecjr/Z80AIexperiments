@@ -86,6 +86,49 @@ def report(path, size, n, durs, secs, got, bad):
     print("  %-18s %s" % ("", ", ".join(
         "%d at %dms" % (hold[d], d) for d in sorted(hold))))
 
+def sam_rgb(v):
+    """A SAM palette byte back to RGB, the inverse of mkchqdata.sam."""
+    br = (v >> 3) & 1
+    out = []
+    for hi, lo in ((6, 2), (5, 1), (4, 0)):         # green, red, blue
+        lvl = (((v >> hi) & 1) << 2) | (((v >> lo) & 1) << 1) | br
+        out.append(lvl * 255 // 7)
+    g, r, b = out
+    return (r, g, b)
+
+
+def copper(frames, pars, fog):
+    """Flatten per-scanline palettes into one indexed image and palette.
+
+    A routine that flips two palette entries a scanline shows more
+    colours at once than the sixteen a MODE 4 screen has, so the frames
+    are remapped here into a palette of everything they use between
+    them - which is what the screen would actually be showing.
+    """
+    pal, seen = [], {}
+
+    def slot(rgb):
+        if rgb not in seen:
+            seen[rgb] = len(pal)
+            pal.append(rgb)
+        return seen[rgb]
+
+    out = []
+    for f, par in zip(frames, pars):
+        g = np.zeros(f.shape, np.uint8)
+        for y in range(f.shape[0]):
+            a, b = fog[2 * y], fog[2 * y + 1]
+            if par[y]:
+                a, b = b, a
+            g[y][f[y] == 1] = slot(sam_rgb(a))
+            g[y][f[y] == 2] = slot(sam_rgb(b))
+        out.append(g)
+    if len(pal) > 256:
+        raise SystemExit("copper: %d colours, more than a GIF holds"
+                         % len(pal))
+    return out, pal
+
+
 def unpack(raw):
     """A MODE 4 buffer into one byte a pixel."""
     b = np.frombuffer(raw, dtype=np.uint8).reshape(192, 128)
@@ -210,6 +253,39 @@ def maze(outdir, seconds=12, harness="harness_wolf.asm", name="maze"):
     report(p, size, n, durs, secs, got, bad)
 
 
+def chequer(outdir, seconds=6):
+    """chequer at its measured rate: 92,404 T-states a frame, 50 Hz.
+
+    Forward all the way and weaving sideways. The palette flips the
+    board's depth stripes and grades the whole picture with distance,
+    so what is drawn is two colour indices and nothing else - see
+    chequer.md.
+    """
+    import math
+    b = Bench("harness_chq.asm", org=0)
+    s = b.syms
+    b.call_regs(s["chq_init"])
+    fog = b.peek(s["chq_fog"], 2 * 192)
+    n = seconds * 50
+    frames, pars, ts = [], [], []
+    for t in range(n):
+        camx = int(1400 * math.sin(2 * math.pi * t / 190))
+        camz = (t * 26) & 0xFFFF
+        b.poke(s["chq_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["chq_camz"], camz.to_bytes(2, "little"))
+        into = b.peek(s["chq_back"], 1)[0]
+        tt, _ = b.call_regs(s["chq_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+        pars.append(list(b.peek(s["chq_par"], 192)))
+    idx, pal = copper(frames, pars, fog)
+    p = "%s/chequer.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, idx, pal, durs)
+    got, bad, secs = check_gif(p, idx, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 if __name__ == "__main__":
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
     cube(d)
@@ -217,3 +293,4 @@ if __name__ == "__main__":
     maze(d)
     maze(d, harness="harness_wolf96.asm", name="maze96")
     maze(d, harness="harness_wolfwide.asm", name="mazewide")
+    chequer(d)

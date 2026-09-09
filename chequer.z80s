@@ -1,0 +1,353 @@
+;------------------------------------------------------------------
+; chequer.z80s - a Space Harrier floor for the SAM Coupe
+;
+;   chq_init     build the runs, fill both buffers, once
+;   chq_frame    draw the floor from (chq_camx, chq_camz) and flip
+;   chq_out      what the display interrupt would do with the parities
+;
+; An infinite chequerboard at a fixed camera height, scrolling both
+; ways, in MODE 4's 256x192 with the horizon at row CHQ_HZ.
+;
+; THE DEPTH STRIPES ARE NOT DRAWN. With the camera height fixed, one
+; scanline is one depth, so the board's row parity is constant along it
+; - and a thing that is constant along a scanline belongs to the
+; palette, not to the pixels. The whole screen is drawn in colour
+; index 1 and 2, the sky included, and what those two indices mean is
+; set per scanline. So:
+;
+;   scrolling forward costs nothing in pixels at all. It moves the
+;   scanlines at which the palette flips, and nothing else.
+;
+;   scrolling sideways is the only thing that touches pixels, and the
+;   phase as a fraction of a square is the same at every depth - the
+;   camera sits in the same part of a square however far away you look
+;   - so it is one number a frame, not one a scanline.
+;
+; ONE DISPATCH A SCANLINE. A scanline is a square wave of period p, so
+; it is one run of alternating PUSH BC / PUSH DE with the period baked
+; in - not one run per square. That is what stops the cost exploding as
+; the squares shrink to nothing near the horizon: a scanline costs its
+; 64 PUSHes and one dispatch whether it holds four squares or sixty.
+;
+; chq_gen writes one run per square width at init, 64 PUSHes plus a
+; cycle of them, and the phase is which push you enter at. Entering
+; part way in spills the extra pushes off the left hand end into the
+; row above - which is why the floor is drawn bottom upwards, so the
+; row above is the one drawn next, and only the last one needs putting
+; back.
+;
+; A square is a whole number of PUSHes, so its width and the phase both
+; quantise to four pixels. Against an exact model that is invisible:
+; the perspective convergence is carried by the palette stripes, and
+; the four-pixel steps in the vertical lines do not read at all.
+;
+; WHAT IS NOT VERIFIED HERE. chq_frame writes a parity a scanline into
+; chq_par, and everything about that is checked against the model. What
+; the display then does with it - two CLUT writes in the line interrupt
+; - is not, because the test bench is a plain Z80 with no SAM ASIC in
+; it. chq_out is the loop it would run; the raster timing wants
+; SimCoupe or hardware. tests/mkgif.py applies chq_par and chq_fog when
+; it writes the GIF, so the picture is right even though the timing is
+; unproven.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+CHQ_BUF0:       EQU 0x80
+CHQ_BUF1:       EQU 0x20
+CHQ_RUNS:       EQU 0xE000      ; the compiled runs, about 1.3K of them
+CHQ_C1:         EQU 0x1111      ; the two colour indices, both nibbles
+CHQ_C2:         EQU 0x2222
+CHQ_CLUT:       EQU 248         ; the SAM's palette port
+
+;------------------------------------------------------------------
+; chq_init - fill both buffers and compile the runs
+;------------------------------------------------------------------
+
+chq_init:
+        LD   A,CHQ_BUF0
+        LD   (chq_back),A
+        LD   A,CHQ_BUF1
+        LD   (chq_front),A
+        LD   H,CHQ_BUF0
+        CALL chq_fill
+        LD   H,CHQ_BUF1
+        CALL chq_fill
+        ; fall through into the generator
+
+;------------------------------------------------------------------
+; chq_gen - one run per square width
+;
+; Square i is 4i pixels, so i PUSHes of one colour then i of the other,
+; and a cycle is 2i PUSHes. The run is 64 PUSHes - a scanline - plus a
+; cycle, so that entering anywhere in the cycle still covers the line.
+;------------------------------------------------------------------
+
+chq_gen:
+        LD   HL,CHQ_RUNS
+        LD   IX,chq_base + 2
+        LD   B,1                ; B = i, the square in PUSHes
+chq_g1:
+        LD   (IX+0),L           ; where this one starts
+        LD   (IX+1),H
+        INC  IX
+        INC  IX
+        LD   A,B                ; 64 + 2i PUSHes to write
+        ADD  A,A
+        ADD  A,64
+        LD   C,A
+        LD   D,0xC5             ; PUSH BC, the first colour
+        LD   E,B                ; and how many are left of this one
+chq_g2:
+        LD   (HL),D
+        INC  HL
+        DEC  E
+        JR   NZ,chq_g3
+        LD   E,B                ; a whole square: the other colour now
+        LD   A,D
+        XOR  0x10               ; PUSH BC becomes PUSH DE
+        LD   D,A
+chq_g3:
+        DEC  C
+        JR   NZ,chq_g2
+        LD   (HL),0xFD          ; JP (IY) - back to the scanline loop
+        INC  HL
+        LD   (HL),0xE9
+        INC  HL
+        INC  B
+        LD   A,B
+        CP   CHQ_NP + 1
+        JR   C,chq_g1
+        LD   (chq_gp),HL
+        RET
+
+;------------------------------------------------------------------
+; chq_fill - 0x6000 bytes of colour index 1 from H:00
+;------------------------------------------------------------------
+
+chq_fill:
+        LD   L,0
+        LD   D,0x60
+chq_f1:
+        LD   B,0
+chq_f2:
+        LD   (HL),CHQ_C1 & 255
+        INC  HL
+        DJNZ chq_f2
+        DEC  D
+        JR   NZ,chq_f1
+        RET
+
+;------------------------------------------------------------------
+; chq_frame - one frame
+;------------------------------------------------------------------
+
+chq_frame:
+        CALL chq_entry
+        CALL chq_floor
+        CALL chq_par8
+        ; fall through into the flip
+
+chq_flip:
+        LD   A,(chq_back)
+        LD   B,A
+        LD   A,(chq_front)
+        LD   (chq_back),A
+        LD   A,B
+        LD   (chq_front),A
+        RET
+
+;------------------------------------------------------------------
+; chq_entry - where each run is entered this frame
+;
+; The camera's offset inside a square is the low byte of chq_camx,
+; because a square is 256 world units, and scaled to a scanline whose
+; square is i PUSHes wide that is the high byte of i * camx - one add
+; a period. Where the run is entered with the camera at zero is in the
+; table, so the whole thing is a subtract and, once in a while, a wrap
+; back into the cycle.
+;------------------------------------------------------------------
+
+chq_entry:
+        LD   A,(chq_camx)
+        LD   C,A                ; the camera inside its own square
+        LD   B,0                ; the fraction of it that i * camx has
+        LD   E,0                ; reached, and phi >> 2, its whole part
+        LD   IX,chq_kt + 2
+        LD   IY,chq_base + 2
+        LD   HL,chq_ent + 2
+        LD   D,CHQ_NP
+chq_e1:
+        LD   A,B                ; i * camx, one add a period
+        ADD  A,C
+        LD   B,A
+        JR   NC,chq_e2
+        INC  E
+chq_e2:
+        LD   A,(IX+0)           ; where the run starts with the camera at
+        SUB  E                  ; zero, less this frame's own offset
+        JR   NC,chq_e3
+        ADD  A,(IX+1)           ; back inside the cycle
+chq_e3:
+        ADD  A,(IY+0)           ; and on to where the run itself starts
+        LD   (HL),A
+        INC  HL
+        LD   A,(IY+1)
+        ADC  A,0
+        LD   (HL),A
+        INC  HL
+        INC  IX
+        INC  IX
+        INC  IY
+        INC  IY
+        DEC  D
+        JR   NZ,chq_e1
+        RET
+
+;------------------------------------------------------------------
+; chq_floor - the board, bottom row upwards
+;
+; BC and DE hold the two colours for the whole loop and must not be
+; touched: they are what the runs push. The row pointer lives in the
+; other register set for the same reason.
+;
+; Rows come in bands that share a square width - sixteen of them - so
+; the run and where to enter it are worked out once a band and not once
+; a row. What a row costs is then five instructions and its PUSHes.
+;------------------------------------------------------------------
+
+chq_floor:
+        DI
+        LD   (chq_sp),SP
+        LD   BC,CHQ_C1
+        LD   DE,CHQ_C2
+        LD   IY,chq_ret
+        LD   IX,chq_band
+        LD   A,(chq_back)
+        ADD  A,0x60             ; one past the last byte of the last row
+        EXX                     ; the row pointer and its step live in the
+        LD   H,A                ; other set, so the colours can stay put
+        LD   L,0
+        LD   DE,-128
+        EXX
+chq_b1:
+        LD   A,(IX+1)           ; the run every row of this band uses
+        OR   A
+        JR   Z,chq_bend
+        ADD  A,A
+        LD   L,A
+        LD   H,chq_ent / 256
+        LD   A,(HL)
+        INC  L
+        LD   H,(HL)
+        LD   L,A                ; HL = where to enter it, all band long
+        LD   A,(IX+0)           ; and how many rows that is
+        INC  IX
+        INC  IX
+chq_l1:
+        EXX
+        LD   SP,HL              ; the runs fill rightwards to leftwards
+        ADD  HL,DE              ; and the row above is 128 lower
+        EXX
+        JP   (HL)
+chq_ret:
+        DEC  A
+        JP   NZ,chq_l1
+        JR   chq_b1
+chq_bend:
+        EXX                     ; the top run spilled into the haze row
+        LD   SP,HL              ; above it; put that back
+        EXX
+        DUP  CHQ_SPILL
+        PUSH BC
+        EDUP
+        LD   SP,(chq_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; chq_par8 - which way round the palette goes on each scanline
+;
+; The board's row is bit 8 of the scanline's depth plus the camera's,
+; because a square is 256 world units. This is the whole cost of
+; scrolling forward.
+;------------------------------------------------------------------
+
+chq_par8:
+        LD   A,(chq_camz)       ; the camera's depth goes in as immediates,
+        LD   (chq_pz1+1),A      ; so B is free to count the scanlines
+        LD   A,(chq_camz+1)
+        LD   (chq_pz2+1),A
+        LD   HL,chq_ztab + 2 * (CHQ_HZ + 1)
+        LD   DE,chq_par + CHQ_HZ + 1
+        LD   B,191 - CHQ_HZ
+chq_p1:
+        LD   A,(HL)
+        INC  HL
+chq_pz1:
+        ADD  A,0
+        LD   A,(HL)
+        INC  HL
+chq_pz2:
+        ADC  A,0
+        AND  1                  ; which square of the board this row is in
+        LD   (DE),A
+        INC  DE
+        DJNZ chq_p1
+        RET
+
+;------------------------------------------------------------------
+; chq_out - the two palette writes a scanline, for real hardware
+;
+; This is what the line interrupt would run, one scanline at a time,
+; and it is the one part of this file the test bench cannot check: the
+; emulator has no CLUT and no raster. Entry: L = scanline.
+;------------------------------------------------------------------
+
+chq_out:
+        LD   H,chq_par / 256
+        LD   A,(HL)             ; which way round this scanline goes
+        LD   H,0
+        ADD  HL,HL              ; two colours a scanline in chq_fog
+        LD   DE,chq_fog
+        ADD  HL,DE
+        OR   A
+        JR   Z,chq_o1
+        INC  HL                 ; the far square first
+        LD   A,(HL)
+        DEC  HL
+        LD   B,1
+        JR   chq_o2
+chq_o1:
+        LD   A,(HL)
+        INC  HL
+        LD   B,1
+chq_o2:
+        LD   C,CHQ_CLUT
+        OUT  (C),A              ; palette entry 1
+        LD   A,(HL)
+        LD   B,2
+        OUT  (C),A              ; palette entry 2
+        RET
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+chq_back:       DEFB CHQ_BUF0
+chq_front:      DEFB CHQ_BUF1
+chq_camx:       DEFW 0          ; the camera, world units
+chq_camz:       DEFW 0
+chq_rp:         DEFS 2
+chq_sp:         DEFS 2
+chq_n:          DEFS 1
+chq_i:          DEFS 1
+chq_j:          DEFS 1
+chq_gp:         DEFS 2
+chq_base:       DEFS 2 * (CHQ_NP + 1)
+
+        ALIGN 256
+chq_ent:        DEFS 2 * (CHQ_NP + 1)   ; this frame's entry into each run
+
+        ALIGN 256
+chq_par:        DEFS 192                ; which way round the palette goes
