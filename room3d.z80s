@@ -123,7 +123,11 @@ R3D_HSCALE:     EQU 8192        ; h = R3D_HSCALE / vz
 R3D_LEVELS:     EQU 6           ; shades in a wall ramp
 R3D_BUF0:       EQU 0x80        ; high byte of the first buffer
 R3D_BUF1:       EQU 0x20        ; and the second
-R3D_MAXW:       EQU 8           ; most walls a room may have
+    IFNDEF R3D_WALLS            ; most walls a room may have, and the
+R3D_MAXW:       EQU 8           ; most strips a frame may hold. A
+    ELSE                        ; harness that drives this renderer
+R3D_MAXW:       EQU R3D_WALLS   ; harder - portal.z80s does - DEFINEs
+    ENDIF                       ; R3D_WALLS before including this file
 
 ;------------------------------------------------------------------
 ; r3d_init - black both buffers, letterbox and all
@@ -156,6 +160,10 @@ r3d_bl2:
 
 r3d_frame:
         CALL r3d_xform      ; every vertex into view space
+        LD   HL,0           ; one room fills the screen
+        LD   (r3d_wl),HL
+        LD   HL,256
+        LD   (r3d_wr),HL
         XOR  A
         LD   (r3d_ns),A
         LD   (r3d_wall),A
@@ -567,7 +575,26 @@ r3d_ow1:
         CALL r3d_getv
         LD   (r3d_p1x),BC
         LD   (r3d_p1z),DE
+        CALL r3d_wspan      ; clip, project and clamp it to the window
+        RET  NC
+        LD   A,(r3d_wall)   ; then its own place in the colour ramp
+        LD   L,A
+        LD   H,0
+        LD   BC,r3d_rc
+        ADD  HL,BC
+        LD   A,(HL)
+        JP   r3d_wdraw
 
+;------------------------------------------------------------------
+; r3d_wspan - a wall's ends in view space to a span of byte columns
+;
+; Entry : the two ends in r3d_p0x/p0z and r3d_p1x/p1z, the window in
+;         r3d_wl and r3d_wr
+; Exit  : carry set and the span in r3d_sbl/r3d_sbr with its heights
+;         in r3d_h0/r3d_h1, or carry clear if none of it is visible
+;------------------------------------------------------------------
+
+r3d_wspan:
         LD   HL,(r3d_p0z)   ; the near plane
         LD   DE,R3D_NEAR
         OR   A
@@ -582,7 +609,7 @@ r3d_ow1:
         LD   A,(r3d_d1+1)
         AND  B
         RLA
-        RET  C              ; both ends behind it
+        JP   C,r3d_wsno     ; both ends behind it
 
         LD   HL,(r3d_p0x)   ; both ends past the same side of the view?
         LD   DE,(r3d_p0z)   ; each side is a half space and a half space
@@ -596,7 +623,7 @@ r3d_ow1:
         LD   A,H
         OR   B
         RLA
-        RET  NC             ; both at or beyond vx = vz
+        JP   NC,r3d_wsno    ; both at or beyond vx = vz
         LD   HL,(r3d_p0x)
         LD   DE,(r3d_p0z)
         ADD  HL,DE
@@ -607,7 +634,7 @@ r3d_ow1:
         LD   A,H
         AND  B
         RLA
-        RET  C              ; both beyond vx = -vz
+        JP   C,r3d_wsno     ; both beyond vx = -vz
 
         LD   A,(r3d_d0+1)
         RLA
@@ -639,28 +666,32 @@ r3d_ow3:
         LD   A,(r3d_ph)
         LD   (r3d_h1),A
 
-        LD   HL,(r3d_sx1)   ; anything left on screen?
-        DEC  HL
-        BIT  7,H
-        RET  NZ             ; sx1 <= 0
+        LD   HL,(r3d_sx1)   ; anything left inside the window? For one
+        LD   DE,(r3d_wl)    ; room that is the screen; through a door it
+        OR   A              ; is the columns the door lands between
+        SBC  HL,DE
+        JP   Z,r3d_wsno     ; sx1 <= wl
+        JP   M,r3d_wsno
         LD   HL,(r3d_sx0)
-        LD   DE,256
+        LD   DE,(r3d_wr)
         OR   A
         SBC  HL,DE
-        RET  P              ; sx0 >= 256
+        JP   P,r3d_wsno     ; sx0 >= wr
         LD   HL,(r3d_sx1)
         LD   DE,(r3d_sx0)
         OR   A
         SBC  HL,DE
-        RET  Z
-        RET  M
+        JP   Z,r3d_wsno
+        JP   M,r3d_wsno
         LD   (r3d_sxd),HL
 
-        LD   HL,(r3d_sx0)   ; clamp the left end onto the screen
-        BIT  7,H
-        JR   Z,r3d_ow4
+        LD   HL,(r3d_sx0)   ; clamp the left end into the window
+        LD   DE,(r3d_wl)
+        OR   A
+        SBC  HL,DE
+        JP   P,r3d_ow4      ; the sign, not the carry: sx0 may be under
         LD   DE,(r3d_sx0)
-        LD   HL,0
+        LD   HL,(r3d_wl)
         OR   A
         SBC  HL,DE
         EX   DE,HL
@@ -683,11 +714,11 @@ r3d_ow3:
         ADD  HL,DE
         LD   A,L
         LD   (r3d_h0),A
-        LD   HL,0
+        LD   HL,(r3d_wl)
         LD   (r3d_sx0),HL
 r3d_ow4:
         LD   HL,(r3d_sx1)   ; and the right end
-        LD   DE,256
+        LD   DE,(r3d_wr)
         OR   A
         SBC  HL,DE
         JR   Z,r3d_ow5
@@ -712,7 +743,7 @@ r3d_ow4:
         ADD  HL,DE
         LD   A,L
         LD   (r3d_h1),A
-        LD   HL,256
+        LD   HL,(r3d_wr)
         LD   (r3d_sx1),HL
 r3d_ow5:
         LD   HL,(r3d_sx0)   ; snap to even byte columns, four pixels
@@ -724,8 +755,23 @@ r3d_ow5:
         LD   (r3d_sbr),A
         LD   HL,r3d_sbl
         CP   (HL)
-        RET  C              ; nothing left of it
+        JR   C,r3d_wsno     ; nothing left of it
+        SCF
+        RET
 
+r3d_wsno:
+        OR   A              ; nothing to draw, and nothing behind it
+        RET
+
+;------------------------------------------------------------------
+; r3d_wdraw - shade the wall the span belongs to and file the strip
+;
+; Entry : A the colour ramp base, the span in r3d_sbl/r3d_sbr and its
+;         end heights in r3d_h0/r3d_h1
+;------------------------------------------------------------------
+
+r3d_wdraw:
+        LD   (r3d_wbase),A
         LD   A,(r3d_h0)     ; the strip's shade, by distance
         LD   (r3d_shl),A
         LD   B,A
@@ -744,12 +790,7 @@ r3d_ow5:
         LD   A,R3D_LEVELS - 1
 r3d_ow6:
         LD   E,A
-        LD   A,(r3d_wall)
-        LD   L,A
-        LD   H,0
-        LD   BC,r3d_rc
-        ADD  HL,BC
-        LD   A,(HL)
+        LD   A,(r3d_wbase)
         ADD  A,E
         AND  15
         LD   C,A
@@ -1501,6 +1542,9 @@ r3d_roC:
 r3d_nw:         DEFB 5
 r3d_rx:         DEFW  160,110, 160,-160, -60,-160, -160,-70, -160,110
 r3d_rc:         DEFB 1,8,1,8,1
+r3d_wl:         DEFW 0          ; the columns a wall may be drawn
+r3d_wr:         DEFW 256        ; between - portal.z80s narrows them
+r3d_wbase:      DEFS 1
 r3d_cx:         DEFW 0
 r3d_cz:         DEFW 0
 r3d_ca:         DEFB 0
@@ -1596,7 +1640,11 @@ r3d_stt:        DEFS R3D_ST * R3D_MAXW
 r3d_cu:         DEFS 2 * R3D_MAXW    ; the two colour tables sit exactly
                 DEFS 256 - 2 * R3D_MAXW   ; 256 apart so that one low byte
 r3d_cd:         DEFS 2 * R3D_MAXW    ; ends the walk over either of them
-r3d_tab:        DEFS 72 * 3 * R3D_MAXW
+    IFNDEF R3D_TAB              ; the rasteriser's table is the big
+r3d_tab:        DEFS 72 * 3 * R3D_MAXW  ; allocation here, so a harness
+    ELSE                        ; that raises R3D_MAXW can put it
+r3d_tab:        EQU R3D_TAB     ; somewhere else entirely
+    ENDIF
 
 ;------------------------------------------------------------------
 ; sin(2*pi*i/256) * 127, signed. Generated; must be page-aligned.

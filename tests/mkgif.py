@@ -204,6 +204,38 @@ def room(outdir, seconds=10):
     report(p, size, n, durs, secs, got, bad)
 
 
+def portal(outdir, seconds=12):
+    """portal at its measured rate: 400,481 T-states a frame, 15 Hz.
+
+    room3d's renderer driven through doors: a lap of the ring corridor
+    of a nine cell maze, looking around between the doors. Compare
+    demo/room.gif, which is the same raster drawing one room.
+    """
+    import math
+    import portal as P
+    from test_portal import path
+    b = Bench("harness_portal.asm", org=0)
+    s = b.syms
+    b.call_regs(s["p_init"])
+    n = int(seconds * 15)
+    frames, ts = [], []
+    for t in range(n):
+        cx, cz, ca = path(t, n)
+        b.poke(s["r3d_cx"], (cx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["r3d_cz"], (cz & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["r3d_ca"], bytes([ca]))
+        b.poke(s["p_here"], bytes([P.sector_for((cx, cz, ca))]))
+        into = b.peek(s["r3d_back"], 1)[0]
+        tt, _ = b.call_regs(s["p_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    p = "%s/portal.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, frames, ROOM_PAL, durs)
+    got, bad, secs = check_gif(p, frames, ROOM_PAL, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 MAZE_PAL = [(0, 0, 0), (58, 58, 68), (118, 120, 132), (88, 90, 100),
             (150, 152, 164), (0, 0, 0), (0, 0, 0), (0, 0, 0),
             (104, 42, 32), (0, 0, 0), (168, 74, 52), (0, 0, 0),
@@ -517,6 +549,7 @@ if __name__ == "__main__":
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
     cube(d)
     room(d)
+    portal(d)
     maze(d)
     maze(d, harness="harness_wolf96.asm", name="maze96")
     maze(d, harness="harness_wolfwide.asm", name="mazewide")

@@ -210,7 +210,15 @@ not screen; 128×128 would not.
 
 More game-tech than demoscene, which is the only reason it is fourth.
 
-### 5. Room Maze - can we make the room render an actual simple maze?
+### 5. Room Maze - can we make the room render an actual simple maze?  — **BUILT**
+
+`portal.z80s`, 400,481 T-states a frame, 15 Hz. room3d's renderer driven
+recursively: the maze is cut into nine convex cells, each drawn with the
+window narrowed to the columns the door into it lands between. No sorting,
+no depth buffer, still no overdraw. See `portal.md` - especially the note
+on where the camera may stand, which is the near plane's doing.
+
+What follows is the original note.
 
 Same as the existing room kind of implementation, but now it actually renders a more complex room.
 

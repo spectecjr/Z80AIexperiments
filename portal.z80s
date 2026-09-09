@@ -1,0 +1,247 @@
+;------------------------------------------------------------------
+; portal.z80s - a maze of convex rooms, seen through the doors
+;
+;   p_init    black both buffers, once
+;   p_frame   draw from (r3d_cx, r3d_cz, r3d_ca) and flip
+;   p_here    which sector the camera is standing in - the caller's
+;             job, because the camera walks and does not teleport
+;
+; room3d.z80s draws one convex room and gets its whole design from
+; that: the walls tile the view exactly, so there is no sorting, no
+; depth buffer and no overdraw, and a wall is a screen space trapezoid
+; rather than a column of rays. A maze is not convex. A maze cut into
+; convex sectors is, one sector at a time.
+;
+; So this is room3d's renderer driven recursively. Draw the sector the
+; camera is in with the window the whole screen; where a wall is a door
+; rather than a wall, draw the sector behind it with the window
+; narrowed to the columns the door lands between. Everything room3d
+; promises still holds inside each window, and the windows do not
+; overlap, so every pixel is still written exactly once.
+;
+; WHAT ROOM3D HAD TO GROW. Two things, both of them in r3d_wspan:
+; a wall is clamped to (r3d_wl)..(r3d_wr) rather than to 0..256, and
+; the part that clips, projects and clamps is split from the part that
+; shades and files the strip, so this file can do the first and then
+; decide whether it wants the second.
+;
+; A door seen from the far side is wound backwards, and room3d already
+; throws a backwards wall out, so the recursion never walks back
+; through the door it came in by. Depth is capped anyway, because a
+; ring of rooms can see itself.
+;
+; The strips come out in recursion order rather than left to right,
+; which costs nothing: r3d_rank already sorts them by where they end.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+P_DEPTH:        EQU 6           ; how many doors deep to look
+P_STACK:        EQU 16          ; sectors waiting to be drawn
+P_ENT:          EQU 6           ; sector, window, depth
+
+;------------------------------------------------------------------
+; p_init - room3d's, which blacks both buffers and the letterbox
+;------------------------------------------------------------------
+
+p_init:
+        JP   r3d_init
+
+;------------------------------------------------------------------
+; p_xform - every maze vertex into view space
+;
+; room3d's loop, pointed at this file's vertices: it takes its source,
+; its destination and its count from three variables, so only the
+; heading has to be set up here.
+;------------------------------------------------------------------
+
+p_xform:
+        LD   A,(r3d_ca)
+        LD   L,A
+        LD   H,r3d_sin / 256
+        LD   A,(HL)
+        LD   (r3d_sa),A
+        LD   A,L
+        ADD  A,64
+        LD   L,A
+        LD   A,(HL)
+        LD   (r3d_co),A
+        LD   A,P_NV
+        LD   (r3d_xn),A
+        LD   HL,p_vert
+        LD   (r3d_xp),HL
+        LD   HL,r3d_vvx
+        LD   (r3d_xq),HL
+        JP   r3d_xl
+
+;------------------------------------------------------------------
+; p_frame - one frame
+;------------------------------------------------------------------
+
+p_frame:
+        CALL p_xform
+        XOR  A
+        LD   (r3d_ns),A
+        LD   HL,p_stack         ; the camera's own sector, whole screen
+        LD   (p_sp),HL
+        LD   A,(p_here)
+        LD   (HL),A
+        INC  HL
+        LD   (HL),0
+        INC  HL
+        LD   (HL),0             ; wl = 0
+        INC  HL
+        LD   (HL),0
+        INC  HL
+        LD   (HL),1             ; wr = 256
+        INC  HL
+        LD   (HL),P_DEPTH
+        INC  HL
+        LD   (p_sp),HL
+
+p_loop:
+        LD   HL,(p_sp)          ; anything left to draw?
+        LD   DE,p_stack
+        OR   A
+        SBC  HL,DE
+        JP   Z,p_done
+        LD   HL,(p_sp)
+        LD   DE,-P_ENT
+        ADD  HL,DE
+        LD   (p_sp),HL
+        LD   A,(HL)             ; the sector, its window and its depth
+        LD   (p_sect),A
+        INC  HL
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        LD   (r3d_wl),DE
+        INC  HL
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        LD   (r3d_wr),DE
+        INC  HL
+        LD   A,(HL)
+        LD   (p_dep),A
+
+        LD   A,(p_sect)         ; three bytes a sector: where its walls
+        LD   L,A                ; are and how many of them there are
+        LD   H,0
+        ADD  HL,HL
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   DE,p_sect0
+        ADD  HL,DE
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        INC  HL
+        LD   A,(HL)
+        LD   (p_wn),A
+        LD   (p_wp),DE
+
+p_wall1:
+        LD   HL,(p_wp)          ; the wall's two ends, in view space
+        LD   A,(HL)
+        CALL r3d_getv
+        LD   (r3d_p0x),BC
+        LD   (r3d_p0z),DE
+        LD   HL,(p_wp)
+        INC  HL
+        LD   A,(HL)
+        CALL r3d_getv
+        LD   (r3d_p1x),BC
+        LD   (r3d_p1z),DE
+        CALL r3d_wspan          ; clipped, projected, clamped, snapped
+        JP   NC,p_wnext
+
+        LD   HL,(p_wp)          ; a wall, or a door into somewhere?
+        INC  HL
+        INC  HL
+        INC  HL
+        LD   A,(HL)
+        INC  A
+        JR   NZ,p_door
+        DEC  HL
+        LD   A,(HL)             ; a wall: shade it and file the strip
+        CALL r3d_wdraw
+        JP   p_wnext
+
+p_door:
+        LD   A,(p_dep)          ; a door: only so far, or a ring of
+        OR   A                  ; rooms would draw itself for ever
+        JP   Z,p_wnext
+        DEC  A
+        LD   C,A
+        LD   HL,(p_sp)          ; and only if there is room to say so
+        LD   DE,p_stack + P_ENT * P_STACK
+        OR   A
+        SBC  HL,DE
+        JP   Z,p_wnext
+        LD   HL,(p_wp)
+        INC  HL
+        INC  HL
+        INC  HL
+        LD   A,(HL)             ; the sector behind it
+        LD   HL,(p_sp)
+        LD   (HL),A
+        INC  HL
+        LD   A,(r3d_sbl)        ; and the columns it may use: this door,
+        LD   E,A                ; in pixels, which is twice its column
+        LD   D,0
+        EX   DE,HL
+        ADD  HL,HL
+        EX   DE,HL
+        LD   (HL),E
+        INC  HL
+        LD   (HL),D
+        INC  HL
+        LD   A,(r3d_sbr)
+        INC  A
+        LD   E,A
+        LD   D,0
+        EX   DE,HL
+        ADD  HL,HL
+        EX   DE,HL
+        LD   (HL),E
+        INC  HL
+        LD   (HL),D
+        INC  HL
+        LD   (HL),C             ; one door further from the camera
+        INC  HL
+        LD   (p_sp),HL
+
+p_wnext:
+        LD   HL,(p_wp)          ; four bytes a wall
+        LD   DE,4
+        ADD  HL,DE
+        LD   (p_wp),HL
+        LD   A,(p_wn)
+        DEC  A
+        LD   (p_wn),A
+        JP   NZ,p_wall1
+        JP   p_loop
+
+p_done:
+        CALL r3d_raster
+        LD   A,(r3d_back)
+        LD   B,A
+        LD   A,(r3d_front)
+        LD   (r3d_back),A
+        LD   A,B
+        LD   (r3d_front),A
+        RET                     ; <- tell the display hardware here
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+p_here:         DEFB 0          ; the sector the camera is standing in
+p_sect:         DEFS 1
+p_dep:          DEFS 1
+p_wp:           DEFS 2
+p_wn:           DEFS 1
+p_sp:           DEFS 2
+p_stack:        DEFS P_ENT * P_STACK
