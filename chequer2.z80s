@@ -1,0 +1,308 @@
+;------------------------------------------------------------------
+; chequer2.z80s - the Space Harrier floor with the phase exact
+;
+;   chq2_init    fill both buffers, once
+;   chq2_frame   draw from (chq2_camx, chq2_camz) and flip
+;   chq2_out     the two palette writes a scanline, as chequer.z80s
+;
+; chequer.z80s draws a scanline as one compiled run of PUSHes, which is
+; one dispatch a scanline however many squares it holds - but a PUSH is
+; four pixels, so the phase quantises to four pixels and the board steps
+; sideways in jumps.
+;
+; This keeps the one dispatch and loses the quantising, by compiling
+; FOUR runs per square width instead of one - t = 0, 1, 2 and 3 pixels.
+; Where a boundary lands inside a PUSH, that PUSH carries a pair with a
+; pixel of each colour in the right place, so a run pushes one of four
+; registers rather than one of two. All four have to be one-byte pushes
+; or the run's entry arithmetic breaks, which means BC, DE, HL and AF:
+; PUSH IX and PUSH IY are two bytes each.
+;
+; AF IS A COLOUR, and that is the whole awkwardness of this file. F
+; cannot be loaded, only popped, so the pair is POPped off its own
+; address once a scanline - and between that POP and the run nothing
+; may touch the flags. EXX and LD SP,HL do not; ADD HL,DE does, so the
+; row pointer is stepped after the run rather than before it. A is half
+; the pair too, so the scanline count lives in the other register set.
+;
+; It costs 5,312 bytes of run against chequer's 1,328, and about 3,000
+; T-states a frame. The square's width is still a whole number of
+; PUSHes; that is the part the eye does not see, and the phase - which
+; is what moves when the camera slides sideways - is now exact.
+;
+; The viewport tables are chequer's and shared with it. Read chequer.md
+; first: the palette trick, the parity, and what is not verifiable here
+; are all the same.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+CHQ2_RUNS:      EQU 0xE000      ; where the 64 runs are assembled
+CHQ_BUF0:       EQU 0x80
+CHQ_BUF1:       EQU 0x20
+CHQ_C1:         EQU 0x1111      ; the two colour indices, both nibbles
+CHQ_C2:         EQU 0x2222
+
+;------------------------------------------------------------------
+; chq2_init - the whole screen in colour index 1, both buffers
+;------------------------------------------------------------------
+
+chq2_init:
+        LD   A,CHQ_BUF0
+        LD   (chq2_back),A
+        LD   A,CHQ_BUF1
+        LD   (chq2_front),A
+        LD   H,CHQ_BUF0
+        CALL chq2_fill
+        LD   H,CHQ_BUF1
+        ; fall through
+
+chq2_fill:
+        LD   L,0
+        LD   D,0x60
+chq2_f1:
+        LD   B,0
+chq2_f2:
+        LD   (HL),CHQ_C1 & 255
+        INC  HL
+        DJNZ chq2_f2
+        DEC  D
+        JR   NZ,chq2_f1
+        RET
+
+;------------------------------------------------------------------
+; chq2_frame - one frame
+;------------------------------------------------------------------
+
+chq2_frame:
+        CALL chq2_entry
+        CALL chq2_floor
+        CALL chq2_par8
+        LD   A,(chq2_back)
+        LD   B,A
+        LD   A,(chq2_front)
+        LD   (chq2_back),A
+        LD   A,B
+        LD   (chq2_front),A
+        RET
+
+;------------------------------------------------------------------
+; chq2_entry - this frame's run and boundary pairs, per square width
+;
+; As chequer's, with one more thing taken from the same product: the
+; camera's offset scaled to this square is i * camx, whose high byte is
+; the phase in whole PUSHes and whose top two low bits are the phase in
+; pixels inside one. The first picks where to enter the run, the second
+; picks which of the four runs.
+;------------------------------------------------------------------
+
+chq2_entry:
+        LD   A,(chq2_camx)
+        LD   C,A
+        LD   B,0
+        LD   HL,0
+        LD   IX,chq_kt + 2
+        LD   IY,chq2_ent
+        XOR  A
+        LD   (chq2_i6),A
+        LD   D,CHQ_NP
+chq2_e1:
+        ADD  HL,BC              ; i * camx
+        PUSH HL
+        LD   A,L                ; the phase in pixels inside a PUSH
+        RLCA
+        RLCA
+        AND  3
+        LD   E,A
+        LD   A,(IX+0)           ; and where that enters the run
+        SUB  H
+        JR   NC,chq2_e2
+        ADD  A,(IX+1)
+chq2_e2:
+        PUSH DE
+        LD   D,A                ; D = the entry, E = the phase
+
+        LD   A,(chq2_i6)        ; the run's address: four runs a square
+        ADD  A,A                ; width and two bytes an address, so
+        ADD  A,A                ; eight bytes a width plus two a phase
+        ADD  A,E
+        ADD  A,A
+        LD   HL,chq2_base
+        ADD  A,L
+        LD   L,A
+        JR   NC,chq2_e3
+        INC  H
+chq2_e3:
+        LD   A,(HL)
+        ADD  A,D                ; entered that far in
+        LD   (IY+0),A
+        INC  HL
+        LD   A,(HL)
+        ADC  A,0
+        LD   (IY+1),A
+
+        LD   A,E                ; the two boundary pairs for this phase
+        ADD  A,A
+        ADD  A,A
+        LD   HL,chq2_pair
+        ADD  A,L
+        LD   L,A
+        JR   NC,chq2_e4
+        INC  H
+chq2_e4:
+        LD   A,(HL)             ; the one that goes in HL
+        LD   (IY+2),A
+        INC  HL
+        LD   A,(HL)
+        LD   (IY+3),A
+        INC  HL
+        LD   (IY+4),L           ; and where the other one lives, for the
+        LD   (IY+5),H           ; POP that puts it in AF
+
+        POP  DE
+        LD   A,(chq2_i6)
+        INC  A
+        LD   (chq2_i6),A
+        INC  IX
+        INC  IX
+        DUP  6
+        INC  IY
+        EDUP
+        POP  HL
+        DEC  D
+        JP   NZ,chq2_e1
+        RET
+
+;------------------------------------------------------------------
+; chq2_floor - the board, bottom row upwards
+;
+; BC, DE, HL and AF are the four things a run pushes and none of them
+; may be disturbed. The row pointer, its step and the scanline count
+; live in the other set, and the flags are a colour from the POP until
+; the run has finished with them.
+;------------------------------------------------------------------
+
+chq2_floor:
+        DI
+        LD   (chq2_sp),SP
+        LD   BC,CHQ_C1
+        LD   DE,CHQ_C2
+        LD   IY,chq2_ret
+        LD   IX,chq_band
+        LD   A,(chq2_back)
+        ADD  A,0x60             ; one past the last byte of the last row
+        EXX
+        LD   H,A
+        LD   L,0
+        LD   DE,-128
+        EXX
+chq2_b1:
+        LD   A,(IX+1)           ; the square width this band of rows has
+        OR   A
+        JR   Z,chq2_bend
+        DEC  A                  ; six bytes a square width
+        ADD  A,A
+        LD   L,A
+        ADD  A,A
+        ADD  A,L
+        LD   HL,chq2_ent
+        ADD  A,L
+        LD   L,A
+        JR   NC,chq2_b2
+        INC  H
+chq2_b2:
+        LD   A,(HL)             ; the run, and where to enter it
+        LD   (chq2_j+1),A
+        INC  HL
+        LD   A,(HL)
+        LD   (chq2_j+2),A
+        INC  HL
+        LD   A,(HL)             ; the boundary pair that lives in HL
+        LD   (chq2_hl+1),A
+        INC  HL
+        LD   A,(HL)
+        LD   (chq2_hl+2),A
+        INC  HL
+        LD   A,(HL)             ; and where the one for AF is
+        LD   (chq2_af+1),A
+        INC  HL
+        LD   A,(HL)
+        LD   (chq2_af+2),A
+        LD   A,(IX+0)           ; how many rows that is
+        INC  IX
+        INC  IX
+        EXX
+        LD   B,A
+        EXX
+chq2_hl:
+        LD   HL,0               ; patched: one boundary pair
+chq2_l1:
+chq2_af:
+        LD   SP,0               ; patched: and the other, which only a
+        POP  AF                 ; POP can load - so from here to the run
+        EXX                     ; nothing may touch the flags
+        LD   SP,HL              ; the runs fill rightwards to leftwards
+        EXX
+chq2_j:
+        JP   0                  ; patched: the run for this row
+chq2_ret:
+        EXX                     ; the count and the row pointer are in
+        ADD  HL,DE              ; the other set, so the loop turns round
+        DJNZ chq2_l0            ; in it and swaps back to draw
+        EXX
+        JP   chq2_b1
+chq2_l0:
+        EXX
+        JP   chq2_l1
+chq2_bend:
+        EXX                     ; the top run spilled into the haze row
+        LD   SP,HL              ; above it; put that back
+        EXX
+        DUP  CHQ_SPILL
+        PUSH BC
+        EDUP
+        LD   SP,(chq2_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; chq2_par8 - which way round the palette goes on each scanline
+;------------------------------------------------------------------
+
+chq2_par8:
+        LD   A,(chq2_camz)
+        LD   (chq2_pz1+1),A
+        LD   A,(chq2_camz+1)
+        LD   (chq2_pz2+1),A
+        LD   HL,chq_ztab + 2 * (CHQ_HZ + 1)
+        LD   DE,chq2_par + CHQ_HZ + 1
+        LD   B,191 - CHQ_HZ
+chq2_p1:
+        LD   A,(HL)
+        INC  HL
+chq2_pz1:
+        ADD  A,0
+        LD   A,(HL)
+        INC  HL
+chq2_pz2:
+        ADC  A,0
+        AND  1
+        LD   (DE),A
+        INC  DE
+        DJNZ chq2_p1
+        RET
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+chq2_back:      DEFB CHQ_BUF0
+chq2_front:     DEFB CHQ_BUF1
+chq2_camx:      DEFW 0
+chq2_camz:      DEFW 0
+chq2_sp:        DEFS 2
+chq2_i6:        DEFS 1
+chq2_ent:       DEFS 6 * CHQ_NP ; run, entry, and the two pairs, a square
+
+        ALIGN 256
+chq2_par:       DEFS 192

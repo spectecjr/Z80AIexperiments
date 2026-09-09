@@ -132,9 +132,11 @@ turn. It wants a per-scanline record of where the boundaries were last
 frame, and the runs to become variable-length again, which is `room3d`'s
 machinery rather than this file's. This is the biggest single win left.
 
-Smaller: one-pixel phase resolution needs a `PUSH` of a mixed pair at each
-boundary, which is cheap on near rows (few boundaries) and hopeless on far
-ones — so it would be worth doing for the bottom third only.
+One-pixel phase turned out to be neither expensive nor awkward, and is now
+`chequer2.z80s`: four compiled runs per square width instead of one, and a
+`PUSH` of a mixed pair wherever a boundary lands inside one. 104,301
+T-states against this file's 92,404, and still 50 Hz. Prefer it unless the
+5,312 bytes of run are a problem.
 
     python3 tests/mkchqdata.py      # regenerate the tables
     python3 tests/test_chequer.py   # verify and time

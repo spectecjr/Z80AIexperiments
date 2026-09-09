@@ -36,11 +36,18 @@ about which of those it is.
 
 ---
 
-## 1. Space Harrier checkerboard floor  — **BUILT**
+## 1. Space Harrier checkerboard floor  — **BUILT, three ways**
 
-`chequer.z80s` at four-pixel resolution, 92,404 T-states, 50 Hz; and
-`harrier.z80s` at full pixel accuracy, 221,420 T-states, 25 Hz. See
-`chequer.md` and `harrier.md`. What follows is the original note.
+| | phase | width | T-states | |
+|---|---|---|---|---|
+| `chequer.z80s` | 4 px | 4 px | 92,404 | 50 Hz |
+| `chequer2.z80s` | **1 px** | 4 px | 104,301 | 50 Hz |
+| `harrier.z80s` | 1 px | 1 px | 221,420 | 25 Hz |
+
+`chequer2` is the one to use unless memory is tight - four compiled runs
+per square width instead of one, so the phase is exact and a scanline is
+still one dispatch. See `chequer.md`, `chequer2.md` and `harrier.md`.
+What follows is the original note.
 
 An infinite checkerboard plane, fixed camera height, scrolling horizontally
 and vertically. Fixed Y-height for now; a moving camera height is a later

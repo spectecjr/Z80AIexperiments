@@ -299,10 +299,10 @@ def twist(outdir, seconds=6):
     s = b.syms
     b.call_regs(s["tw_init"])
     bg = list(b.peek(s["tw_bg"], 192))
-    ramp = list(b.peek(s["tw_ramp"], 8))
+    ramp = list(b.peek(s["tw_ramp"], 14))
     pal = [(0, 0, 0)] * 16
     for i, v in enumerate(ramp):
-        pal[8 + i] = sam_rgb(v)
+        pal[2 + i] = sam_rgb(v)
     rows = {}
     for v in set(bg):
         rows[v] = len(pal)
@@ -448,6 +448,38 @@ def vox(outdir, seconds=8):
     report(p, size, n, durs, secs, got, bad)
 
 
+def chequer2(outdir, seconds=8):
+    """chequer2 at its measured rate: 104,301 T-states a frame, 50 Hz.
+
+    The same floor as chequer with the phase exact to the pixel, so the
+    board slides sideways smoothly instead of in four-pixel steps.
+    Compare demo/chequer.gif.
+    """
+    import math
+    b = Bench("harness_chq2.asm", org=0)
+    s = b.syms
+    b.call_regs(s["chq2_init"])
+    fog = b.peek(s["chq_fog"], 2 * 192)
+    n = seconds * 50
+    frames, pars, ts = [], [], []
+    for t in range(n):
+        camx = int(1400 * math.sin(2 * math.pi * t / 190))
+        camz = (t * 26) & 0xFFFF
+        b.poke(s["chq2_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["chq2_camz"], camz.to_bytes(2, "little"))
+        into = b.peek(s["chq2_back"], 1)[0]
+        tt, _ = b.call_regs(s["chq2_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+        pars.append(list(b.peek(s["chq2_par"], 192)))
+    idx, pal = copper(frames, pars, fog)
+    p = "%s/chequer2.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, idx, pal, durs)
+    got, bad, secs = check_gif(p, idx, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 if __name__ == "__main__":
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
     cube(d)
@@ -456,6 +488,7 @@ if __name__ == "__main__":
     maze(d, harness="harness_wolf96.asm", name="maze96")
     maze(d, harness="harness_wolfwide.asm", name="mazewide")
     chequer(d)
+    chequer2(d)
     harrier(d)
     twist(d)
     roto(d)

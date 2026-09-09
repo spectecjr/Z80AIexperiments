@@ -19,7 +19,8 @@ BX = 32                         # first byte of the band the ribbon is in
 BW = 64                         # and how many bytes wide it is
 R = 58.0                        # half diagonal of the square, in pixels
 LIGHT = 0.9                     # where the light is, radians
-SHADES = 8                      # ramp of eight, palette 8..15
+SHADES = 14                     # ramp of fourteen, palette 2..15
+SHBASE = 2
 BG = 1                          # backdrop colour index
 
 
@@ -40,7 +41,17 @@ def geom(a):
     for k in (f, (f - 1) % 4):
         n = th + k * math.pi / 2 + math.pi / 2
         s = max(0.0, math.cos(n - LIGHT))
-        sh.append(8 + min(SHADES - 1, int(1 + s * (SHADES - 1.5))))
+        sh.append(SHBASE + min(SHADES - 1, int(round(s * (SHADES - 1)))))
+    # Two faces at ninety degrees have Lambert terms cos(d) and -sin(d),
+    # which land in the same bucket wherever |cos| is near |sin| - one
+    # angle in eight with a ramp of seven, one in twenty with fourteen.
+    # When that happens the fold between them disappears and the ribbon
+    # reads as a flat band, so the darker one is pushed one further.
+    if sh[0] == sh[1]:
+        if sh[1] > SHBASE:
+            sh[1] -= 1
+        else:
+            sh[0] += 1
     return xl, xs, xr, sh[0], sh[1]
 
 

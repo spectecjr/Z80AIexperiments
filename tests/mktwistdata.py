@@ -35,8 +35,8 @@ def bg(y):
 
 
 def ramp(i):
-    """The eight shades the faces are drawn in, palette 8 to 15."""
-    t = i / 7.0
+    """The fourteen shades the faces are drawn in, palette 2 to 15."""
+    t = i / 13.0
     return sam(1 + 6 * t, 1 + 4 * t, 5 * t * t)
 
 
@@ -65,7 +65,7 @@ def main(path):
              "\ntw_shl:\n" + defb(sh[0]),
              "\ntw_shr:\n" + defb(sh[1]),
              "\ntw_bg:\n" + defb([bg(y) for y in range(T.H)]),
-             "\ntw_ramp:\n" + defb([ramp(i) for i in range(8)]),
+             "\ntw_ramp:\n" + defb([ramp(i) for i in range(14)]),
              "\ntw_shape:\n" + defb(T.SHAPE)]
     open(path, "w").write("\n".join(parts) + "\n")
     print("wrote %s: 64 runs of %d PUSHes, four pages of tables"
