@@ -13,6 +13,12 @@ from __future__ import annotations
 from ..ir import Mode, Piece, Plan
 from ..sprite import PackedSprite
 
+# A stack run pays a one-off SP seating (10T) and needs a pair loaded (10T)
+# to save 3T per byte against a cached HL write, so it only wins on runs of
+# a few bytes.  Four is the shortest run that is clearly ahead once the pair
+# is reused across rows.
+STACK_MIN_RUN = 4
+
 
 def build_pieces(
     packed: PackedSprite, *, max_gap: int = 1, mode: Mode = Mode.HL
@@ -33,15 +39,37 @@ def build_pieces(
     return pieces
 
 
+def choose_mode(piece: Piece, minimum_run: int = STACK_MIN_RUN) -> Mode:
+    """Pick a write mode for one piece from its longest opaque run."""
+    longest = current = 0
+    previous_col: int | None = None
+    for cell in piece.cells:
+        if cell.opaque and (previous_col is None or cell.col == previous_col + 1):
+            current += 1
+        else:
+            current = 1 if cell.opaque else 0
+        previous_col = cell.col
+        longest = max(longest, current)
+    return Mode.STACK if longest >= minimum_run else Mode.HL
+
+
 def baseline_plan(
     packed: PackedSprite,
     *,
     max_gap: int = 1,
     serpentine: bool = True,
-    mode: Mode = Mode.HL,
+    mode: Mode | str = Mode.HL,
+    minimum_run: int = STACK_MIN_RUN,
 ) -> Plan:
-    """Row-major plan; alternate rows are walked right to left."""
-    pieces = build_pieces(packed, max_gap=max_gap, mode=mode)
+    """Row-major plan; alternate rows are walked right to left.
+
+    ``mode`` may be a fixed :class:`Mode` or ``"auto"``, which puts long
+    opaque runs into stack mode and leaves the rest on HL writes.
+    """
+    auto = mode == "auto"
+    pieces = build_pieces(packed, max_gap=max_gap, mode=Mode.HL if auto else mode)
+    if auto:
+        pieces = [p.with_mode(choose_mode(p, minimum_run)) for p in pieces]
     if serpentine:
         out = []
         for piece in pieces:

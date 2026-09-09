@@ -65,6 +65,15 @@ class Op:
     def patches(self) -> tuple[Patch, ...]:
         return ()
 
+    def encode_with(self, labels: dict[str, int]) -> bytes:
+        """Encode, resolving any symbolic operand against ``labels``.
+
+        Self-modifying stores name the instruction they rewrite (for
+        example ``LD (.p3+1),A``), so their operand is only known once
+        addresses are assigned.
+        """
+        return self.encode()
+
     # -- shared ------------------------------------------------------------
     @property
     def size(self) -> int:
@@ -84,6 +93,15 @@ def _u16(value: int) -> int:
 
 def _hx(value: int, width: int = 2) -> str:
     return f"${value:0{width}X}"
+
+
+def split_label(text: str) -> tuple[str, int]:
+    """Split ``"name+2"`` into ``("name", 2)``; a bare name yields offset 0."""
+    for sign, factor in (("+", 1), ("-", -1)):
+        if sign in text[1:]:
+            name, _, offset = text.rpartition(sign)
+            return name, factor * int(offset, 0)
+    return text, 0
 
 
 @dataclass(frozen=True)
@@ -266,6 +284,28 @@ class LdIndexReg(Op):
 
     def text(self) -> str:
         return f"LD ({self.index}{self.disp:+d}),{self.reg}"
+
+    @property
+    def tstates(self) -> int:
+        return 19
+
+
+@dataclass(frozen=True)
+class LdRegIndex(Op):
+    """``LD r,(IX+d)`` - 19T, 3 bytes."""
+
+    reg: str
+    index: str
+    disp: int
+
+    mnemonic = "LD r,(IX+d)"
+
+    def encode(self) -> bytes:
+        prefix = 0xDD if self.index == "IX" else 0xFD
+        return bytes([prefix, 0x46 | (R8[self.reg] << 3), _u8(self.disp)])
+
+    def text(self) -> str:
+        return f"LD {self.reg},({self.index}{self.disp:+d})"
 
     @property
     def tstates(self) -> int:
@@ -535,6 +575,18 @@ class LdMemSp(Op):
     def tstates(self) -> int:
         return 20
 
+    def encode_with(self, labels: dict[str, int]) -> bytes:
+        if self.label is None:
+            return self.encode()
+        name, offset = split_label(self.label)
+        if name not in labels:
+            raise KeyError(f"unresolved label {name!r}")
+        target = (labels[name] + offset) & 0xFFFF
+        body = bytearray(self.encode())
+        body[-2] = target & 0xFF
+        body[-1] = target >> 8
+        return bytes(body)
+
 
 @dataclass(frozen=True)
 class LdMemA(Op):
@@ -557,6 +609,18 @@ class LdMemA(Op):
     def tstates(self) -> int:
         return 13
 
+    def encode_with(self, labels: dict[str, int]) -> bytes:
+        if self.label is None:
+            return self.encode()
+        name, offset = split_label(self.label)
+        if name not in labels:
+            raise KeyError(f"unresolved label {name!r}")
+        target = (labels[name] + offset) & 0xFFFF
+        body = bytearray(self.encode())
+        body[-2] = target & 0xFF
+        body[-1] = target >> 8
+        return bytes(body)
+
 
 @dataclass(frozen=True)
 class LdAMem(Op):
@@ -578,6 +642,18 @@ class LdAMem(Op):
     @property
     def tstates(self) -> int:
         return 13
+
+    def encode_with(self, labels: dict[str, int]) -> bytes:
+        if self.label is None:
+            return self.encode()
+        name, offset = split_label(self.label)
+        if name not in labels:
+            raise KeyError(f"unresolved label {name!r}")
+        target = (labels[name] + offset) & 0xFFFF
+        body = bytearray(self.encode())
+        body[-2] = target & 0xFF
+        body[-1] = target >> 8
+        return bytes(body)
 
 
 @dataclass(frozen=True)
@@ -609,6 +685,18 @@ class LdMemPair(Op):
             return 16
         return 20
 
+    def encode_with(self, labels: dict[str, int]) -> bytes:
+        if self.label is None:
+            return self.encode()
+        name, offset = split_label(self.label)
+        if name not in labels:
+            raise KeyError(f"unresolved label {name!r}")
+        target = (labels[name] + offset) & 0xFFFF
+        body = bytearray(self.encode())
+        body[-2] = target & 0xFF
+        body[-1] = target >> 8
+        return bytes(body)
+
 
 @dataclass(frozen=True)
 class LdPairMem(Op):
@@ -636,6 +724,18 @@ class LdPairMem(Op):
     @property
     def tstates(self) -> int:
         return 16 if self.pair == "HL" else 20
+
+    def encode_with(self, labels: dict[str, int]) -> bytes:
+        if self.label is None:
+            return self.encode()
+        name, offset = split_label(self.label)
+        if name not in labels:
+            raise KeyError(f"unresolved label {name!r}")
+        target = (labels[name] + offset) & 0xFFFF
+        body = bytearray(self.encode())
+        body[-2] = target & 0xFF
+        body[-1] = target >> 8
+        return bytes(body)
 
 
 @dataclass(frozen=True)
@@ -814,7 +914,7 @@ def assemble(ops: list[Op], origin: int = 0) -> tuple[bytes, dict[str, int]]:
                 raise ValueError(f"DJNZ to {op.label} out of range ({disp})")
             encoded = bytes([0x10, disp & 0xFF])
         else:
-            encoded = op.encode()
+            encoded = op.encode_with(labels)
         out += encoded
         address += len(encoded)
     return bytes(out), labels

@@ -173,7 +173,6 @@ def test_16x16_opaque_sprite_hl_mode_baseline_cost():
     packed, program, ctx = compile_sprite(sprite, x=0, y=0)
     verify_draw(program, packed, ctx.screen, 0, 0, expected_tstates=program.tstates)
     per_byte = program.tstates / len(packed.cells)
-    # LD (HL),n is 10T plus an INC L (4T) per step: ~14.5T/byte is the floor
-    # for this mode.  Register caching (M4) takes it to ~8T and stack mode to
-    # ~6T; this test pins the mode's cost so those wins are visible.
-    assert 14.0 <= per_byte < 15.0, f"unexpected HL-mode cost {per_byte:.2f}T/byte"
+    # With the byte cache a repeated pixel byte costs LD (HL),r (7T) plus an
+    # INC L (4T): ~11.6T/byte.  Stack mode has to beat that.
+    assert 11.0 <= per_byte < 12.5, f"unexpected HL-mode cost {per_byte:.2f}T/byte"

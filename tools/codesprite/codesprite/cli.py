@@ -9,13 +9,15 @@ import sys
 from pathlib import Path
 
 from .codegen.draw import DrawContext, generate_draw
+from .codegen.setpos import collect_sites, generate_setpos, label_patch_sites
 from .emit.report import Report, VariantRow, manifest
 from .emit.sjasm import ModuleInfo, render
 from .ir import Mode, Reloc
 from .optimize.baseline import baseline_plan
+from .optimize.evaluate import best_plan
 from .screen import MemoryLayout, Screen
 from .sprite import PackedSprite, Sprite, load_sprite
-from .verify import verify_draw
+from .verify import verify_draw, verify_patched
 
 
 def _auto_int(text: str) -> int:
@@ -78,7 +80,15 @@ def build_parser() -> argparse.ArgumentParser:
     compile_p.add_argument("--backbuffer-base", type=_auto_int)
     compile_p.add_argument("--at", default="0,0", help="fixed draw position x,y for --reloc none")
     compile_p.add_argument("--max-gap", type=int, default=1)
-    compile_p.add_argument("--no-serpentine", action="store_true")
+    compile_p.add_argument("--mode", default="best",
+                           choices=["best", "auto", "hl", "stack", "ix"],
+                           help="write mode; 'best' costs every candidate plan")
+    compile_p.add_argument("--stack", default="di", choices=["di", "raw"],
+                           help="whether stack sections disable interrupts")
+    compile_p.add_argument("--no-alternate", action="store_true",
+                           help="do not use the alternate register bank")
+    compile_p.add_argument("--moves-per-draw", type=float, default=1.0,
+                           help="how many setpos calls to weigh against each draw")
     compile_p.add_argument("--no-verify", action="store_true")
 
     inspect_p = sub.add_parser("inspect", help="report sprite statistics")
@@ -139,10 +149,8 @@ def command_compile(args: argparse.Namespace) -> int:
         )
     if args.form != "single":
         raise SystemExit("the list form arrives in M5; use --form single")
-    if reloc is not Reloc.NONE:
-        raise SystemExit(
-            "only --reloc none is implemented so far (M4 adds patch and register)"
-        )
+    if args.clip != "none":
+        raise SystemExit("clipping arrives in M7; use --clip none")
 
     x_at, y_at = (int(v, 0) for v in args.at.replace(",", " ").split())
     out_dir = Path(args.out_dir)
@@ -152,62 +160,125 @@ def command_compile(args: argparse.Namespace) -> int:
 
     report = Report(args.name, command_line=command_line, source=str(args.source))
     phases = (0,) if args.x_align == 2 else (0, 1)
+    # A fixed-position build bakes in one y, so it has no parity variants;
+    # relocatable builds need one per parity because the row-step encoding
+    # (SET 7,L versus INC H : RES 7,L) alternates with it.
+    if reloc is Reloc.NONE or args.y_align == 2:
+        parities: tuple[int | None, ...] = (None,)
+    else:
+        parities = (0, 1)
+
+    modes = {"best": None, "auto": "auto", "hl": Mode.HL, "stack": Mode.STACK,
+             "ix": Mode.IX}
+    mode = modes[args.mode]
 
     for phase in phases:
         packed = sprite.pack(phase)
-        plan = baseline_plan(
-            packed,
-            max_gap=args.max_gap,
-            serpentine=not args.no_serpentine,
-            mode=Mode.HL,
-        )
-        plan.validate(packed)
-        # A fixed-position build bakes in absolute addresses, so the x it is
-        # compiled for must have the parity of the variant being generated:
-        # the "xo" file draws one pixel to the right of an even --at.
-        x = x_at if (x_at % 2) == phase else x_at + 1
-        context = DrawContext(screen, x=x, y=y_at, reloc=reloc)
-        program = generate_draw(plan, context)
+        for parity in parities:
+            if reloc is Reloc.NONE:
+                # Addresses are baked in, so compile for the requested spot;
+                # the "xo" variant sits one pixel right of an even --at.
+                x = x_at if (x_at % 2) == phase else x_at + 1
+                y = y_at
+            else:
+                # Relocatable builds are compiled at the canonical position
+                # for their parities and moved from there.
+                x, y = phase, (parity or 0)
+            context = DrawContext(
+                screen,
+                x=x,
+                y=y,
+                reloc=reloc,
+                interrupts=args.stack,
+                label=f"{args.name}_draw",
+            )
+            kwargs = {"use_alternate": not args.no_alternate}
+            if mode is None:
+                _plan, _cost, program = best_plan(
+                    packed,
+                    context,
+                    max_gap=args.max_gap,
+                    patch_weight=13.0 * args.moves_per_draw,
+                    **kwargs,
+                )
+            else:
+                plan = baseline_plan(packed, max_gap=args.max_gap, mode=mode)
+                plan.validate(packed)
+                program = generate_draw(plan, context, **kwargs)
 
-        info = ModuleInfo(
-            name=args.name,
-            routine="draw",
-            width=sprite.width,
-            height=sprite.height,
-            cells=len(packed.cells),
-            phase=phase,
-            form=args.form,
-            reloc=reloc.value,
-            clip=args.clip,
-            command_line=command_line,
-            source=str(args.source),
-            source_hash=source_hash,
-            palette=palette,
-            lower_bound=lower_bound(packed),
-        )
-        if not args.no_verify:
-            verify_draw(
-                program, packed, screen, x, y_at, expected_tstates=program.tstates
-            )
-        path = out_dir / f"{info.label}.z80s"
-        path.write_text(render(program, info))
-        report.add(
-            VariantRow(
-                variant=info.label,
-                form=args.form,
-                path=str(path),
-                size=program.size,
-                tstates=program.tstates,
-                patches=program.patch_count,
-                lower_bound=info.lower_bound,
+            setpos = None
+            if reloc is Reloc.PATCH:
+                program = label_patch_sites(program)
+                setpos = generate_setpos(collect_sites(program), parity=y % 2)
+
+            info = ModuleInfo(
+                name=args.name,
+                routine="draw",
+                width=sprite.width,
+                height=sprite.height,
                 cells=len(packed.cells),
+                phase=phase,
+                parity=parity,
+                form=args.form,
+                reloc=reloc.value,
+                clip=args.clip,
+                command_line=command_line,
+                source=str(args.source),
+                source_hash=source_hash,
+                palette=palette,
+                lower_bound=lower_bound(packed),
+                compiled_at=(x, y),
             )
-        )
+            if not args.no_verify:
+                verify_variant(program, setpos, packed, screen, x, y, reloc)
+
+            path = out_dir / f"{info.label}.z80s"
+            path.write_text(render(program, info, setpos=setpos))
+            report.add(
+                VariantRow(
+                    variant=info.label,
+                    form=args.form,
+                    path=str(path),
+                    size=program.size + (setpos.size if setpos else 0),
+                    tstates=program.tstates,
+                    item_tstates=setpos.tstates if setpos else None,
+                    patches=program.patch_count,
+                    lower_bound=info.lower_bound,
+                    cells=len(packed.cells),
+                )
+            )
 
     (out_dir / f"{args.name}_manifest.z80s").write_text(manifest(args.name, report.rows))
     report.write(out_dir)
     print(report.table())
     return 0
+
+
+def verify_variant(program, setpos, packed, screen, x, y, reloc) -> None:
+    """Run the generated code and compare it with a reference composite.
+
+    Relocatable variants are checked at several positions, since the whole
+    point of them is that the same code draws anywhere.
+    """
+    if reloc is Reloc.PATCH:
+        for target in ((x, y), (40 + x % 2, 60 + y % 2), (200 + x % 2, 100 + y % 2)):
+            if target[0] + packed.byte_width * 2 > 256 or target[1] + packed.height > 192:
+                continue
+            verify_patched(program, setpos, packed, screen, (x, y), target)
+        return
+    registers = None
+    if reloc is Reloc.REGISTER:
+        address = screen.addr_byte(y, x // 2)
+        registers = {"h": address >> 8, "l": address & 0xFF}
+    verify_draw(
+        program,
+        packed,
+        screen,
+        x,
+        y,
+        registers=registers,
+        expected_tstates=program.tstates,
+    )
 
 
 def command_sizes(args: argparse.Namespace) -> int:

@@ -86,10 +86,66 @@ def test_unimplemented_options_fail_loudly(ship, tmp_path):
     for extra in (
         ["--routines", "erase"],
         ["--form", "list"],
-        ["--reloc", "patch"],
+        ["--clip", "y-spill"],
     ):
         with pytest.raises(SystemExit):
             main(["compile", str(ship), "--name", "s", "--out-dir", str(out)] + extra)
+
+
+@pytest.mark.parametrize("reloc", ["none", "patch", "register"])
+def test_every_relocation_mode_compiles_and_verifies(ship, tmp_path, reloc):
+    """Compilation verifies by running the code, so reaching the table is
+    itself the assertion that the generated routines are correct."""
+    out = tmp_path / reloc
+    assert main(
+        ["compile", str(ship), "--name", "spr", "--out-dir", str(out),
+         "--reloc", reloc]
+    ) == 0
+    files = sorted(p.name for p in out.glob("spr_draw_*.z80s"))
+    # Fixed builds have one file per x phase; relocatable ones also split by
+    # y parity, because the row-step encoding depends on it.
+    expected = 2 if reloc == "none" else 4
+    assert len(files) == expected, files
+
+
+def test_patched_variant_emits_a_setpos_routine(ship, tmp_path):
+    out = tmp_path / "out"
+    main(["compile", str(ship), "--name", "spr", "--out-dir", str(out),
+          "--reloc", "patch"])
+    text = (out / "spr_draw_single_xe_ye.z80s").read_text()
+    assert "spr_draw_single_xe_ye_setpos:" in text
+    assert "LD A,C" in text or "LD A,D" in text
+    assert ".p0:" in text
+    assert "C = (y&1)*128 + x/2" in text  # the entry contract is documented
+
+
+def test_register_variant_documents_its_hl_contract(ship, tmp_path):
+    out = tmp_path / "out"
+    main(["compile", str(ship), "--name", "spr", "--out-dir", str(out),
+          "--reloc", "register"])
+    text = (out / "spr_draw_single_xe_ye.z80s").read_text()
+    assert "HL = address of the sprite's top-left screen byte" in text
+    assert "LD HL,$" not in text  # no absolute addresses in register mode
+
+
+def test_y_align_2_halves_the_variant_count(ship, tmp_path):
+    out = tmp_path / "out"
+    main(["compile", str(ship), "--name", "spr", "--out-dir", str(out),
+          "--reloc", "patch", "--y-align", "2"])
+    assert len(list(out.glob("spr_draw_*.z80s"))) == 2
+
+
+def test_mode_switch_changes_the_generated_code(tmp_path):
+    path = tmp_path / "solid.txt"
+    path.write_text("\n".join("7" * 16 for _ in range(8)) + "\n")
+    sizes = {}
+    for mode in ("hl", "stack", "best"):
+        out = tmp_path / mode
+        main(["compile", str(path), "--name", "s", "--out-dir", str(out),
+              "--mode", mode, "--x-align", "2"])
+        sizes[mode] = json.loads((out / "s_stats.json").read_text())["variants"][0]
+    assert sizes["stack"]["tstates"] < sizes["hl"]["tstates"]
+    assert sizes["best"]["tstates"] <= sizes["stack"]["tstates"]
 
 
 def test_verification_runs_by_default(ship, tmp_path, monkeypatch):
