@@ -89,6 +89,32 @@ def main():
             shown = got
     print("  %-40s %4d poses, %d mismatches"
           % ("Z80 buffer against the model", len(poses), bad))
+
+    cbad = 0
+    ctimes = []
+    for px, py, ang in poses:
+        want = bytearray()
+        for c in wolf.frame(mp, px, py, ang):
+            h, cell, u, side = c
+            want += bytes([h, pages[cell - 1], u])
+        b.poke(s["w3d_px"], (px & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["w3d_py"], (py & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["w3d_ang"], bytes([ang]))
+        b.poke(s["w3d_cols"], bytes(3 * wolf.COLS))
+        t, _ = b.call_regs(s["w3d_cast"])
+        ctimes.append(t)
+        got = b.peek(s["w3d_cols"], 3 * wolf.COLS)
+        if got != bytes(want):
+            cbad += 1
+            if cbad <= 3:
+                d = [i for i in range(len(want)) if got[i] != want[i]]
+                print("  MISMATCH at (%d,%d) angle %d: %d of %d bytes, "
+                      "first column %d field %d, got %d want %d"
+                      % (px, py, ang, len(d), len(want), d[0] // 3, d[0] % 3,
+                         got[d[0]], want[d[0]]))
+    print("  %-40s %4d poses, %d mismatches"
+          % ("Z80 column list against the model", len(poses), cbad))
+    bad += cbad
     print("  %-40s %d..%d, mean %d"
           % ("wall bytes a frame", min(wallbytes), max(wallbytes),
              sum(wallbytes) / len(wallbytes)))
@@ -101,6 +127,22 @@ def main():
     print("  %-40s %.1f T a wall byte"
           % ("so the wall columns cost",
              (mean - pt) / (sum(wallbytes) / len(wallbytes))))
+    print("  w3d_cast     min %d T-states, mean %.0f, max %d"
+          % (min(ctimes), sum(ctimes) / len(ctimes), max(ctimes)))
+    print("               %.0f T-states a ray"
+          % (sum(ctimes) / len(ctimes) / wolf.COLS))
+    ftimes = []
+    for px, py, ang in poses[::4]:
+        b.poke(s["w3d_px"], (px & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["w3d_py"], (py & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["w3d_ang"], bytes([ang]))
+        t, _ = b.call_regs(s["w3d_frame"])
+        ftimes.append(t)
+    fm = sum(ftimes) / len(ftimes)
+    print("  w3d_frame    min %d T-states, mean %.0f, max %d"
+          % (min(ftimes), fm, max(ftimes)))
+    print("  %-40s %.1f Hz mean, %.1f Hz worst"
+          % ("which at 6 MHz is", 6000000 / fm, 6000000 / max(ftimes)))
     ok = bad == 0
     print("\n%s" % ("ALL TESTS PASSED" if ok else "FAILURES: %d" % bad))
     return 0 if ok else 1

@@ -2,7 +2,10 @@
 ; wolf3d.z80s - a textured grid maze for the SAM Coupe
 ;
 ;   w3d_init     build the scalers, black both buffers
+;   w3d_frame    cast, draw and show one frame from w3d_px/py/ang
+;   w3d_cast     fill the column list by ray casting the map
 ;   w3d_draw     draw the column list in w3d_cols into the back buffer
+;   w3d_flip     swap the buffers
 ;
 ; Half horizontal resolution, which is what makes this possible at all:
 ; 128 columns of two pixels, so a screen column is exactly one byte of
@@ -42,6 +45,37 @@
 ; being negligible near and hopeless far. That keeps the whole bank
 ; inside 5K; a uniform ladder to the same accuracy would need 30K.
 ;
+; WHAT A FRAME COSTS, measured on the emulator over 96 camera poses:
+;
+;   w3d_frame   min 601,810 T-states, mean 713,368, max 778,499
+;
+; which at 6 MHz is 8.4 frames a second, 7.7 in the worst view, and it
+; divides up like this:
+;
+;   the wall columns    363,107 T   51%   14,297 bytes at 25.4 T each
+;   w3d_cast            241,826 T   34%   128 rays at 1,889 T each
+;   w3d_prefill         107,656 T   15%   18,432 bytes at 5.5 T each
+;
+; The first line is the floor for a textured wall and the third is the
+; floor for anything at all, so this is roughly what the machine can
+; do: half the frame is the 14K of wall the texture forces into column
+; order, and the prefill is 18K of ceiling and floor at a third of the
+; price a column costs. Two thirds of what is left is casting.
+;
+; Two things would buy real speed, both by drawing fewer columns. Four
+; pixels a column halves the rays and lets a scaler write two bytes a
+; row - about 12 Hz. A shorter viewport is cheaper in proportion to
+; its height, but only for the half of the frame that draws it: at
+; 256x96 it would be about 10 Hz.
+;
+; w3d_init costs 1,899,320 T-states once, nearly all of it writing the
+; 5,508 bytes of scaler.
+;
+; RAM outside the two screen buffers: the scaler bank at W3D_SCAL, two
+; 512-byte tables at W3D_TX and W3D_TY that w3d_cast rebuilds each
+; frame, and qsmul8's own 1K of quarter squares, which this file needs
+; but does not contain - assemble mul8x8_qs.z80s alongside it.
+;
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
 
@@ -53,6 +87,8 @@ W3D_TEX:        EQU 32          ; textures are 32 wide by 32 tall
 W3D_BUF0:       EQU 0x80
 W3D_BUF1:       EQU 0x20
 W3D_SCAL:       EQU 0xE000      ; the scaler bank lives up here
+W3D_TX:         EQU 0xFA00      ; and the two per-frame product tables
+W3D_TY:         EQU 0xFC00      ; at the top of memory
 
 ;------------------------------------------------------------------
 ; w3d_init - black both buffers and build the scaler bank
@@ -261,23 +297,16 @@ w3d_dr1:
         LD   L,A            ; rung the scaler was built for
         LD   H,w3d_htop / 256
         LD   A,(HL)
-        LD   L,A
-        LD   H,0
-        ADD  HL,HL          ; row * 128
-        ADD  HL,HL
-        ADD  HL,HL
-        ADD  HL,HL
-        ADD  HL,HL
-        ADD  HL,HL
-        ADD  HL,HL
+        SRL  A              ; and a row is half a page, so the address
+        LD   L,0            ; is (row >> 1) pages on and (row & 1) half
+        RR   L              ; pages in - no multiply
+        LD   H,A
         LD   A,(w3d_back)
-        LD   D,A
-        LD   E,0
-        ADD  HL,DE
+        ADD  A,H
+        LD   H,A
         LD   A,(w3d_cx)
-        LD   E,A
-        LD   D,0
-        ADD  HL,DE          ; HL -> the top of this column
+        ADD  A,L
+        LD   L,A            ; HL -> the top of this column
 
         LD   A,(IX+2)       ; the texture column: base + u * 32, which
         RRCA                ; needs sixteen bits - u reaches 31, so the
@@ -304,6 +333,528 @@ w3d_dr2:
         CP   W3D_COLS
         JP   C,w3d_dr1
         RET
+
+;------------------------------------------------------------------
+; w3d_cast - one ray a screen column, into the column list
+;
+; Lodev's DDA: step to whichever grid line comes next, in x or in y,
+; until the cell stepped into is solid. Everything inside the loop is
+; an add and a compare. The two things that would otherwise be a
+; division and a multiply are a table each:
+;
+;   w3d_recip   the distance along the ray between one grid line and
+;               the next, from the ray component - built once, ever
+;
+;   W3D_TX/TY   the camera's position inside its own cell times i, for
+;               i = 0..255 - built once a frame, because the position
+;               is the same for every ray in the frame, and read twice
+;               a ray to get the distance to the first grid line
+;
+; The second one is the interesting one. It wants (f * dd) >> 8 with f
+; a byte and dd sixteen bits, which is two multiplies; but f is fixed
+; for the whole frame, so a table of f*i answers both halves:
+;
+;   f * dd = 256 * T[dd >> 8] + T[dd & 255]
+;
+; and the table is built by pushing a running sum onto the stack, 22
+; T-states an entry. Two of them cost 11,000 T-states a frame and save
+; four quarter-square multiplies a ray, which would be 76,000.
+;
+; The map is 16 by 16 page aligned, one byte a cell, so the map pointer
+; is a whole cell step at INC C or ADD A,16 and the cell is LD A,(BC)
+; at seven T-states. That is why BC is the map pointer and the two
+; delta distances are patched into the loop as immediates instead.
+;
+; The map must have a solid border: nothing bounds checks, and a ray
+; that escaped would wrap around the page rather than stop.
+;
+; Entry : (w3d_px), (w3d_py) the camera, 8.8 in map cells
+;         (w3d_ang) the heading, 0..255
+; Exit  : w3d_cols filled, three bytes a column
+; Needs : qsmul8 from mul8x8_qs.z80s, for the texture coordinate
+;------------------------------------------------------------------
+
+w3d_cast:
+        LD   A,(w3d_ang)        ; the direction vector
+        ADD  A,64
+        CALL w3d_sinlk
+        LD   (w3d_rx),HL        ; dx
+        LD   A,(w3d_ang)
+        CALL w3d_planelk
+        EX   DE,HL
+        LD   HL,0
+        OR   A
+        SBC  HL,DE              ; plx = -PLANE[ang]
+        PUSH HL
+        EX   DE,HL
+        LD   HL,(w3d_rx)
+        OR   A
+        SBC  HL,DE              ; the leftmost ray, dir - plane
+        LD   (w3d_rx),HL
+        POP  HL
+        CALL w3d_asr6           ; and a 128th of the plane's width is
+        LD   (w3d_sx),HL        ; the step from one ray to the next
+
+        LD   A,(w3d_ang)
+        CALL w3d_sinlk
+        LD   (w3d_ry),HL        ; dy
+        LD   A,(w3d_ang)
+        ADD  A,64
+        CALL w3d_planelk        ; ply = PLANE[ang+64]
+        PUSH HL
+        EX   DE,HL
+        LD   HL,(w3d_ry)
+        OR   A
+        SBC  HL,DE
+        LD   (w3d_ry),HL
+        POP  HL
+        CALL w3d_asr6
+        LD   (w3d_sy),HL
+
+        LD   A,(w3d_px)         ; where the camera sits inside its cell
+        LD   HL,W3D_TX
+        CALL w3d_ftab
+        LD   A,(w3d_py)
+        LD   HL,W3D_TY
+        CALL w3d_ftab
+
+        LD   A,(w3d_py+1)       ; and which cell that is
+        ADD  A,A
+        ADD  A,A
+        ADD  A,A
+        ADD  A,A
+        LD   C,A
+        LD   A,(w3d_px+1)
+        ADD  A,C
+        LD   (w3d_c0),A
+        LD   A,w3d_map / 256
+        LD   (w3d_c0+1),A
+
+        LD   IY,w3d_cols
+        LD   A,W3D_COLS
+        LD   (w3d_cn),A
+
+;------------------------------------------------------------------
+; one ray: the x axis first - which way it steps, how far to the first
+; vertical grid line, and the delta distance patched into the loop
+;------------------------------------------------------------------
+
+w3d_cl:
+        LD   HL,(w3d_rx)
+        LD   A,H
+        OR   A
+        JP   P,w3d_xpos
+        XOR  A                  ; |rx|
+        SUB  L
+        LD   L,A
+        SBC  A,A
+        SUB  H
+        LD   H,A
+        LD   A,0x0D             ; DEC C - one cell left
+        LD   (w3d_xstep),A
+        XOR  A                  ; and no flip of the texture across it
+        LD   (w3d_uxor1+1),A
+        INC  A
+        JR   w3d_xsg
+w3d_xpos:
+        LD   A,0x0C             ; INC C - one cell right
+        LD   (w3d_xstep),A
+        LD   A,0xFF
+        LD   (w3d_uxor1+1),A
+        XOR  A
+w3d_xsg:
+        LD   (w3d_xsgn),A
+
+        SLA  L                  ; i = |rx| >> 7, the reciprocal index
+        LD   A,H
+        ADC  A,A
+        ADD  A,A                ; DE = w3d_recip[i] = the delta distance
+        LD   L,A
+        LD   A,w3d_recip / 256
+        ADC  A,0
+        LD   H,A
+        LD   E,(HL)
+        INC  L
+        LD   D,(HL)
+        LD   A,E                ; which the DDA adds as an immediate
+        LD   (w3d_xa1+1),A
+        LD   A,D
+        LD   (w3d_xa2+1),A
+
+        LD   A,D                ; n = (f * ddx) >> 8, out of the table
+        ADD  A,A                ;   = TX[ddx >> 8] + high(TX[ddx & 255])
+        LD   L,A
+        LD   A,W3D_TX / 256
+        ADC  A,0
+        LD   H,A
+        LD   C,(HL)
+        INC  L
+        LD   B,(HL)
+        LD   A,E
+        ADD  A,A
+        LD   L,A
+        LD   A,W3D_TX / 256
+        ADC  A,0
+        LD   H,A
+        LD   A,(HL)             ; the low byte only decides a rounding
+        INC  L
+        LD   L,(HL)
+        LD   H,0
+        ADD  HL,BC              ; HL = n
+        LD   B,A                ; B = the low byte
+        LD   A,(w3d_xsgn)
+        OR   A
+        JR   NZ,w3d_xdone       ; stepping left: the distance is n
+
+        LD   A,B                ; stepping right: it is the rest of the
+        OR   A                  ; cell, ddx - ceil(n), which the low
+        EX   DE,HL              ; byte says whether to round up
+        JR   Z,w3d_xd1
+        DEC  HL
+w3d_xd1:
+        SBC  HL,DE
+w3d_xdone:
+        LD   (w3d_sdx),HL
+
+;------------------------------------------------------------------
+; the y axis, the same again
+;------------------------------------------------------------------
+
+        LD   HL,(w3d_ry)
+        LD   A,H
+        OR   A
+        JP   P,w3d_ypos
+        XOR  A
+        SUB  L
+        LD   L,A
+        SBC  A,A
+        SUB  H
+        LD   H,A
+        LD   A,-16              ; ADD A,-16 - one cell back
+        LD   (w3d_ystep+1),A
+        LD   A,0xFF
+        LD   (w3d_uxor2+1),A
+        LD   A,1
+        JR   w3d_ysg
+w3d_ypos:
+        LD   A,16               ; ADD A,16 - one cell on
+        LD   (w3d_ystep+1),A
+        XOR  A
+        LD   (w3d_uxor2+1),A
+w3d_ysg:
+        LD   (w3d_ysgn),A
+
+        SLA  L
+        LD   A,H
+        ADC  A,A
+        ADD  A,A
+        LD   L,A
+        LD   A,w3d_recip / 256
+        ADC  A,0
+        LD   H,A
+        LD   E,(HL)
+        INC  L
+        LD   D,(HL)
+        LD   A,E
+        LD   (w3d_ya1+1),A
+        LD   A,D
+        LD   (w3d_ya2+1),A
+
+        LD   A,D
+        ADD  A,A
+        LD   L,A
+        LD   A,W3D_TY / 256
+        ADC  A,0
+        LD   H,A
+        LD   C,(HL)
+        INC  L
+        LD   B,(HL)
+        LD   A,E
+        ADD  A,A
+        LD   L,A
+        LD   A,W3D_TY / 256
+        ADC  A,0
+        LD   H,A
+        LD   A,(HL)
+        INC  L
+        LD   L,(HL)
+        LD   H,0
+        ADD  HL,BC
+        LD   B,A
+        LD   A,(w3d_ysgn)
+        OR   A
+        JR   NZ,w3d_ydone
+
+        LD   A,B
+        OR   A
+        EX   DE,HL
+        JR   Z,w3d_yd1
+        DEC  HL
+w3d_yd1:
+        SBC  HL,DE
+w3d_ydone:
+
+;------------------------------------------------------------------
+; the DDA. HL is the distance to the next vertical grid line, DE to
+; the next horizontal one, BC the cell the ray is in.
+;------------------------------------------------------------------
+
+        EX   DE,HL              ; DE = the y distance
+        LD   HL,(w3d_sdx)
+        LD   BC,(w3d_c0)
+w3d_dda:
+        LD   A,H                ; whichever grid line is nearer
+        CP   D
+        JR   C,w3d_ddax
+        JR   NZ,w3d_dday
+        LD   A,L
+        CP   E
+        JR   NC,w3d_dday
+w3d_ddax:
+        LD   A,L
+w3d_xa1:
+        ADD  A,0                ; patched: the x delta distance
+        LD   L,A
+        LD   A,H
+w3d_xa2:
+        ADC  A,0
+        LD   H,A
+w3d_xstep:
+        INC  C                  ; patched: INC C or DEC C
+        LD   A,(BC)
+        OR   A
+        JP   Z,w3d_dda
+        JP   w3d_hitx
+w3d_dday:
+        LD   A,E
+w3d_ya1:
+        ADD  A,0                ; patched: the y delta distance
+        LD   E,A
+        LD   A,D
+w3d_ya2:
+        ADC  A,0
+        LD   D,A
+        LD   A,C
+w3d_ystep:
+        ADD  A,16               ; patched: one map row either way
+        LD   C,A
+        LD   A,(BC)
+        OR   A
+        JP   Z,w3d_dda
+
+;------------------------------------------------------------------
+; a horizontal wall: the distance is the one before the last step, and
+; the texture coordinate comes off the x axis
+;------------------------------------------------------------------
+
+w3d_hity:
+        LD   (w3d_cell),A
+        EX   DE,HL
+        LD   A,(w3d_ya1+1)
+        LD   C,A
+        LD   A,(w3d_ya2+1)
+        LD   B,A
+        OR   A
+        SBC  HL,BC
+        PUSH HL
+        LD   A,(w3d_rx+1)
+        LD   C,A
+        CALL w3d_umul
+        LD   A,(w3d_px)
+        ADD  A,E
+w3d_uxor2:
+        XOR  0                  ; patched: which way the wall faces
+        JP   w3d_ufin
+
+w3d_hitx:
+        LD   (w3d_cell),A
+        LD   A,(w3d_xa1+1)
+        LD   C,A
+        LD   A,(w3d_xa2+1)
+        LD   B,A
+        OR   A
+        SBC  HL,BC
+        PUSH HL
+        LD   A,(w3d_ry+1)
+        LD   C,A
+        CALL w3d_umul
+        LD   A,(w3d_py)
+        ADD  A,E
+w3d_uxor1:
+        XOR  0
+
+;------------------------------------------------------------------
+; A is the texture coordinate, the stack holds the distance
+;------------------------------------------------------------------
+
+w3d_ufin:
+        RRCA                    ; the texture is 32 wide
+        RRCA
+        RRCA
+        AND  0x1F
+        LD   (IY+2),A
+        LD   A,(w3d_cell)       ; which texture
+        LD   HL,w3d_pages-1
+        LD   C,A
+        LD   B,0
+        ADD  HL,BC
+        LD   A,(HL)
+        LD   (IY+1),A
+        POP  HL                 ; and how tall to draw it
+        SRL  H
+        RR   L
+        SRL  H
+        RR   L
+        SRL  H
+        RR   L
+        LD   A,H
+        CP   4
+        JR   NC,w3d_uf2         ; further than the table goes
+        ADD  A,w3d_htab / 256
+        LD   H,A
+        LD   A,(HL)
+        OR   A
+        JR   NZ,w3d_uf3
+w3d_uf2:
+        LD   A,1                ; never nothing at all
+w3d_uf3:
+        LD   (IY+0),A
+
+        LD   HL,(w3d_rx)        ; on to the next ray
+        LD   DE,(w3d_sx)
+        ADD  HL,DE
+        LD   (w3d_rx),HL
+        LD   HL,(w3d_ry)
+        LD   DE,(w3d_sy)
+        ADD  HL,DE
+        LD   (w3d_ry),HL
+        LD   DE,3
+        ADD  IY,DE
+        LD   A,(w3d_cn)
+        DEC  A
+        LD   (w3d_cn),A
+        JP   NZ,w3d_cl
+        RET
+
+;------------------------------------------------------------------
+; w3d_umul - where along the wall the ray hit, as a fraction of a cell
+;
+; The hit point is pos + dist * ray / 16384, and dist >> 5 times
+; ray >> 8 is that product to within the five bits of it anyone reads.
+; Both fit in a byte - no ray in a 16 by 16 map is longer than the
+; diagonal - so it is one unsigned multiply and a correction: with
+; b = bu - 256 for a negative ray, a*b is a*bu less a*256, which is
+; the high byte only.
+;
+; Entry : HL = distance, C = the ray component's high byte
+; Exit  : E = the offset within the cell.  Trashes AF, BC, DE, HL.
+;------------------------------------------------------------------
+
+w3d_umul:
+        LD   A,L                ; a = dist >> 5
+        RLCA
+        RLCA
+        RLCA
+        AND  7
+        LD   E,A
+        LD   A,H
+        ADD  A,A
+        ADD  A,A
+        ADD  A,A
+        OR   E
+        LD   B,A
+        CALL qsmul8             ; DE = a * bu
+        BIT  7,C
+        JR   Z,w3d_um1
+        LD   A,D
+        SUB  B
+        LD   D,A
+w3d_um1:
+        SRA  D                  ; and the last halving of the fraction
+        RR   E
+        RET
+
+;------------------------------------------------------------------
+; w3d_sinlk / w3d_planelk - the table entry for angle A, into HL
+;------------------------------------------------------------------
+
+w3d_sinlk:
+        ADD  A,A
+        LD   L,A
+        LD   A,w3d_sin / 256
+        ADC  A,0
+        LD   H,A
+        LD   A,(HL)
+        INC  L
+        LD   H,(HL)
+        LD   L,A
+        RET
+
+w3d_planelk:
+        ADD  A,A
+        LD   L,A
+        LD   A,w3d_plane / 256
+        ADC  A,0
+        LD   H,A
+        LD   A,(HL)
+        INC  L
+        LD   H,(HL)
+        LD   L,A
+        RET
+
+;------------------------------------------------------------------
+; w3d_asr6 - HL >> 6, signed
+;------------------------------------------------------------------
+
+w3d_asr6:
+        LD   B,6
+w3d_a61:
+        SRA  H
+        RR   L
+        DJNZ w3d_a61
+        RET
+
+;------------------------------------------------------------------
+; w3d_ftab - 256 entries of A times i at HL, by pushing a running sum
+;------------------------------------------------------------------
+
+w3d_ftab:
+        LD   C,A
+        LD   B,0
+        LD   DE,512
+        ADD  HL,DE
+        DI
+        LD   (w3d_sp),SP
+        LD   SP,HL              ; the table fills downwards
+        LD   H,C                ; from f * 255 at the top
+        LD   L,0
+        OR   A
+        SBC  HL,BC
+        XOR  A                  ; and steps by -f
+        SUB  C
+        LD   C,A
+        SBC  A,A
+        LD   B,A
+        LD   A,4
+w3d_ft1:
+        DUP  64
+        PUSH HL
+        ADD  HL,BC
+        EDUP
+        DEC  A
+        JP   NZ,w3d_ft1
+        LD   SP,(w3d_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; w3d_frame - cast, draw, show
+;------------------------------------------------------------------
+
+w3d_frame:
+        CALL w3d_cast
+        CALL w3d_draw
+        JP   w3d_flip
 
 ;------------------------------------------------------------------
 ; w3d_flip - swap the buffers
@@ -341,6 +892,20 @@ w3d_gmoved:     DEFS 1
 w3d_pfn:        DEFS 1
 w3d_cx:         DEFS 1
 w3d_sp:         DEFS 2
+w3d_pages:      DEFB w3d_tex1 / 256, w3d_tex2 / 256
+w3d_px:         DEFW 0x0380     ; the camera, 8.8 in map cells
+w3d_py:         DEFW 0x0380
+w3d_ang:        DEFB 0
+w3d_rx:         DEFS 2          ; this ray
+w3d_ry:         DEFS 2
+w3d_sx:         DEFS 2          ; and the step to the next one
+w3d_sy:         DEFS 2
+w3d_sdx:        DEFS 2
+w3d_c0:         DEFS 2
+w3d_cn:         DEFS 1
+w3d_xsgn:       DEFS 1
+w3d_ysgn:       DEFS 1
+w3d_cell:       DEFS 1
 
 w3d_cols:       DEFS 3 * W3D_COLS   ; half height, texture page, texture column
 

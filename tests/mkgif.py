@@ -121,7 +121,56 @@ def room(outdir, seconds=10):
           % (p, n, secs, size / 1024, bad, got))
 
 
+MAZE_PAL = [(0, 0, 0), (58, 58, 68), (118, 120, 132), (88, 90, 100),
+            (150, 152, 164), (0, 0, 0), (0, 0, 0), (0, 0, 0),
+            (104, 42, 32), (0, 0, 0), (168, 74, 52), (0, 0, 0),
+            (0, 0, 0), (0, 0, 0), (38, 38, 52), (94, 74, 52)]
+
+
+def maze(outdir, seconds=12):
+    """wolf3d at its measured rate: 713,368 T-states a frame, 8.4 Hz.
+
+    The camera walks itself: a step forward each frame, and where the
+    cell ahead is solid it turns on the spot until it is not.
+    """
+    import math
+    b = Bench("harness_wolf.asm", org=0)
+    s = b.syms
+    b.call_regs(s["w3d_init"])
+    mp = b.peek(s["w3d_map"], 256)
+    px, py, ang, spin = 3.5, 3.5, 40, 3
+    n = int(seconds * 8.4)
+    frames = []
+    for _ in range(n):
+        dx = math.cos(2 * math.pi * ang / 256)
+        dy = math.sin(2 * math.pi * ang / 256)
+        for _ in range(64):                     # turn until the way ahead
+            ax = px + dx * 0.55                 # is clear, then walk
+            ay = py + dy * 0.55
+            if not mp[(int(ay) & 15) * 16 + (int(ax) & 15)]:
+                break
+            ang = (ang + spin) & 255
+            dx = math.cos(2 * math.pi * ang / 256)
+            dy = math.sin(2 * math.pi * ang / 256)
+        else:
+            spin = -spin
+        px += dx * 0.055
+        py += dy * 0.055
+        b.poke(s["w3d_px"], int(px * 256).to_bytes(2, "little"))
+        b.poke(s["w3d_py"], int(py * 256).to_bytes(2, "little"))
+        b.poke(s["w3d_ang"], bytes([ang & 255]))
+        into = b.peek(s["w3d_back"], 1)[0]
+        b.call_regs(s["w3d_frame"])
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    p = "%s/maze.gif" % outdir
+    size = write_gif(p, frames, MAZE_PAL, 120)
+    got, bad, secs = check_gif(p, frames, MAZE_PAL, 120)
+    print("  %-18s %3d frames, 8.4 Hz, %.2fs, %6.1f KB, %d of %d wrong"
+          % (p, n, secs, size / 1024, bad, got))
+
+
 if __name__ == "__main__":
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
     cube(d)
     room(d)
+    maze(d)

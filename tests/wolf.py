@@ -95,13 +95,18 @@ def cast(mp, px, py, rayx, rayy):
             dist = (sdx - ddx) if side == 0 else (sdy - ddy)
             if dist < 1:
                 dist = 1
-            # where along the wall it hit, for the texture column
+            # Where along the wall it hit, for the texture column: the
+            # hit point is pos + dist * ray / 16384. The exact product
+            # wants 16 by 16; one signed 8 by 8 is close enough, because
+            # u is only ever used five bits wide. dist >> 5 stays inside
+            # a byte because no ray in a 16 by 16 map runs further than
+            # the diagonal, and ray >> 8 is the high byte of the ray.
             if side == 0:
-                u = (py + ((dist * rayy) >> 14)) & 255
+                u = (py + ((((dist >> 5) & 255) * (rayy >> 8)) >> 1)) & 255
                 if stepx > 0:
                     u = 255 - u
             else:
-                u = (px + ((dist * rayx) >> 14)) & 255
+                u = (px + ((((dist >> 5) & 255) * (rayx >> 8)) >> 1)) & 255
                 if stepy < 0:
                     u = 255 - u
             return dist, side, (u * TEX) >> 8, cell
