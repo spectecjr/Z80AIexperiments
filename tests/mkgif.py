@@ -2,153 +2,53 @@
 """Record the renderers running on the emulated Z80 as animated GIFs.
 
 GIF is a good fit for a MODE 4 screen: sixteen colours and a palette,
-which is what the SAM has. Frames after the first are stored as just
-the rectangle that changed, which for the cube is a small part of the
-screen and for the room is the viewport without its letterbox.
+which is what the SAM has, so the nibbles are palette indices already
+and nothing is quantised.
 
+    pip install pillow numpy
     python3 tests/mkgif.py [outdir]
 """
 import sys
 
 import numpy as np
+from PIL import Image
 
 from bench import Bench
 
-CLEAR_BITS = 4                          # sixteen colours
 
-
-def lzw(data, mcs=CLEAR_BITS):
-    """GIF's variable width LZW."""
-    clear, end = 1 << mcs, (1 << mcs) + 1
-    out = bytearray()
-    buf = bits = 0
-
-    def emit(code, width):
-        nonlocal buf, bits
-        buf |= code << bits
-        bits += width
-        while bits >= 8:
-            out.append(buf & 0xFF)
-            buf >>= 8
-            bits -= 8
-
-    width = mcs + 1
-    table = {}
-    nxt = end + 1
-    emit(clear, width)
-    it = iter(data)
-    cur = next(it)
-    for sym in it:
-        k = (cur << 4) | sym
-        v = table.get(k)
-        if v is not None:
-            cur = v
-            continue
-        emit(cur, width)
-        if nxt < 4096:
-            table[k] = nxt
-            nxt += 1
-            if nxt == (1 << width) and width < 12:
-                width += 1
-        else:
-            emit(clear, width)
-            table.clear()
-            nxt = end + 1
-            width = mcs + 1
-        cur = sym
-    emit(cur, width)
-    emit(end, width)
-    if bits:
-        out.append(buf & 0xFF)
-    return bytes(out)
-
-
-def unlzw(blob, mcs=CLEAR_BITS):
-    """The other way, so the encoder can be checked against itself."""
-    clear, end = 1 << mcs, (1 << mcs) + 1
-    width = mcs + 1
-    table = {i: bytes([i]) for i in range(clear)}
-    nxt = end + 1
-    out = bytearray()
-    buf = bits = pos = 0
-    prev = None
-    while True:
-        while bits < width:
-            if pos >= len(blob):
-                return bytes(out)
-            buf |= blob[pos] << bits
-            bits += 8
-            pos += 1
-        code = buf & ((1 << width) - 1)
-        buf >>= width
-        bits -= width
-        if code == clear:
-            table = {i: bytes([i]) for i in range(clear)}
-            nxt = end + 1
-            width = mcs + 1
-            prev = None
-            continue
-        if code == end:
-            return bytes(out)
-        if code in table:
-            entry = table[code]
-        else:
-            entry = prev + prev[:1]
-        out += entry
-        if prev is not None and nxt < 4096:
-            table[nxt] = prev + entry[:1]
-            nxt += 1
-            # the decoder's table is one entry behind the encoder's, so
-            # it has to widen one code earlier than the encoder does
-            if nxt == (1 << width) - 1 and width < 12:
-                width += 1
-        prev = entry
-
-
-def blocks(blob):
-    out = bytearray()
-    for i in range(0, len(blob), 255):
-        chunk = blob[i:i + 255]
-        out.append(len(chunk))
-        out += chunk
-    out.append(0)
-    return bytes(out)
-
-
-def write_gif(path, frames, palette, delay, check=True):
-    """frames: list of (H, W) uint8 arrays of palette indices."""
-    h, w = frames[0].shape
-    out = bytearray(b"GIF89a")
-    out += bytes([w & 255, w >> 8, h & 255, h >> 8, 0xF3, 0, 0])
+def write_gif(path, frames, palette, ms):
+    """frames: a list of (H, W) uint8 arrays of palette indices."""
+    pal = []
     for r, g, b in palette:
-        out += bytes([r, g, b])
-    out += b"\x21\xFF\x0BNETSCAPE2.0\x03\x01\x00\x00\x00"
-    prev = None
+        pal += [r, g, b]
+    pal += [0] * (768 - len(pal))
+    imgs = []
     for f in frames:
-        if prev is None:
-            x0, y0, sub = 0, 0, f
-        else:
-            ys, xs = np.nonzero(f != prev)
-            if len(ys) == 0:                    # nothing moved: a dot
-                x0, y0, sub = 0, 0, f[:1, :1]
-            else:
-                y0, y1 = int(ys.min()), int(ys.max()) + 1
-                x0, x1 = int(xs.min()), int(xs.max()) + 1
-                sub = f[y0:y1, x0:x1]
-        sh, sw = sub.shape
-        out += bytes([0x21, 0xF9, 0x04, 0x04, delay & 255, delay >> 8, 0, 0])
-        out += bytes([0x2C, x0 & 255, x0 >> 8, y0 & 255, y0 >> 8,
-                      sw & 255, sw >> 8, sh & 255, sh >> 8, 0x00])
-        flat = sub.reshape(-1).tolist()
-        blob = lzw(flat)
-        if check:
-            assert unlzw(blob) == bytes(flat), "LZW round trip failed"
-        out += bytes([CLEAR_BITS]) + blocks(blob)
-        prev = f
-    out += b"\x3B"
-    open(path, "wb").write(bytes(out))
-    return len(out)
+        im = Image.frombytes("P", (f.shape[1], f.shape[0]), f.tobytes())
+        im.putpalette(pal)
+        imgs.append(im)
+    imgs[0].save(path, save_all=True, append_images=imgs[1:], loop=0,
+                 duration=ms, disposal=1, optimize=True)
+    return len(open(path, "rb").read())
 
+
+def check_gif(path, frames, palette, ms):
+    """Read it back with a decoder that had no part in writing it.
+
+    Pillow merges runs of identical frames and adds their delays
+    together, and it renumbers the palette, so the comparison is by
+    colour and the decoded frames are spread back out by their delays.
+    """
+    from PIL import ImageSequence
+    pal = np.array(palette, dtype=np.uint8)
+    got = []
+    total = 0
+    for f in ImageSequence.Iterator(Image.open(path)):
+        d = f.info.get("duration", ms)
+        total += d
+        got += [np.array(f.convert("RGB"))] * max(1, round(d / ms))
+    bad = sum(1 for g, w in zip(got, frames) if not np.array_equal(g, pal[w]))
+    return len(got), bad, total / 1000.0
 
 def unpack(raw):
     """A MODE 4 buffer into one byte a pixel."""
@@ -186,8 +86,10 @@ def cube(outdir, seconds=10):
         b.call_regs(s["rndl_frame"])
         frames.append(unpack(b.peek(BUF[into], 128 * 192)))
     p = "%s/lit_cube.gif" % outdir
-    size = write_gif(p, frames, CUBE_PAL, 2)
-    print("  %-16s %d frames at 50 Hz, %.1f KB" % (p, n, size / 1024))
+    size = write_gif(p, frames, CUBE_PAL, 20)
+    got, bad, secs = check_gif(p, frames, CUBE_PAL, 20)
+    print("  %-18s %3d frames, 50 Hz, %.2fs, %6.1f KB, %d of %d wrong"
+          % (p, n, secs, size / 1024, bad, got))
 
 
 def room(outdir, seconds=10):
@@ -201,7 +103,7 @@ def room(outdir, seconds=10):
     for t in range(n):
         cx = int(45 * math.sin(2 * math.pi * t / 200))   # a wander that
         cz = int(35 * math.cos(2 * math.pi * t / 150))   # keeps corners
-        ca = (t * 3) & 255                               # in view
+        ca = (t * 3 + 64) & 255                          # in view
         b.poke(s["r3d_cx"], (cx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["r3d_cz"], (cz & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["r3d_ca"], bytes([ca]))
@@ -209,8 +111,10 @@ def room(outdir, seconds=10):
         b.call_regs(s["r3d_frame"])
         frames.append(unpack(b.peek(BUF[into], 128 * 192)))
     p = "%s/room.gif" % outdir
-    size = write_gif(p, frames, ROOM_PAL, 5)
-    print("  %-16s %d frames at 20 Hz, %.1f KB" % (p, n, size / 1024))
+    size = write_gif(p, frames, ROOM_PAL, 50)
+    got, bad, secs = check_gif(p, frames, ROOM_PAL, 50)
+    print("  %-18s %3d frames, 20 Hz, %.2fs, %6.1f KB, %d of %d wrong"
+          % (p, n, secs, size / 1024, bad, got))
 
 
 if __name__ == "__main__":
