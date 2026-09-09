@@ -151,8 +151,8 @@ def generate_list(
     sp_label = f"{label}_splist"
 
     program = Program()
-    if uses_stack:
-        program.add(isa.Simple("DI") if context.interrupts == "di" else isa.Simple("NOP"))
+    if uses_stack and context.interrupts == "di":
+        program.add(isa.Simple("DI"))
     prologue_loads = _state_loads(entry)
     program.extend(prologue_loads)
     prologue_tstates = program.tstates

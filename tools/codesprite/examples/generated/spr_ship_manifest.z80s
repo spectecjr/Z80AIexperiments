@@ -10,11 +10,11 @@
 ;     1137T   182b  single  INCLUDE "spr_ship_save_single_xe_yo.z80s"
 ;     1233T   206b  single  INCLUDE "spr_ship_restore_single_xe_yo.z80s"
 ;     1325T   295b  single  INCLUDE "spr_ship_draw_single_xo_ye.z80s"
-;      618T   106b  single  INCLUDE "spr_ship_erase_single_xo_ye.z80s"
+;      610T   104b  single  INCLUDE "spr_ship_erase_single_xo_ye.z80s"  ; writes through SP - interrupts must be off
 ;     1165T   185b  single  INCLUDE "spr_ship_save_single_xo_ye.z80s"
 ;     1261T   209b  single  INCLUDE "spr_ship_restore_single_xo_ye.z80s"
 ;     1329T   296b  single  INCLUDE "spr_ship_draw_single_xo_yo.z80s"
-;      622T   107b  single  INCLUDE "spr_ship_erase_single_xo_yo.z80s"
+;      614T   105b  single  INCLUDE "spr_ship_erase_single_xo_yo.z80s"  ; writes through SP - interrupts must be off
 ;     1169T   186b  single  INCLUDE "spr_ship_save_single_xo_yo.z80s"
 ;     1265T   210b  single  INCLUDE "spr_ship_restore_single_xo_yo.z80s"
 

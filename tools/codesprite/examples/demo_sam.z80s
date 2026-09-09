@@ -6,6 +6,12 @@
 ; deliberately left as a stub, because codesprite never touches hardware
 ; and the right mode/palette/paging code belongs to your program.
 ;
+; Note the interrupt handling: routines that write through SP need
+; interrupts off, and they do NOT disable them themselves - one DI/EI goes
+; around a whole batch of sprite work.  Every generated file says whether
+; it needs this, as <label>_uses_stack.  All registers are trashed by a
+; sprite routine; SP is the only thing guaranteed to come back unchanged.
+;
 ; Build (once sjasmplus is on PATH):
 ;     sjasmplus examples/demo_sam.z80s
 ;
@@ -43,6 +49,7 @@ TILE_COUNT      EQU  8
 TILE_Y          EQU  32
 
 draw_tile_row:
+                DI                              ; the list lives on the stack
                 SPR_LIST_BEGIN                  ; push the return address
                 LD   B,TILE_COUNT
                 LD   D,TILE_Y
@@ -61,6 +68,7 @@ draw_tile_row:
 
                 LD   A,TILE_COUNT
                 SPR_LIST_CALL tile_draw_list_xe
+                EI
                 RET
 
 ;-----------------------------------------------------------------------
@@ -83,10 +91,20 @@ move_ship:
                 CALL spr_ship_draw_single_xe_ye_setpos
                 CALL spr_ship_restore_single_xe_ye_setpos
 
+                ; One DI/EI around the whole batch, not around each routine:
+                ; anything with <label>_uses_stack = 1 points SP into the
+                ; display file while it runs.  SP itself is always restored
+                ; by the routine, so nesting calls like this is safe.
+                DI
                 CALL spr_ship_save_single_xe_ye     ; keep the background
                 CALL spr_ship_draw_single_xe_ye     ; draw the ship
+                EI
+
                 HALT                                ; wait for the frame
+
+                DI
                 CALL spr_ship_restore_single_xe_ye  ; put it back
+                EI
 
                 POP  DE
                 LD   A,E

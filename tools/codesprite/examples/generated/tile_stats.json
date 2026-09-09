@@ -2,20 +2,21 @@
   "name": "tile",
   "source": "examples/solid16.txt",
   "command_line": "compile examples/solid16.txt --name tile --out-dir examples/generated --reloc register --form list --x-align 2 --y-align 2",
-  "total_size": 138,
+  "total_size": 136,
   "variants": [
     {
       "variant": "tile_draw_list_xe",
       "form": "list",
       "path": "examples/generated/tile_draw_list_xe.z80s",
-      "size": 138,
-      "tstates": 1035,
+      "size": 136,
+      "tstates": 1027,
       "item_tstates": 1017,
       "patches": 0,
+      "uses_stack": true,
       "lower_bound": 704,
       "cells": 128,
       "routine": "draw",
-      "gap_percent": 47.01704545454545
+      "gap_percent": 45.88068181818182
     }
   ]
 }

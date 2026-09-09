@@ -122,14 +122,25 @@ SPR_SCRATCH     EQU $E000       ; save/restore scratch, just past the screen
 ;-----------------------------------------------------------------------
 ; Register and interrupt contract
 ;
-;   * Every generated routine may use AF, BC, DE, HL, IX and the
-;     alternate bank BC'/DE'/HL'.  IY is never touched.
-;   * A routine that writes through the stack disables interrupts, saves
-;     SP into its own code, and restores both before returning.  If your
-;     interrupt handler must keep running, generate with --stack raw and
-;     take responsibility for SP yourself.
+;   * EVERY register is trashed: AF, BC, DE, HL, IX, IY and the alternate
+;     bank AF'/BC'/DE'/HL'.  Save anything you need before calling.
+;   * SP is the one exception: it is always exactly as it was on entry.
+;   * A routine that writes through SP says so in its header comment and
+;     sets <label>_uses_stack to 1.  Such a routine needs interrupts off
+;     for its duration.  By default it does NOT disable them itself: put
+;     one DI before a batch of sprites and one EI after, which is cheaper
+;     than guarding each routine.  Build with --interrupts di if you would
+;     rather each routine took care of itself.
+;   * Build with --stack none for routines that never touch SP at all
+;     (<label>_uses_stack = 0).  Those are safe to run with interrupts
+;     enabled, at some cost in speed.
 ;   * A patched routine rewrites its own immediates, so it must live in
 ;     RAM that is paged in while it runs.
 ;   * Nothing here pages memory: the display file and the code must be in
 ;     the CPU's address space together (HMPR = VMPR for a screen at $8000).
+;
+; So a frame typically looks like:
+;       DI
+;       ... save / draw / restore as many sprites as you like ...
+;       EI
 ;-----------------------------------------------------------------------

@@ -17,6 +17,7 @@ COLUMNS = [
     ("T(call)", 9, ">"),
     ("T(item)", 9, ">"),
     ("patches", 8, ">"),
+    ("stack", 7, ">"),
     ("bound", 8, ">"),
     ("gap", 7, ">"),
 ]
@@ -33,6 +34,7 @@ class VariantRow:
     tstates: int
     item_tstates: int | None = None
     patches: int = 0
+    uses_stack: bool = False
     lower_bound: int | None = None
     cells: int = 0
     routine: str = "draw"
@@ -75,6 +77,7 @@ class Report:
                 str(row.tstates),
                 "-" if row.item_tstates is None else str(row.item_tstates),
                 str(row.patches),
+                "SP" if row.uses_stack else "-",
                 "-" if row.lower_bound is None else str(row.lower_bound),
                 "-" if gap is None else f"{gap:+.0f}%",
             ]
@@ -111,6 +114,7 @@ class Report:
                         str(row.tstates),
                         "-" if row.item_tstates is None else str(row.item_tstates),
                         str(row.patches),
+                        "yes" if row.uses_stack else "no",
                         "-" if row.lower_bound is None else str(row.lower_bound),
                         "-" if gap is None else f"{gap:+.0f}%",
                     ]
@@ -150,9 +154,10 @@ def manifest(name: str, rows: list[VariantRow]) -> str:
         ";",
     ]
     for row in rows:
+        note = "  ; writes through SP - interrupts must be off" if row.uses_stack else ""
         lines.append(
             f";   {row.tstates:>6}T {row.size:>5}b  {row.form:<6}  "
-            f"INCLUDE \"{Path(row.path).name}\""
+            f"INCLUDE \"{Path(row.path).name}\"{note}"
         )
     lines.append("")
     for row in rows:

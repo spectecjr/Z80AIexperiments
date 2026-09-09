@@ -231,3 +231,43 @@ codesprite sizes DIR              re-print the size table from the manifest/JSON
 2. `codesprite compile examples/ship16.txt --name spr_ship --budget 60 --out-dir out/spr_ship` finishes within budget, verify passes for every variant file, the size table prints, and draw ≤ ~1 100T for the opaque 16×16 example with a reported lower-bound gap; `--x-align 2 --y-align 2 --form list --clip none` yields exactly one draw file per routine.
 3. With sjasmplus installed: `sjasmplus examples/demo_sam.z80s` assembles the demo that includes selected variant files and `runtime/sprite_rt.z80s`; bytes match our encoder (`--bin` diff).
 4. Load the demo in SimCoupe (manual, v1) and see the sprite drawn, erased, and restored at moving positions including odd x and odd y.
+
+
+---
+
+## Changes since approval
+
+Recorded as they were made, so this document stays a usable design record.
+
+* **setpos needs three entry registers, not four.** The high byte of a row
+  address is `D + (r + parity)/2`, a per-row offset from one register, not
+  a choice between two parity registers.  `B`, `C` and `D` carry the whole
+  contract; `E` is unused.
+* **Register relocation cannot use the alternate bank.** `EXX` swaps `HL`,
+  which is the anchor a relocatable routine navigates from.  Bodies built
+  with `--reloc register` (including every list-form body) cache push
+  values in the main bank only.
+* **The list form reserves `B`.** It is the `DJNZ` counter, so `BC` cannot
+  double as a data pair inside a list body.
+* **Interrupt guarding moved to the caller.**  `--stack di|raw|none` became
+  two orthogonal switches: `--stack allow|none` says whether the generator
+  may write through SP at all, and `--interrupts caller|di` says who
+  guards it.  The default is `caller`: one `DI`/`EI` around a batch of
+  sprites is cheaper than guarding each routine.  SP is still saved and
+  restored by the routine itself in every case.
+* **Stack use is documented everywhere**, since it decides whether a caller
+  needs interrupts off: a header line in each generated file, a
+  `<label>_uses_stack` EQU, a `stack` column in the size table, a field in
+  the JSON, and a note in the manifest.
+* **Register contract simplified.** All registers are trashed - `AF`, `BC`,
+  `DE`, `HL`, `IX`, `IY` and the alternate bank - and only SP is preserved.
+* **An external assembler cross-check was added** (`emit/external.py`).
+  sjasmplus is unavailable in the development sandbox, so `pasmo` is used
+  to confirm every encoding byte for byte; sjasmplus-specific *syntax*
+  remains unverified until it runs on a machine that has it.
+* **`emit/parse.py` was added**: emitted text is parsed back and re-encoded,
+  so a mistake in how an instruction prints is caught, not only how it
+  encodes.
+* **Optimisation is not yet a search.**  M6 is outstanding; today
+  `optimize/evaluate.py` generates eight candidate plans and keeps the
+  cheapest, which is honest but is not the annealer the plan describes.

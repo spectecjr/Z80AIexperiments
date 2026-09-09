@@ -15,6 +15,16 @@ from dataclasses import dataclass, field
 from ..ir import Program
 from ..z80 import isa
 
+# Instructions that read or write through the stack pointer.  A routine
+# containing none of these leaves SP alone and is safe to run with
+# interrupts enabled.
+STACK_OPS = (isa.Push, isa.Pop, isa.LdSpImm, isa.LdSpPair, isa.LdMemSp)
+
+
+def uses_stack(program: Program) -> bool:
+    """Does this routine write through SP (and so need interrupts off)?"""
+    return any(isinstance(op, STACK_OPS) for op in program.ops)
+
 INDENT = " " * 16
 
 
@@ -112,9 +122,17 @@ def render(
     if info.lower_bound:
         gap = 100.0 * (program.tstates - info.lower_bound) / info.lower_bound
         add(f"; Bound  : {info.lower_bound}T lower bound ({gap:+.0f}%)")
-    if any(op.text() in ("DI", "EI") for op in program.ops):
-        add("; Note   : uses stack writes; interrupts are disabled while drawing")
-        add(";          and SP is saved and restored by the routine itself.")
+    if uses_stack(program):
+        guarded = any(op.text() == "DI" for op in program.ops)
+        add("; Stack  : WRITES THROUGH SP.  Interrupts must be off for the")
+        if guarded:
+            add(";          duration; this routine disables them itself and")
+            add(";          restores SP before returning.")
+        else:
+            add(";          duration - the CALLER must have done DI already.")
+            add(";          SP is saved and restored by the routine itself.")
+    else:
+        add("; Stack  : does not touch SP; safe with interrupts enabled.")
     for note in info.notes:
         add(f"; Note   : {note}")
     if info.source:
@@ -145,6 +163,10 @@ def render(
     add(f"{info.label}_tstates  EQU {program.tstates}")
     add(f"{info.label}_size{' ' * 5}EQU {program.size}")
     add(f"{info.label}_patches  EQU {program.patch_count}")
+    add(
+        f"{info.label}_uses_stack EQU {1 if uses_stack(program) else 0}"
+        "   ; 1 = needs interrupts off"
+    )
     if setpos is not None and setpos.ops:
         add(f"{info.label}_setpos_tstates EQU {setpos.tstates}")
     add("")

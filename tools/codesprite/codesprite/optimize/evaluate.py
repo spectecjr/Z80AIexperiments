@@ -35,7 +35,9 @@ def evaluate(plan: Plan, context: DrawContext, **kwargs) -> tuple[Cost, Program]
     return Cost(program.tstates, program.size, program.patch_count), program
 
 
-def candidate_plans(packed: PackedSprite, *, max_gap: int = 1) -> list[Plan]:
+def candidate_plans(
+    packed: PackedSprite, *, max_gap: int = 1, allow_stack: bool = True
+) -> list[Plan]:
     """A small spread of plans worth trying before any real search.
 
     The modes trade against each other in ways that depend on the sprite:
@@ -46,7 +48,8 @@ def candidate_plans(packed: PackedSprite, *, max_gap: int = 1) -> list[Plan]:
     and honest, and it is what the annealer refines in M6.
     """
     plans = []
-    for mode in ("auto", Mode.HL, Mode.STACK, Mode.IX):
+    modes = ("auto", Mode.HL, Mode.STACK, Mode.IX) if allow_stack else (Mode.HL, Mode.IX)
+    for mode in modes:
         for serpentine in (True, False):
             plans.append(
                 baseline_plan(
@@ -68,7 +71,9 @@ def best_plan(
 ) -> tuple[Plan, Cost, Program]:
     """Generate every candidate plan and return the cheapest."""
     best: tuple[Plan, Cost, Program] | None = None
-    for plan in plans or candidate_plans(packed, max_gap=max_gap):
+    for plan in plans or candidate_plans(
+        packed, max_gap=max_gap, allow_stack=context.allow_stack
+    ):
         cost, program = evaluate(plan, context, **kwargs)
         score = cost.score(patch_weight=patch_weight, size_weight=size_weight)
         if best is None or score < best[1].score(

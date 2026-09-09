@@ -60,6 +60,7 @@ def baseline_plan(
     serpentine: bool = True,
     mode: Mode | str = Mode.HL,
     minimum_run: int = STACK_MIN_RUN,
+    allow_stack: bool = True,
 ) -> Plan:
     """Row-major plan; alternate rows are walked right to left.
 
@@ -67,9 +68,14 @@ def baseline_plan(
     opaque runs into stack mode and leaves the rest on HL writes.
     """
     auto = mode == "auto"
+    if not allow_stack and mode is Mode.STACK:
+        raise ValueError("stack writes are disabled; pick another mode")
     pieces = build_pieces(packed, max_gap=max_gap, mode=Mode.HL if auto else mode)
     if auto:
-        pieces = [p.with_mode(choose_mode(p, minimum_run)) for p in pieces]
+        pieces = [
+            p.with_mode(choose_mode(p, minimum_run) if allow_stack else Mode.HL)
+            for p in pieces
+        ]
     if serpentine:
         out = []
         for piece in pieces:

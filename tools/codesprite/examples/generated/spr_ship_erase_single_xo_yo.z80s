@@ -11,12 +11,13 @@
 ;                  D = screen_high + (y>>1)
 ;        Valid for x odd and y odd only.
 ;
-; Cost   : 622T (nominal Z80 timing)
+; Cost   : 614T (nominal Z80 timing)
 ; Setpos : 34T, 8 bytes
-; Size   : 99 bytes
+; Size   : 97 bytes
 ; Patches: 2
-; Note   : uses stack writes; interrupts are disabled while drawing
-;          and SP is saved and restored by the routine itself.
+; Stack  : WRITES THROUGH SP.  Interrupts must be off for the
+;          duration - the CALLER must have done DI already.
+;          SP is saved and restored by the routine itself.
 ; Source : examples/ship14.txt (88b6538d6e9a)
 ; Command: compile examples/ship14.txt --name spr_ship --out-dir
 ; examples/generated --reloc patch --routines draw,erase,save,restore
@@ -24,7 +25,6 @@
 ;-----------------------------------------------------------------------
 
 spr_ship_erase_single_xo_yo:
-                DI
                 LD (spr_ship_erase_sprestore+1),SP
 .p0:
                 LD HL,$8080             ; (0,0)
@@ -103,7 +103,6 @@ spr_ship_erase_single_xo_yo:
                 PUSH BC                 ; (11,3)
 spr_ship_erase_sprestore:
                 LD SP,$0000
-                EI
                 RET
 
 spr_ship_erase_single_xo_yo_setpos:
@@ -116,7 +115,8 @@ spr_ship_erase_single_xo_yo_setpos:
 spr_ship_erase_single_xo_yo_w        EQU 14
 spr_ship_erase_single_xo_yo_h        EQU 12
 spr_ship_erase_single_xo_yo_bytes    EQU 60
-spr_ship_erase_single_xo_yo_tstates  EQU 622
-spr_ship_erase_single_xo_yo_size     EQU 99
+spr_ship_erase_single_xo_yo_tstates  EQU 614
+spr_ship_erase_single_xo_yo_size     EQU 97
 spr_ship_erase_single_xo_yo_patches  EQU 2
+spr_ship_erase_single_xo_yo_uses_stack EQU 1   ; 1 = needs interrupts off
 spr_ship_erase_single_xo_yo_setpos_tstates EQU 34

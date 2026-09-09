@@ -58,7 +58,8 @@ project includes only what it uses.
 | `--reloc` | `none` (fixed) · `patch` (self-modifying setpos) · `register` (HL) |
 | `--clip` | `none` today; `y-spill`/`y-entry` are M7 |
 | `--mode` | `best` (cost every candidate plan) · `hl` · `stack` · `ix` · `auto` |
-| `--stack` | `di` (guard stack writes with DI/EI) · `raw` |
+| `--stack` | `allow` writing through SP (fastest) · `none` (never touches SP) |
+| `--interrupts` | `caller` (you DI/EI around a batch) · `di` (routine guards itself) |
 
 ## Sprite input
 
@@ -114,14 +115,22 @@ cheap, and each is isolated to one place:
   (`codesprite/screen.py`).
 * **Where the generated code lives**, and that it is paged in throughout —
   patched routines rewrite their own immediates, so they cannot be in ROM.
-* **Interrupt policy.** Stack writes point SP into the display file, so
-  those sections currently `DI`/`EI`. If you keep interrupts off for the
-  whole frame anyway, `--stack raw` saves 8T per routine.
-* **IY and the alternate bank** are used freely (IY is not, actually —
-  only `AF`, `BC`, `DE`, `HL`, `IX` and `BC'/DE'/HL'`). Say so if an
-  interrupt handler needs any of them preserved.
 * **CLUT byte encoding**, if you want palettes emitted as SAM colour
   bytes rather than RGB comments.
+
+## Register and interrupt contract
+
+Every register is trashed — `AF`, `BC`, `DE`, `HL`, `IX`, `IY` and the
+alternate bank. **SP is the one exception**: it is always restored to
+exactly what it was on entry.
+
+A routine that writes through SP (the fast path — `PUSH` moves two bytes
+in 11T) needs interrupts off while it runs. It does not disable them
+itself by default: the expected shape is one `DI` before a batch of
+sprites and one `EI` after. Every generated file states which it is, in
+the header comment and as `<label>_uses_stack EQU 0|1`, and the size
+table has a `stack` column. `--stack none` builds routines that never
+touch SP at all, at some cost in speed.
 
 ## Layout
 

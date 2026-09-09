@@ -14,7 +14,7 @@ from .codegen.erase import SHAPES, erase_sprite
 from .codegen.forms import generate_list
 from .codegen.setpos import collect_sites, generate_setpos, label_patch_sites
 from .emit.report import Report, VariantRow, manifest
-from .emit.sjasm import ModuleInfo, render
+from .emit.sjasm import ModuleInfo, render, uses_stack
 from .ir import Mode, Reloc
 from .optimize.baseline import baseline_plan
 from .optimize.evaluate import best_plan
@@ -92,8 +92,20 @@ def build_parser() -> argparse.ArgumentParser:
     compile_p.add_argument("--mode", default="best",
                            choices=["best", "auto", "hl", "stack", "ix"],
                            help="write mode; 'best' costs every candidate plan")
-    compile_p.add_argument("--stack", default="di", choices=["di", "raw"],
-                           help="whether stack sections disable interrupts")
+    compile_p.add_argument(
+        "--stack",
+        default="allow",
+        choices=["allow", "none"],
+        help="allow writing through SP (fastest), or forbid it entirely so "
+        "the routine leaves SP alone and is safe with interrupts on",
+    )
+    compile_p.add_argument(
+        "--interrupts",
+        default="caller",
+        choices=["caller", "di"],
+        help="who guards stack writes: the caller (default - one DI/EI around "
+        "a whole batch), or the routine itself",
+    )
     compile_p.add_argument("--no-alternate", action="store_true",
                            help="do not use the alternate register bank")
     compile_p.add_argument("--moves-per-draw", type=float, default=1.0,
@@ -161,6 +173,8 @@ def command_compile(args: argparse.Namespace) -> int:
         raise SystemExit("the list form needs --reloc register")
     if args.clip != "none":
         raise SystemExit("clipping arrives in M7; use --clip none")
+    if args.stack == "none" and args.mode == "stack":
+        raise SystemExit("--mode stack contradicts --stack none")
 
     x_at, y_at = (int(v, 0) for v in args.at.replace(",", " ").split())
     out_dir = Path(args.out_dir)
@@ -258,7 +272,8 @@ def build_variant(
         x=x,
         y=y,
         reloc=reloc,
-        interrupts=args.stack,
+        interrupts=args.interrupts,
+        allow_stack=args.stack == "allow",
         label=f"{args.name}_{routine}",
     )
     kwargs = {"use_alternate": not args.no_alternate}
@@ -275,7 +290,8 @@ def build_variant(
         if form == "list":
             plan = baseline_plan(packed if target is packed else target,
                                  max_gap=args.max_gap,
-                                 mode=mode if mode is not None else "auto")
+                                 mode=mode if mode is not None else "auto",
+                                 allow_stack=context.allow_stack)
             listing = generate_list(plan, context, label=context.label, **kwargs)
             program = listing.program
             item_tstates = listing.item_tstates
@@ -292,7 +308,10 @@ def build_variant(
                 **kwargs,
             )
         else:
-            plan = baseline_plan(target, max_gap=args.max_gap, mode=mode)
+            plan = baseline_plan(
+                target, max_gap=args.max_gap, mode=mode,
+                allow_stack=context.allow_stack,
+            )
             plan.validate(target)
             program = generate_draw(plan, context, **kwargs)
     else:
@@ -346,6 +365,7 @@ def build_variant(
         item_tstates=item_tstates if item_tstates is not None
         else (setpos.tstates if setpos else None),
         patches=program.patch_count,
+        uses_stack=uses_stack(program),
         lower_bound=info.lower_bound,
         cells=len(packed.cells),
         routine=routine,

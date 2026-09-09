@@ -197,6 +197,8 @@ def generate_copy(
     ldi = _ldi_chain(
         spans, context, scratch_base, to_screen=to_screen, source_delta=source_delta
     )
+    if not context.allow_stack:
+        return ldi  # the bounce moves data through SP
     if source_delta is not None and context.reloc is Reloc.REGISTER:
         raise ValueError(
             "restoring from a back buffer needs absolute source addresses; "

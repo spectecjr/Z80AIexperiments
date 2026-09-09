@@ -7,13 +7,14 @@
 ; Entry: HL = address of the sprite's top-left screen byte.
 ;        The routine assumes x is even.
 ;
-; Cost   : 1035T (nominal Z80 timing)
-; Size   : 138 bytes
+; Cost   : 1027T (nominal Z80 timing)
+; Size   : 136 bytes
 ; Patches: 0
-; Bound  : 704T lower bound (+47%)
-; Note   : uses stack writes; interrupts are disabled while drawing
-;          and SP is saved and restored by the routine itself.
-; Note   : list form: 14T setup then 1017T per item
+; Bound  : 704T lower bound (+46%)
+; Stack  : WRITES THROUGH SP.  Interrupts must be off for the
+;          duration - the CALLER must have done DI already.
+;          SP is saved and restored by the routine itself.
+; Note   : list form: 10T setup then 1017T per item
 ; Source : examples/solid16.txt (8e98af55d08f)
 ; Command: compile examples/solid16.txt --name tile --out-dir
 ; examples/generated --reloc register --form list --x-align 2 --y-align
@@ -22,7 +23,6 @@
 ;-----------------------------------------------------------------------
 
 tile_draw_list_xe:
-                DI
                 LD DE,$7777
 tile_draw_loop:
                 POP HL
@@ -136,12 +136,12 @@ tile_draw_splist:
                 LD SP,$0000
                 DEC B
                 JP NZ,tile_draw_loop
-                EI
                 RET
 
 tile_draw_list_xe_w        EQU 16
 tile_draw_list_xe_h        EQU 16
 tile_draw_list_xe_bytes    EQU 128
-tile_draw_list_xe_tstates  EQU 1035
-tile_draw_list_xe_size     EQU 138
+tile_draw_list_xe_tstates  EQU 1027
+tile_draw_list_xe_size     EQU 136
 tile_draw_list_xe_patches  EQU 0
+tile_draw_list_xe_uses_stack EQU 1   ; 1 = needs interrupts off

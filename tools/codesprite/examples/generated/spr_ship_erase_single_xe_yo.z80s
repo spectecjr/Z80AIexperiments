@@ -15,6 +15,7 @@
 ; Setpos : 34T, 8 bytes
 ; Size   : 150 bytes
 ; Patches: 2
+; Stack  : does not touch SP; safe with interrupts enabled.
 ; Source : examples/ship14.txt (88b6538d6e9a)
 ; Command: compile examples/ship14.txt --name spr_ship --out-dir
 ; examples/generated --reloc patch --routines draw,erase,save,restore
@@ -174,4 +175,5 @@ spr_ship_erase_single_xe_yo_bytes    EQU 55
 spr_ship_erase_single_xe_yo_tstates  EQU 766
 spr_ship_erase_single_xe_yo_size     EQU 150
 spr_ship_erase_single_xe_yo_patches  EQU 2
+spr_ship_erase_single_xe_yo_uses_stack EQU 0   ; 1 = needs interrupts off
 spr_ship_erase_single_xe_yo_setpos_tstates EQU 34

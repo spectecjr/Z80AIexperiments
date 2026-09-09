@@ -13,7 +13,10 @@ run of cells uses:
     two bytes for 11T, the fastest write the Z80 has.  Runs must be
     adjacent and fully opaque; anything else in the piece falls back to
     HL writes.  SP is saved and restored around the routine, and the
-    section runs with interrupts disabled unless told otherwise.
+    section needs interrupts off; by default the caller is assumed to have
+    seen to that, since a batch of sprites wants one DI/EI around the lot.
+    ``DrawContext.allow_stack = False`` forbids this mode outright, and the
+    routine then never touches SP.
 
 ``Mode.IX``
     ``LD (IX+d),n`` (19T) for scattered cells, since one IX seating
@@ -46,7 +49,15 @@ class DrawContext:
     x: int = 0
     y: int = 0
     reloc: Reloc = Reloc.NONE
-    interrupts: str = "di"  # di | raw : whether stack sections DI/EI
+    # Who guards a stack-writing section against interrupts:
+    #   "caller" - nothing is emitted; the caller has interrupts off already
+    #              (the usual case, where a whole batch of sprites is drawn
+    #              between one DI and one EI)
+    #   "di"     - the routine disables and re-enables them itself
+    interrupts: str = "caller"
+    # False forbids writing through SP entirely, so the routine leaves SP
+    # untouched and is safe to run with interrupts enabled.
+    allow_stack: bool = True
     label: str = "sprite"  # label stem, for self-modifying operands
 
     def address(self, cell: Cell) -> int:
@@ -125,7 +136,13 @@ class DrawGenerator:
         self.state = initial_state.copy() if initial_state else MachineState()
         self.manage_sp = manage_sp
         self.program = Program()
-        self.uses_stack = any(p.mode is Mode.STACK for p in plan.pieces)
+        wants_stack = any(p.mode is Mode.STACK for p in plan.pieces)
+        if wants_stack and not context.allow_stack:
+            raise ValueError(
+                "this plan writes through SP but the context forbids it; "
+                "generate with a non-stack mode instead"
+            )
+        self.uses_stack = wants_stack
         # HL doubles as a data pair only when addresses are baked in.  With
         # register or patch relocation it is the anchor the code navigates
         # from, and seating SP through it is what keeps row steps patch-free.

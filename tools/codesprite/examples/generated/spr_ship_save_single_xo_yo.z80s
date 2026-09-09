@@ -15,6 +15,7 @@
 ; Setpos : 41T, 10 bytes
 ; Size   : 176 bytes
 ; Patches: 2
+; Stack  : does not touch SP; safe with interrupts enabled.
 ; Note   : scratch: 60 bytes at $E000
 ; Source : examples/ship14.txt (88b6538d6e9a)
 ; Command: compile examples/ship14.txt --name spr_ship --out-dir
@@ -141,4 +142,5 @@ spr_ship_save_single_xo_yo_bytes    EQU 60
 spr_ship_save_single_xo_yo_tstates  EQU 1169
 spr_ship_save_single_xo_yo_size     EQU 176
 spr_ship_save_single_xo_yo_patches  EQU 2
+spr_ship_save_single_xo_yo_uses_stack EQU 0   ; 1 = needs interrupts off
 spr_ship_save_single_xo_yo_setpos_tstates EQU 41

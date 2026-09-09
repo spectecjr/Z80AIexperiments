@@ -1,6 +1,6 @@
 ; tile - compiled sprite variant manifest
 ; Uncomment the variants this project uses.
 ;
-;     1035T   138b  list    INCLUDE "tile_draw_list_xe.z80s"
+;     1027T   136b  list    INCLUDE "tile_draw_list_xe.z80s"  ; writes through SP - interrupts must be off
 
 ; INCLUDE "tile_draw_list_xe.z80s"

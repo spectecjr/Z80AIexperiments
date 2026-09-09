@@ -67,13 +67,62 @@ def test_stack_mode_beats_hl_mode_on_a_solid_sprite():
 
 
 def test_stack_mode_saves_and_restores_sp():
+    """SP is always restored; guarding interrupts is the caller's job."""
     sprite = Sprite([[5] * 16 for _ in range(2)])
     _packed, program, _ = build(sprite)
     texts = [op.text() for op in program.ops]
     assert any(t.startswith("LD (") and t.endswith("),SP") for t in texts)
-    assert "DI" in texts and "EI" in texts
+    assert "DI" not in texts and "EI" not in texts
     # verify_draw asserts SP is back where it started.
     check(sprite)
+
+
+def test_routine_can_guard_interrupts_itself():
+    sprite = Sprite([[5] * 16 for _ in range(2)])
+    packed = sprite.pack(0)
+    plan = baseline_plan(packed, mode="auto")
+    ctx = DrawContext(SCREEN, reloc=Reloc.NONE, interrupts="di", label="t")
+    program = generate_draw(plan, ctx)
+    texts = [op.text() for op in program.ops]
+    assert texts[0] == "DI" and "EI" in texts
+    verify_draw(program, packed, SCREEN, 0, 0, expected_tstates=program.tstates)
+
+
+def test_stack_can_be_forbidden_entirely():
+    """--stack none must leave SP untouched, so a routine is interrupt-safe."""
+    from codesprite.emit.sjasm import uses_stack
+
+    sprite = Sprite([[5] * 16 for _ in range(4)])
+    packed = sprite.pack(0)
+    ctx = DrawContext(SCREEN, reloc=Reloc.NONE, allow_stack=False, label="t")
+    plan = baseline_plan(packed, mode="auto", allow_stack=False)
+    program = generate_draw(plan, ctx)
+    assert not uses_stack(program)
+    assert not any(isinstance(op, (isa.Push, isa.Pop)) for op in program.ops)
+    verify_draw(program, packed, SCREEN, 0, 0, expected_tstates=program.tstates)
+
+
+def test_forbidding_the_stack_is_enforced_not_ignored():
+    sprite = Sprite([[5] * 16])
+    packed = sprite.pack(0)
+    ctx = DrawContext(SCREEN, reloc=Reloc.NONE, allow_stack=False, label="t")
+    stack_plan = baseline_plan(packed, mode=Mode.STACK)
+    with pytest.raises(ValueError):
+        generate_draw(stack_plan, ctx)
+    with pytest.raises(ValueError):
+        baseline_plan(packed, mode=Mode.STACK, allow_stack=False)
+
+
+def test_best_plan_respects_the_stack_ban():
+    from codesprite.emit.sjasm import uses_stack
+    from codesprite.optimize.evaluate import best_plan
+
+    sprite = Sprite([[7] * 16 for _ in range(8)])
+    packed = sprite.pack(0)
+    ctx = DrawContext(SCREEN, reloc=Reloc.NONE, allow_stack=False, label="t")
+    _plan, _cost, program = best_plan(packed, ctx)
+    assert not uses_stack(program)
+    verify_draw(program, packed, SCREEN, 0, 0, expected_tstates=program.tstates)
 
 
 def test_stack_mode_without_interrupt_guard():

@@ -16,6 +16,7 @@
 ; Size   : 233 bytes
 ; Patches: 2
 ; Bound  : 500T lower bound (+116%)
+; Stack  : does not touch SP; safe with interrupts enabled.
 ; Source : examples/ship14.txt (88b6538d6e9a)
 ; Command: compile examples/ship14.txt --name spr_ship --out-dir
 ; examples/generated --reloc patch --routines draw,erase,save,restore
@@ -211,4 +212,5 @@ spr_ship_draw_single_xe_ye_bytes    EQU 55
 spr_ship_draw_single_xe_ye_tstates  EQU 1078
 spr_ship_draw_single_xe_ye_size     EQU 233
 spr_ship_draw_single_xe_ye_patches  EQU 2
+spr_ship_draw_single_xe_ye_uses_stack EQU 0   ; 1 = needs interrupts off
 spr_ship_draw_single_xe_ye_setpos_tstates EQU 34

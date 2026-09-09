@@ -175,3 +175,71 @@ def test_trim_shrinks_the_sprite(tmp_path, capsys):
     path.write_text("....\n.11.\n....\n")
     main(["inspect", str(path), "--trim"])
     assert "2x1 pixels" in capsys.readouterr().out
+
+
+def test_stack_use_is_documented_in_every_output(tmp_path):
+    """A caller must be able to tell, without reading the code, whether a
+    routine needs interrupts off."""
+    path = tmp_path / "solid.txt"
+    path.write_text("\n".join("7" * 16 for _ in range(8)) + "\n")
+    out = tmp_path / "out"
+    main(["compile", str(path), "--name", "s", "--out-dir", str(out),
+          "--x-align", "2"])
+
+    text = (out / "s_draw_single_xe.z80s").read_text()
+    assert "WRITES THROUGH SP" in text
+    assert "s_draw_single_xe_uses_stack EQU 1" in text
+    assert "the CALLER must have done DI already" in text
+
+    data = json.loads((out / "s_stats.json").read_text())
+    assert data["variants"][0]["uses_stack"] is True
+    assert "| yes |" in (out / "s_SIZES.md").read_text()
+    assert "interrupts must be off" in (out / "s_manifest.z80s").read_text()
+
+
+def test_stack_free_build_says_so_and_uses_no_sp(tmp_path):
+    path = tmp_path / "solid.txt"
+    path.write_text("\n".join("7" * 16 for _ in range(8)) + "\n")
+    out = tmp_path / "out"
+    main(["compile", str(path), "--name", "s", "--out-dir", str(out),
+          "--x-align", "2", "--stack", "none"])
+
+    text = (out / "s_draw_single_xe.z80s").read_text()
+    assert "does not touch SP; safe with interrupts enabled" in text
+    assert "s_draw_single_xe_uses_stack EQU 0" in text
+    for forbidden in ("PUSH ", "POP ", "LD SP,"):
+        assert forbidden not in text, forbidden
+    assert json.loads((out / "s_stats.json").read_text())["variants"][0][
+        "uses_stack"
+    ] is False
+
+
+def test_routine_can_be_asked_to_guard_interrupts_itself(tmp_path):
+    path = tmp_path / "solid.txt"
+    path.write_text("\n".join("7" * 16 for _ in range(4)) + "\n")
+    out = tmp_path / "out"
+    main(["compile", str(path), "--name", "s", "--out-dir", str(out),
+          "--x-align", "2", "--interrupts", "di"])
+    text = (out / "s_draw_single_xe.z80s").read_text()
+    assert "this routine disables them itself" in text
+    assert "\n                DI" in text
+
+
+def test_stack_none_costs_more_but_still_draws(tmp_path):
+    path = tmp_path / "solid.txt"
+    path.write_text("\n".join("7" * 16 for _ in range(8)) + "\n")
+    costs = {}
+    for policy in ("allow", "none"):
+        out = tmp_path / policy
+        main(["compile", str(path), "--name", "s", "--out-dir", str(out),
+              "--x-align", "2", "--stack", policy])
+        costs[policy] = json.loads((out / "s_stats.json").read_text())["variants"][0]
+    assert costs["allow"]["tstates"] < costs["none"]["tstates"]
+
+
+def test_contradictory_stack_options_are_refused(tmp_path):
+    path = tmp_path / "s.txt"
+    path.write_text("77\n")
+    with pytest.raises(SystemExit):
+        main(["compile", str(path), "--name", "s", "--out-dir", str(tmp_path / "o"),
+              "--stack", "none", "--mode", "stack"])
