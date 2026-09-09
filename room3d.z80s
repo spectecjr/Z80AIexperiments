@@ -38,19 +38,33 @@
 ; the same split and differ only in whether the rest of the run is
 ; ceiling or floor. That halves the edge walking.
 ;
-; FILLING. Each row of a strip is two runs of one colour, filled off
-; the stack pointer through a run of PUSH HLs entered n from its end:
-; two bytes every 11 T-states. Wall boundaries are snapped to even
-; byte columns so every run is a whole number of pairs; where the
-; split lands mid-pair one PUSH of a mixed pair - one colour in H, the
-; other in L - covers both sides of it, so the split itself keeps full
+; FILLING. A row is a run of one colour per side of each strip, all
+; filled off the stack pointer through runs of PUSH BCs entered n from
+; the end: two bytes every 11 T-states. Wall boundaries are snapped to
+; even byte columns so every run is a whole number of pairs; where the
+; split lands mid-pair one PUSH of a mixed pair - one colour in B, the
+; other in C - covers both sides of it, so the split itself keeps full
 ; two-pixel resolution.
+;
+; Three things keep the cost of a run near the cost of its PUSHes.
+; What follows each run of PUSHes is the code that would have been
+; jumped back to, so a run ends by falling into it and pays nothing to
+; return - and an empty run, which two in five are, enters at the far
+; end and costs nothing beyond its dispatch. Which of two runs a strip
+; is sent to says whether its split fell inside a pair, so the entry
+; byte carries that and the rasteriser needs no test for it. And the
+; rows above and below the wall's sloped edge, where the split does
+; not move, are five in six of them and are filled in by r3d_prep
+; without running the accumulator at all.
 ;
 ; GEOMETRY. Vertices are rotated into view space with the sine table,
 ; walls clipped against the near plane, projected, and clamped to the
 ; screen edges by interpolating h - which is legitimate precisely
-; because h is affine in screen x. The wall's colour is a shade of its
-; ramp chosen by distance.
+; because h is affine in screen x. A wall with both ends past the same
+; side of the view is thrown out before any of that, on the sign of
+; vx-vz and vx+vz at its two ends, which costs a tenth of finding the
+; same thing out from the projected x. The wall's colour is a shade of
+; its ramp chosen by distance.
 ;
 ; The room must be convex with the camera inside it. World coordinates
 ; are signed 16-bit and should stay inside about +/-2000 units; walls
@@ -61,32 +75,41 @@
 ; tests/test_room3d.py, which checks every drawn byte against
 ; tests/room.py, a model of the same arithmetic:
 ;
-;   r3d_frame     min 227,228   mean 291,953   max 381,103 T-states
-;   walls drawn   min       1   mean     2.20  max       4
+;   r3d_frame     min 184,714   mean 237,161   max 307,720 T-states
 ;
-; and where a mean frame goes:
+; A 6 MHz SAM has 240,000 T-states between 25 Hz frames, so the
+; average view makes 25 Hz with a little to spare. It is not flat,
+; though: the cost is about 150,000 fixed plus 40,000 for every wall
+; in view.
 ;
-;   push run   107,309 T  37%     divide      27,702 T   9%
-;   rowout      53,163 T  18%     geometry    25,738 T   9%
-;   prep        39,676 T  14%     qsmul8       8,780 T   3%
-;   raster      28,707 T  10%     addstrip     1,508 T   1%
+;   one wall visible    23 frames   mean 187,270
+;   two walls          161 frames   mean 229,674
+;   three walls         70 frames   mean 268,769
+;   four walls           2 frames   mean 307,311
 ;
-; A 6 MHz SAM has 240,000 T-states between 25 Hz frames, so this runs
-; at about 20 Hz - 122% of the 25 Hz budget - and 25 Hz is close but
-; not free. What the numbers really say is where the floor is: the
-; push run is 18,432 bytes at 5.5 T-states each and cannot be beaten,
-; and it is only 45% of a 25 Hz frame. The other 185,000 is this
-; implementation, and it has obvious slack left: a normalised
-; reciprocal in place of the restoring divide is worth about 16,000,
-; merging the background runs either side of a far corner about 9,000,
-; and prep another 8,000.
+; So a view of two walls or fewer holds 25 Hz - 72% of this demo's
+; frames - and a corner with three or four in it runs at 19 to 22.
+;
+; Where a mean frame goes:
+;
+;   push run   103,825 T  44%     prep        15,544 T   7%
+;   rowout      44,510 T  19%     xform        9,846 T   4%
+;   raster      20,874 T   9%     onewall      9,176 T   4%
+;   divide      19,718 T   8%     qsmul8       7,578 T   3%
+;
+; The push run is 18,432 bytes at 5.5 T-states each and cannot be
+; beaten; at 44% of the frame it is now the floor rather than the
+; problem. What is left worth having: the restoring divide could be a
+; normalised reciprocal, which would take most of that 19,718, and it
+; is the geometry - divide, xform, onewall, qsmul8, some 46,000 - that
+; is the fixed cost keeping the three-wall views over budget.
 ;
 ; The comparison that matters: a ray per column, drawing each strip
 ; down the screen, would spend 368,000 T-states writing those same
 ; 18,432 bytes and would not have cast a ray yet.
 ;
-; 4,864 bytes: 2,520 of code, 1,728 for the run table, 256 for the
-; sine table, and the rest workspace.
+; 5,632 bytes, of which 2,888 is code; the rest is the run table, the
+; two pages of PUSH runs, the sine table and workspace.
 ;
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
@@ -558,6 +581,32 @@ r3d_ow1:
         AND  B
         RLA
         RET  C              ; both ends behind it
+
+        LD   HL,(r3d_p0x)   ; both ends past the same side of the view?
+        LD   DE,(r3d_p0z)   ; each side is a half space and a half space
+        OR   A              ; is convex, so the whole wall is out with
+        SBC  HL,DE          ; them - and this costs a tenth of what
+        LD   B,H            ; finding out from the projected x costs
+        LD   HL,(r3d_p1x)
+        LD   DE,(r3d_p1z)
+        OR   A
+        SBC  HL,DE
+        LD   A,H
+        OR   B
+        RLA
+        RET  NC             ; both at or beyond vx = vz
+        LD   HL,(r3d_p0x)
+        LD   DE,(r3d_p0z)
+        ADD  HL,DE
+        LD   B,H
+        LD   HL,(r3d_p1x)
+        LD   DE,(r3d_p1z)
+        ADD  HL,DE
+        LD   A,H
+        AND  B
+        RLA
+        RET  C              ; both beyond vx = -vz
+
         LD   A,(r3d_d0+1)
         RLA
         JR   NC,r3d_ow2
@@ -957,9 +1006,7 @@ r3d_asN:
 
 r3d_prep:
         LD   A,(r3d_ns)
-        LD   B,A
-        ADD  A,A
-        ADD  A,B                ; 3 * ns, the table's stride
+        ADD  A,A                ; 2 * ns, the table's stride
         LD   (r3d_stride),A
         LD   A,(r3d_ns)
         LD   (r3d_pn),A
@@ -985,16 +1032,13 @@ r3d_pl:
         LD   (r3d_pbg),A
         CALL r3d_pcol
         POP  HL
-        LD   E,L                ; rank * 3, into the run table
-        LD   D,H
-        ADD  HL,HL
-        ADD  HL,DE
-        LD   DE,r3d_tab + 2
+        ADD  HL,HL              ; rank * 2, into the run table
+        LD   DE,r3d_tab + 1
         ADD  HL,DE
         LD   (r3d_pw),HL
-        LD   A,(r3d_stride)     ; the step back up to the next triple's
-        ADD  A,2                ; last byte, the three writes having run
-        LD   E,A                ; down to its first
+        LD   A,(r3d_stride)     ; the step back up to the next pair's last
+        INC  A                  ; byte, the two writes having run down to
+        LD   E,A                ; its first
         LD   D,0
         LD   A,(IY+4)
         LD   C,A                ; C = n
@@ -1007,34 +1051,89 @@ r3d_pl:
         LD   D,(IY+3)
         LD   C,(IY+4)
         EXX
+        LD   A,C                ; the two triples the constant regions
+        SRL  A                  ; use: nothing of the wall, and all of it
+        LD   B,A                ; (n is even, so neither needs a mixed pair)
+        LD   A,64
+        SUB  B
+        LD   (r3d_tAl),A        ; run A: nr = 0, nl = n
+        LD   (r3d_tBe),A        ; run B: nr = n, nl = 0
+
+        LD   A,(IY+6)           ; which of them is c = 0 and which c = n
+        OR   A
+        JR   NZ,r3d_pswap
+        LD   A,64               ; the wall is the right hand run
+        LD   (r3d_t0e),A
+        LD   A,(r3d_tAl)
+        LD   (r3d_t0l),A
+        LD   A,(r3d_tBe)
+        LD   (r3d_t1e),A
+        LD   A,64
+        LD   (r3d_t1l),A
+        JR   r3d_pph1
+r3d_pswap:
+        LD   A,(r3d_tBe)        ; the wall is the left hand run
+        LD   (r3d_t0e),A
+        LD   A,64
+        LD   (r3d_t0l),A
+        LD   A,64
+        LD   (r3d_t1e),A
+        LD   A,(r3d_tAl)
+        LD   (r3d_t1l),A
+
+r3d_pph1:                       ; the rows above the wall are all alike,
+        LD   A,(r3d_pz)         ; so they do not need the accumulator
+        OR   A
+        JR   Z,r3d_pph2
+        LD   B,A
+        LD   A,(r3d_t0e)
+        LD   (r3d_te),A
+        LD   A,(r3d_t0l)
+        LD   (r3d_tl),A
+        CALL r3d_pfill
+r3d_pph2:
+        LD   A,R3D_HALF         ; and this many are left to work out
+        LD   B,A
+        LD   A,(r3d_pz)
+        NEG
+        ADD  A,B
+        RET  Z
+        LD   B,A
         LD   A,(IY+6)
         OR   A
         JR   Z,r3d_pright
         JR   r3d_pleft
 
+;------------------------------------------------------------------
+; r3d_pfill - B rows of the same triple, for the stretches above and
+; below the wall's edge where the split does not move
+;------------------------------------------------------------------
+
+r3d_pfill:
+        LD   A,(r3d_te)
+        LD   C,A
+        LD   A,(r3d_tl)
+r3d_pf0:
+        LD   (HL),C
+        DEC  HL
+        LD   (HL),A
+        ADD  HL,DE
+        DJNZ r3d_pf0
+        LD   A,(IY+4)           ; C was n; the caller still wants it
+        LD   C,A
+        RET
+
 r3d_pright:                     ; the wall is the right hand run
-        LD   B,72
 r3d_pr1:
-        LD   A,(r3d_pz)
-        OR   A
-        JR   Z,r3d_pr2
-        DEC  A
-        LD   (r3d_pz),A
-        XOR  A                  ; wholly above the wall: c = 0
-        JR   r3d_pr3
-r3d_pr2:
         EXX
         LD   A,H                ; c = acc >> 8
         ADD  HL,DE
         JR   NC,r3d_pr2a
         LD   HL,0xFFFF
 r3d_pr2a:
-        CP   C
-        JR   C,r3d_pr2b
-        LD   A,C
-r3d_pr2b:
-        EXX
-r3d_pr3:
+        CP   C                  ; once it reaches n it stays there, and
+        EXX                     ; every row below is the same triple
+        JP   NC,r3d_psolid
         SRL  A                  ; nr = c, its pairs and its odd byte
         JR   C,r3d_prm
         LD   IXL,A
@@ -1042,14 +1141,12 @@ r3d_pr3:
         SUB  IXL
         LD   (HL),A             ; the right hand run's entry
         DEC  HL
-        LD   (HL),0             ; no odd byte
-        DEC  HL
         LD   A,C
         SUB  IXL
         SUB  IXL                ; nl = n - nr
         SRL  A
         LD   IXL,A
-        LD   A,192
+        LD   A,64
         SUB  IXL
         LD   (HL),A             ; the left hand run's entry
         ADD  HL,DE
@@ -1057,11 +1154,9 @@ r3d_pr3:
         JP   r3d_pnext
 r3d_prm:
         LD   IXL,A
-        LD   A,64
-        SUB  IXL
+        LD   A,192              ; the high half of the range says one pair
+        SUB  IXL                ; carries a colour each side of the split
         LD   (HL),A
-        DEC  HL
-        LD   (HL),1             ; one pair carries both colours
         DEC  HL
         LD   A,C
         SUB  IXL
@@ -1070,7 +1165,7 @@ r3d_prm:
         DEC  A
         SRL  A
         LD   IXL,A
-        LD   A,192
+        LD   A,64
         SUB  IXL
         LD   (HL),A
         ADD  HL,DE
@@ -1078,16 +1173,7 @@ r3d_prm:
         JP   r3d_pnext
 
 r3d_pleft:                      ; the wall is the left hand run
-        LD   B,72
 r3d_pf1:
-        LD   A,(r3d_pz)
-        OR   A
-        JR   Z,r3d_pf2
-        DEC  A
-        LD   (r3d_pz),A
-        XOR  A
-        JR   r3d_pf3
-r3d_pf2:
         EXX
         LD   A,H
         ADD  HL,DE
@@ -1095,11 +1181,8 @@ r3d_pf2:
         LD   HL,0xFFFF
 r3d_pf2a:
         CP   C
-        JR   C,r3d_pf2b
-        LD   A,C
-r3d_pf2b:
         EXX
-r3d_pf3:
+        JP   NC,r3d_psolid
         LD   IXH,A              ; c, which is nl here
         LD   A,C
         SUB  IXH                ; nr = n - c
@@ -1110,12 +1193,10 @@ r3d_pf3:
         SUB  IXL
         LD   (HL),A
         DEC  HL
-        LD   (HL),0
-        DEC  HL
         LD   A,IXH
         SRL  A
         LD   IXL,A
-        LD   A,192
+        LD   A,64
         SUB  IXL
         LD   (HL),A
         ADD  HL,DE
@@ -1123,21 +1204,26 @@ r3d_pf3:
         JP   r3d_pnext
 r3d_pfm:
         LD   IXL,A
-        LD   A,64
-        SUB  IXL
+        LD   A,192              ; the high half of the range says one pair
+        SUB  IXL                ; carries a colour each side of the split
         LD   (HL),A
-        DEC  HL
-        LD   (HL),1
         DEC  HL
         LD   A,IXH
         DEC  A                  ; the mixed pair took a byte off it
         SRL  A
         LD   IXL,A
-        LD   A,192
+        LD   A,64
         SUB  IXL
         LD   (HL),A
         ADD  HL,DE
         DJNZ r3d_pf1
+
+r3d_psolid:                     ; the rest of the strip is solid wall
+        LD   A,(r3d_t1e)
+        LD   (r3d_te),A
+        LD   A,(r3d_t1l)
+        LD   (r3d_tl),A
+        CALL r3d_pfill
 
 r3d_pnext:
         LD   DE,R3D_ST
@@ -1254,15 +1340,22 @@ r3d_raster:
         DEC  HL
         LD   (r3d_cpd),HL
 
-        LD   A,(r3d_back)   ; and the two row pointers, one past column 127
+        LD   A,(r3d_back)   ; upper row end + lower row start is fixed,
+        LD   H,A            ; and so is lower row end + next upper start
+        LD   L,0
+        ADD  HL,HL
+        LD   DE,192 * 128
+        ADD  HL,DE
+        LD   (r3d_k1),HL
+        LD   DE,128
+        ADD  HL,DE
+        LD   (r3d_k2),HL
+        LD   A,(r3d_back)   ; the first row's end, one past column 127
         LD   H,A
         LD   L,0
         LD   DE,R3D_TOP * 128 + 128
         ADD  HL,DE
         LD   (r3d_spu),HL
-        LD   DE,143 * 128
-        ADD  HL,DE
-        LD   (r3d_spd),HL
 
         LD   HL,r3d_tab     ; the first level's triples, last byte first
         LD   A,(r3d_stride)
@@ -1278,39 +1371,32 @@ r3d_raster:
         LD   (r3d_sp),SP
         LD   A,R3D_HALF
         LD   (r3d_sj),A
-r3d_rloop:
-        LD   HL,(r3d_spu)   ; the row above the horizon, ceiling behind
+        LD   HL,(r3d_spu)
+r3d_rloop:                  ; HL = this level's upper row end
         LD   SP,HL
-        LD   DE,(r3d_cpu)
-        LD   A,r3d_cu & 255
-        DEC  A
-        LD   (r3d_clim),A
+        LD   DE,(r3d_cpu)   ; the row above the horizon, ceiling behind
         LD   IY,r3d_rl1
         JP   r3d_rowout
-r3d_rl1:
-        LD   HL,(r3d_spd)   ; and its mirror below, floor behind
+r3d_rl1:                    ; the runs tile the row, so SP is now its left
+        LD   HL,(r3d_k1)    ; end - and the mirror row below the horizon is
+        OR   A              ; a fixed distance from it, because the two move
+        SBC  HL,SP          ; towards each other as j falls
         LD   SP,HL
-        LD   DE,(r3d_cpd)
-        LD   A,r3d_cd & 255
-        DEC  A
-        LD   (r3d_clim),A
+        LD   DE,(r3d_cpd)   ; floor behind this one
         LD   IY,r3d_rl2
         JP   r3d_rowout
 r3d_rl2:
-        LD   HL,(r3d_tp)
+        LD   HL,(r3d_k2)    ; and likewise the next level's upper row
+        OR   A
+        SBC  HL,SP
+        LD   BC,(r3d_tp)    ; on to the next level's triples
         LD   A,(r3d_stride)
-        LD   E,A
-        LD   D,0
-        ADD  HL,DE
-        LD   (r3d_tp),HL
-        LD   HL,(r3d_spu)
-        LD   DE,128
-        ADD  HL,DE
-        LD   (r3d_spu),HL
-        LD   HL,(r3d_spd)
-        LD   DE,-128
-        ADD  HL,DE
-        LD   (r3d_spd),HL
+        ADD  A,C
+        LD   C,A
+        JR   NC,r3d_rl3
+        INC  B
+r3d_rl3:
+        LD   (r3d_tp),BC
         LD   A,(r3d_sj)
         DEC  A
         LD   (r3d_sj),A
@@ -1338,45 +1424,8 @@ r3d_ro1:
         DEC  DE
         LD   B,A
         LD   C,A
-        JP   (IX)
-r3d_roA:
-        LD   A,(HL)         ; does the split land inside a pair?
-        DEC  HL
-        OR   A
-        JR   Z,r3d_roB
-        LD   A,(DE)         ; then one pair carries a colour each side
-        LD   C,A
-        PUSH BC
-r3d_roB:
-        LD   A,(DE)         ; the left hand run
-        DEC  DE
-        LD   B,A
-        LD   C,A
-        LD   A,(HL)
-        DEC  HL
-        LD   IXL,A
-        JP   (IX)
-r3d_roC:
-        LD   A,(r3d_clim)
-        CP   E
-        JP   NZ,r3d_ro1
-        JP   (IY)
-
-;------------------------------------------------------------------
-; r3d_pushes - two runs of 64 PUSH BCs, entered n from the end to
-; write 2n bytes of BC downwards from SP: two bytes every 11 T-states.
-; Two of them so that each can come back to its own place without an
-; index register, and both in one page so that only the low byte of
-; the entry has to be worked out.
-;------------------------------------------------------------------
-
-        ALIGN 256
-r3d_pushes:
-        DEFS 64,0xC5        ; PUSH BC, sixty four times
-        JP   r3d_roA
-        DEFS 128 - 67,0xC5
-        DEFS 64,0xC5
-        JP   r3d_roC
+        JP   (IX)           ; into the run of PUSHes, which falls out of
+                            ; its far end into what comes next
 
 ;------------------------------------------------------------------
 ; r3d_mul8x16 - A * (r3d_sinc), the product taken to fit sixteen bits
@@ -1396,6 +1445,51 @@ r3d_mul8x16:
         ADD  A,E
         LD   H,A
         RET
+
+;------------------------------------------------------------------
+; r3d_pushes - runs of 64 PUSH BCs, entered n from the end to write 2n
+; bytes of BC downwards from SP: two bytes every 11 T-states.
+;
+; What follows each run is the code that would have been jumped back
+; to, so a run ends by falling into it and none of them pays for a
+; return. An empty run - two in five of them - enters at the far end
+; and costs nothing beyond its dispatch.
+;
+; There are two runs for the right hand side, and which one prep sends
+; a strip to says whether the split falls inside a pair. That is why
+; the entry byte's two halves mean what they do, and it saves the
+; rasteriser a test on every strip of every row.
+;------------------------------------------------------------------
+
+        ALIGN 256
+r3d_pushes:
+        DEFS 64,0xC5        ; the split fell on a pair boundary
+        JP   r3d_roB
+        DEFS 128 - ($ - r3d_pushes),0
+        DEFS 64,0xC5        ; the split fell inside a pair
+r3d_roM:
+        LD   A,(DE)         ; so one pair carries a colour each side
+        LD   C,A
+        PUSH BC
+r3d_roB:
+        LD   A,(DE)         ; the left hand run
+        DEC  DE
+        LD   B,A
+        LD   C,A
+        LD   A,(HL)
+        DEC  HL
+        LD   (r3d_bj+1),A
+r3d_bj:
+        JP   r3d_pushb
+
+        ALIGN 256
+r3d_pushb:
+        DEFS 64,0xC5        ; the left hand runs
+r3d_roC:
+        LD   A,E            ; every strip of the row done?
+        CP   (r3d_cu - 1) & 255
+        JP   NZ,r3d_ro1
+        JP   (IY)
 
 ;------------------------------------------------------------------
 ; The room. Convex, camera inside, wound so the walls come out left to
@@ -1481,14 +1575,25 @@ r3d_tp:         DEFS 2
 r3d_cp:         DEFS 2
 r3d_cpu:        DEFS 2
 r3d_cpd:        DEFS 2
-r3d_clim:       DEFS 1
+r3d_k1:         DEFS 2
+r3d_k2:         DEFS 2
 r3d_ps:         DEFS 1
 r3d_pbg:        DEFS 1
 r3d_wcol:       DEFS R3D_MAXW
+r3d_te:         DEFS 1
+r3d_tl:         DEFS 1
+r3d_tAl:        DEFS 1
+r3d_tBe:        DEFS 1
+r3d_t0e:        DEFS 1
+r3d_t0l:        DEFS 1
+r3d_t1e:        DEFS 1
+r3d_t1l:        DEFS 1
 r3d_vvx:        DEFS 4 * R3D_MAXW
 r3d_stt:        DEFS R3D_ST * R3D_MAXW
-r3d_cu:         DEFS 2 * R3D_MAXW
-r3d_cd:         DEFS 2 * R3D_MAXW
+        ALIGN 32
+r3d_cu:         DEFS 2 * R3D_MAXW    ; the two colour tables sit exactly
+                DEFS 256 - 2 * R3D_MAXW   ; 256 apart so that one low byte
+r3d_cd:         DEFS 2 * R3D_MAXW    ; ends the walk over either of them
 r3d_tab:        DEFS 72 * 3 * R3D_MAXW
 
 ;------------------------------------------------------------------

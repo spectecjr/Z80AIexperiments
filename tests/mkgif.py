@@ -93,17 +93,21 @@ def cube(outdir, seconds=10):
 
 
 def room(outdir, seconds=10):
-    """room3d at its measured rate: 291,953 T-states a frame, 20 Hz."""
+    """room3d at its measured rate: 237,161 T-states a frame, 25 Hz.
+
+    That is the average; a view with three or four walls in it costs
+    nearer 300,000 and would drop to about 20 Hz on real hardware.
+    """
     import math
     b = Bench("harness_room.asm", org=0)
     s = b.syms
     b.call_regs(s["r3d_init"])
-    n = seconds * 20
+    n = seconds * 25
     frames = []
     for t in range(n):
-        cx = int(45 * math.sin(2 * math.pi * t / 200))   # a wander that
-        cz = int(35 * math.cos(2 * math.pi * t / 150))   # keeps corners
-        ca = (t * 3 + 64) & 255                          # in view
+        cx = int(45 * math.sin(2 * math.pi * t / 250))   # a wander that
+        cz = int(35 * math.cos(2 * math.pi * t / 188))   # keeps corners
+        ca = (t * 2 + 64) & 255                          # in view
         b.poke(s["r3d_cx"], (cx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["r3d_cz"], (cz & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["r3d_ca"], bytes([ca]))
@@ -111,9 +115,9 @@ def room(outdir, seconds=10):
         b.call_regs(s["r3d_frame"])
         frames.append(unpack(b.peek(BUF[into], 128 * 192)))
     p = "%s/room.gif" % outdir
-    size = write_gif(p, frames, ROOM_PAL, 50)
-    got, bad, secs = check_gif(p, frames, ROOM_PAL, 50)
-    print("  %-18s %3d frames, 20 Hz, %.2fs, %6.1f KB, %d of %d wrong"
+    size = write_gif(p, frames, ROOM_PAL, 40)
+    got, bad, secs = check_gif(p, frames, ROOM_PAL, 40)
+    print("  %-18s %3d frames, 25 Hz, %.2fs, %6.1f KB, %d of %d wrong"
           % (p, n, secs, size / 1024, bad, got))
 
 
