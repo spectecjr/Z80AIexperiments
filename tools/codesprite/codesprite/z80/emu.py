@@ -195,6 +195,11 @@ class Z80:
             | (FLAG_C if result < 0 else 0)
         )
 
+    def _condition(self, index: int) -> bool:
+        """Evaluate a Z80 condition code (NZ, Z, NC, C, PO, PE, P, M)."""
+        flag = (FLAG_Z, FLAG_C, FLAG_PV, FLAG_S)[index >> 1]
+        return bool(self.f & flag) == bool(index & 1)
+
     def _alu(self, op: int, operand: int) -> None:
         """ALU operation ``op`` (0..7) between A and ``operand``."""
         if op == 0:  # ADD
@@ -257,6 +262,22 @@ class Z80:
         elif opcode == 0xFB:  # EI
             self.iff = True
             self.tstates += 4
+        elif opcode in (0x07, 0x0F, 0x17, 0x1F):  # RLCA / RRCA / RLA / RRA
+            carry = 1 if self.f & FLAG_C else 0
+            if opcode == 0x07:  # RLCA
+                out_carry = (self.a >> 7) & 1
+                self.a = ((self.a << 1) | out_carry) & 0xFF
+            elif opcode == 0x0F:  # RRCA
+                out_carry = self.a & 1
+                self.a = ((self.a >> 1) | (out_carry << 7)) & 0xFF
+            elif opcode == 0x17:  # RLA
+                out_carry = (self.a >> 7) & 1
+                self.a = ((self.a << 1) | carry) & 0xFF
+            else:  # RRA
+                out_carry = self.a & 1
+                self.a = ((self.a >> 1) | (carry << 7)) & 0xFF
+            self.f = (self.f & ~(FLAG_H | FLAG_N | FLAG_C)) | out_carry
+            self.tstates += 4
         elif opcode == 0x2F:  # CPL
             self.a = (~self.a) & 0xFF
             self.f |= FLAG_H | FLAG_N
@@ -276,6 +297,11 @@ class Z80:
             self.tstates += 10
         elif opcode == 0xC3:  # JP nn
             self.pc = self._fetch16()
+            self.tstates += 10
+        elif opcode & 0xC7 == 0xC2:  # JP cc,nn
+            target = self._fetch16()
+            if self._condition((opcode >> 3) & 7):
+                self.pc = target
             self.tstates += 10
         elif opcode == 0xCD:  # CALL nn
             target = self._fetch16()

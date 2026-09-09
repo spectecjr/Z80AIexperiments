@@ -232,3 +232,83 @@ def verify_patched(
         writes=[a for a in cpu.writes if lo <= a < hi],
         self_modified=[a for a in cpu.writes if code_lo <= a < code_hi],
     )
+
+
+def verify_list(
+    program: Program,
+    packed: PackedSprite,
+    screen: Screen,
+    positions: list[tuple[int, int]],
+    *,
+    seed: int = 0,
+    origin: int = CODE_ORIGIN,
+) -> VerifyResult:
+    """Run a list-form routine over ``positions`` and check every copy.
+
+    The caller's protocol is built here exactly as the runtime macros build
+    it: return address first, then the item addresses last-first, with B
+    holding the count.  Every position must share the sprite's x and y
+    parity, since one list feeds one variant.
+    """
+    from .z80 import isa
+
+    if not positions:
+        raise VerificationError("a list needs at least one position")
+    phase = packed.phase
+    parity = positions[0][1] % 2
+    for x, y in positions:
+        if x % 2 != phase or y % 2 != parity:
+            raise VerificationError(
+                f"position {(x, y)} does not match the variant's parities"
+            )
+
+    code, _labels = program.assemble(origin)
+    last = program.ops[-1] if program.ops else None
+    if not (isinstance(last, isa.Simple) and last.name == "RET"):
+        code = code + b"\xc9"
+
+    memory = noise_image(seed, screen)
+    expected = bytearray(memory)
+    for x, y in positions:
+        expected = reference_screen(expected, packed, screen, x, y)
+
+    cpu = Z80(memory=memory)
+    cpu.memory[origin : origin + len(code)] = code
+    cpu.sp = STACK_TOP
+    cpu._push16(0xFFFE)  # the return address the final RET lands on
+    for x, y in reversed(positions):
+        cpu._push16(screen.addr_byte(y, x // 2))
+    cpu.b = len(positions)
+    list_bottom = cpu.sp
+    cpu.track_writes = True
+    taken = run(cpu, origin, push_return=False)
+
+    lo, hi = screen.base, screen.base + SCREEN_BYTES
+    code_lo, code_hi = origin, origin + len(code)
+    for address in range(lo, hi):
+        if cpu.memory[address] != expected[address]:
+            row, col = (address - lo) // 128, (address - lo) % 128
+            raise VerificationError(
+                f"list draw wrong at {address:#06x} (row {row}, col {col}): "
+                f"got {cpu.memory[address]:#04x}, expected {expected[address]:#04x}"
+            )
+    stray = [
+        a
+        for a in cpu.writes
+        if not (lo <= a < hi or code_lo <= a < code_hi or list_bottom <= a < STACK_TOP)
+    ]
+    if stray:
+        raise VerificationError(
+            f"{len(stray)} write(s) outside screen, code and list, "
+            f"first at {stray[0]:#06x}"
+        )
+    if cpu.sp != STACK_TOP:
+        raise VerificationError(
+            f"list did not consume exactly its items: SP {cpu.sp:#06x} "
+            f"!= {STACK_TOP:#06x}"
+        )
+    return VerifyResult(
+        tstates=taken,
+        writes=[a for a in cpu.writes if lo <= a < hi],
+        self_modified=[a for a in cpu.writes if code_lo <= a < code_hi],
+    )

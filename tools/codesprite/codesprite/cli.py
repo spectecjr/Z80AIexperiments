@@ -8,7 +8,10 @@ import shlex
 import sys
 from pathlib import Path
 
+from .codegen.copy import generate_copy, scratch_size
 from .codegen.draw import DrawContext, generate_draw
+from .codegen.erase import SHAPES, erase_sprite
+from .codegen.forms import generate_list
 from .codegen.setpos import collect_sites, generate_setpos, label_patch_sites
 from .emit.report import Report, VariantRow, manifest
 from .emit.sjasm import ModuleInfo, render
@@ -17,7 +20,7 @@ from .optimize.baseline import baseline_plan
 from .optimize.evaluate import best_plan
 from .screen import MemoryLayout, Screen
 from .sprite import PackedSprite, Sprite, load_sprite
-from .verify import verify_draw, verify_patched
+from .verify import verify_draw, verify_list, verify_patched
 
 
 def _auto_int(text: str) -> int:
@@ -66,8 +69,14 @@ def build_parser() -> argparse.ArgumentParser:
     compile_p.add_argument("--name", required=True, help="label stem for the routines")
     compile_p.add_argument("--out-dir", required=True, help="directory for the files")
     compile_p.add_argument(
-        "--routines", default="draw", help="comma separated: draw (more in M5)"
+        "--routines",
+        default="draw",
+        help="comma separated: draw, erase, save, restore, restore_bb",
     )
+    compile_p.add_argument("--erase-color", type=_auto_int, default=0)
+    compile_p.add_argument("--erase-shape", default="rows", choices=list(SHAPES))
+    compile_p.add_argument("--list-len", type=int, default=16,
+                           help="expected list length, for costing the list form")
     compile_p.add_argument("--form", default="single", choices=["single", "list", "both"])
     compile_p.add_argument("--x-align", type=int, default=1, choices=[1, 2])
     compile_p.add_argument("--y-align", type=int, default=1, choices=[1, 2])
@@ -141,14 +150,15 @@ def command_compile(args: argparse.Namespace) -> int:
 
     reloc = Reloc(args.reloc)
     routines = [r.strip() for r in args.routines.split(",") if r.strip()]
-    unsupported = set(routines) - {"draw"}
+    known = {"draw", "erase", "save", "restore", "restore_bb"}
+    unsupported = set(routines) - known
     if unsupported:
-        raise SystemExit(
-            f"routines {sorted(unsupported)} are not implemented yet (M5); "
-            "only 'draw' is available"
-        )
-    if args.form != "single":
-        raise SystemExit("the list form arrives in M5; use --form single")
+        raise SystemExit(f"unknown routines {sorted(unsupported)}; known: {sorted(known)}")
+    if "restore_bb" in routines and args.backbuffer_base is None:
+        raise SystemExit("--routines restore_bb needs --backbuffer-base")
+    forms = ("single", "list") if args.form == "both" else (args.form,)
+    if "list" in forms and reloc is not Reloc.REGISTER:
+        raise SystemExit("the list form needs --reloc register")
     if args.clip != "none":
         raise SystemExit("clipping arrives in M7; use --clip none")
 
@@ -174,6 +184,7 @@ def command_compile(args: argparse.Namespace) -> int:
 
     for phase in phases:
         packed = sprite.pack(phase)
+        layout.check_scratch(scratch_size(packed))
         for parity in parities:
             if reloc is Reloc.NONE:
                 # Addresses are baked in, so compile for the requested spot;
@@ -184,69 +195,29 @@ def command_compile(args: argparse.Namespace) -> int:
                 # Relocatable builds are compiled at the canonical position
                 # for their parities and moved from there.
                 x, y = phase, (parity or 0)
-            context = DrawContext(
-                screen,
-                x=x,
-                y=y,
-                reloc=reloc,
-                interrupts=args.stack,
-                label=f"{args.name}_draw",
-            )
-            kwargs = {"use_alternate": not args.no_alternate}
-            if mode is None:
-                _plan, _cost, program = best_plan(
-                    packed,
-                    context,
-                    max_gap=args.max_gap,
-                    patch_weight=13.0 * args.moves_per_draw,
-                    **kwargs,
-                )
-            else:
-                plan = baseline_plan(packed, max_gap=args.max_gap, mode=mode)
-                plan.validate(packed)
-                program = generate_draw(plan, context, **kwargs)
-
-            setpos = None
-            if reloc is Reloc.PATCH:
-                program = label_patch_sites(program)
-                setpos = generate_setpos(collect_sites(program), parity=y % 2)
-
-            info = ModuleInfo(
-                name=args.name,
-                routine="draw",
-                width=sprite.width,
-                height=sprite.height,
-                cells=len(packed.cells),
-                phase=phase,
-                parity=parity,
-                form=args.form,
-                reloc=reloc.value,
-                clip=args.clip,
-                command_line=command_line,
-                source=str(args.source),
-                source_hash=source_hash,
-                palette=palette,
-                lower_bound=lower_bound(packed),
-                compiled_at=(x, y),
-            )
-            if not args.no_verify:
-                verify_variant(program, setpos, packed, screen, x, y, reloc)
-
-            path = out_dir / f"{info.label}.z80s"
-            path.write_text(render(program, info, setpos=setpos))
-            report.add(
-                VariantRow(
-                    variant=info.label,
-                    form=args.form,
-                    path=str(path),
-                    size=program.size + (setpos.size if setpos else 0),
-                    tstates=program.tstates,
-                    item_tstates=setpos.tstates if setpos else None,
-                    patches=program.patch_count,
-                    lower_bound=info.lower_bound,
-                    cells=len(packed.cells),
-                )
-            )
+            for routine in routines:
+                for form in forms:
+                    if form == "list" and routine != "draw":
+                        continue  # only draw is worth batching in v1
+                    row = build_variant(
+                        args,
+                        sprite,
+                        packed,
+                        palette,
+                        screen,
+                        layout,
+                        reloc,
+                        routine,
+                        form,
+                        phase,
+                        parity,
+                        x,
+                        y,
+                        out_dir,
+                        command_line,
+                        source_hash,
+                    )
+                    report.add(row)
 
     (out_dir / f"{args.name}_manifest.z80s").write_text(manifest(args.name, report.rows))
     report.write(out_dir)
@@ -254,17 +225,157 @@ def command_compile(args: argparse.Namespace) -> int:
     return 0
 
 
-def verify_variant(program, setpos, packed, screen, x, y, reloc) -> None:
+def routine_sprite(args, packed, routine):
+    """The packed sprite a routine draws, if it is a draw-like routine."""
+    if routine == "draw":
+        return packed
+    if routine == "erase":
+        return erase_sprite(packed, args.erase_color, args.erase_shape)
+    return None
+
+
+def build_variant(
+    args,
+    sprite,
+    packed,
+    palette,
+    screen,
+    layout,
+    reloc,
+    routine,
+    form,
+    phase,
+    parity,
+    x,
+    y,
+    out_dir,
+    command_line,
+    source_hash,
+) -> VariantRow:
+    """Generate, verify and write one variant file; return its table row."""
+    context = DrawContext(
+        screen,
+        x=x,
+        y=y,
+        reloc=reloc,
+        interrupts=args.stack,
+        label=f"{args.name}_{routine}",
+    )
+    kwargs = {"use_alternate": not args.no_alternate}
+    modes = {"best": None, "auto": "auto", "hl": Mode.HL, "stack": Mode.STACK,
+             "ix": Mode.IX}
+    mode = modes[args.mode]
+
+    target = routine_sprite(args, packed, routine)
+    setpos = None
+    item_tstates = None
+    notes: list[str] = []
+
+    if target is not None:
+        if form == "list":
+            plan = baseline_plan(packed if target is packed else target,
+                                 max_gap=args.max_gap,
+                                 mode=mode if mode is not None else "auto")
+            listing = generate_list(plan, context, label=context.label, **kwargs)
+            program = listing.program
+            item_tstates = listing.item_tstates
+            notes.append(
+                f"list form: {listing.prologue_tstates}T setup then "
+                f"{listing.item_tstates}T per item"
+            )
+        elif mode is None:
+            _plan, _cost, program = best_plan(
+                target,
+                context,
+                max_gap=args.max_gap,
+                patch_weight=13.0 * args.moves_per_draw,
+                **kwargs,
+            )
+        else:
+            plan = baseline_plan(target, max_gap=args.max_gap, mode=mode)
+            plan.validate(target)
+            program = generate_draw(plan, context, **kwargs)
+    else:
+        to_screen = routine != "save"
+        delta = layout.backbuffer_delta if routine == "restore_bb" else None
+        program = generate_copy(
+            packed, context, args.scratch_base, to_screen=to_screen, source_delta=delta
+        )
+        notes.append(
+            f"scratch: {scratch_size(packed)} bytes at ${args.scratch_base:04X}"
+            if routine != "restore_bb"
+            else f"back buffer at ${args.backbuffer_base:04X}"
+        )
+
+    if reloc is Reloc.PATCH:
+        program = label_patch_sites(program)
+        setpos = generate_setpos(collect_sites(program), parity=y % 2)
+
+    info = ModuleInfo(
+        name=args.name,
+        routine=routine,
+        width=sprite.width,
+        height=sprite.height,
+        cells=len(packed.cells),
+        phase=phase,
+        parity=parity,
+        form=form,
+        reloc=reloc.value,
+        clip=args.clip,
+        command_line=command_line,
+        source=str(args.source),
+        source_hash=source_hash,
+        palette=palette if routine == "draw" else None,
+        lower_bound=lower_bound(packed) if routine == "draw" else None,
+        compiled_at=(x, y),
+        notes=notes,
+    )
+    if not args.no_verify:
+        verify_variant(
+            program, setpos, target, packed, screen, x, y, reloc, form, args
+        )
+
+    path = out_dir / f"{info.label}.z80s"
+    path.write_text(render(program, info, setpos=setpos))
+    return VariantRow(
+        variant=info.label,
+        form=form,
+        path=str(path),
+        size=program.size + (setpos.size if setpos else 0),
+        tstates=program.tstates,
+        item_tstates=item_tstates if item_tstates is not None
+        else (setpos.tstates if setpos else None),
+        patches=program.patch_count,
+        lower_bound=info.lower_bound,
+        cells=len(packed.cells),
+        routine=routine,
+    )
+
+
+def verify_variant(
+    program, setpos, target, packed, screen, x, y, reloc, form, args
+) -> None:
     """Run the generated code and compare it with a reference composite.
 
     Relocatable variants are checked at several positions, since the whole
-    point of them is that the same code draws anywhere.
+    point of them is that the same code draws anywhere.  Copy routines are
+    exercised by the round-trip tests rather than here, since correctness
+    for them means "the screen came back", not "these pixels appeared".
     """
+    if target is None:
+        return  # save/restore: covered by the round-trip tests
+    if form == "list":
+        positions = [(x, y)]
+        for step in (32, 64):
+            if x + step + packed.byte_width * 2 <= 256:
+                positions.append((x + step, y))
+        verify_list(program, target, screen, positions)
+        return
     if reloc is Reloc.PATCH:
-        for target in ((x, y), (40 + x % 2, 60 + y % 2), (200 + x % 2, 100 + y % 2)):
-            if target[0] + packed.byte_width * 2 > 256 or target[1] + packed.height > 192:
+        for place in ((x, y), (40 + x % 2, 60 + y % 2), (200 + x % 2, 100 + y % 2)):
+            if place[0] + packed.byte_width * 2 > 256 or place[1] + packed.height > 192:
                 continue
-            verify_patched(program, setpos, packed, screen, (x, y), target)
+            verify_patched(program, setpos, target, screen, (x, y), place)
         return
     registers = None
     if reloc is Reloc.REGISTER:
@@ -272,7 +383,7 @@ def verify_variant(program, setpos, packed, screen, x, y, reloc) -> None:
         registers = {"h": address >> 8, "l": address & 0xFF}
     verify_draw(
         program,
-        packed,
+        target,
         screen,
         x,
         y,

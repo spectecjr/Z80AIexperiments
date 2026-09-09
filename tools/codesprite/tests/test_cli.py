@@ -84,8 +84,9 @@ def test_inspect_reports_both_phases(ship, capsys):
 def test_unimplemented_options_fail_loudly(ship, tmp_path):
     out = tmp_path / "out"
     for extra in (
-        ["--routines", "erase"],
-        ["--form", "list"],
+        ["--routines", "nonsense"],
+        ["--form", "list"],  # needs --reloc register
+        ["--routines", "restore_bb"],  # needs --backbuffer-base
         ["--clip", "y-spill"],
     ):
         with pytest.raises(SystemExit):

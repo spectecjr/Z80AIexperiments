@@ -1,0 +1,135 @@
+;-----------------------------------------------------------------------
+; sprite_rt.z80s - caller-side support for codesprite compiled sprites
+;
+; Include this once, then include whichever generated variant files the
+; program uses.  Nothing here is generated: it is the hand-written glue
+; that computes entry values and drives the list protocol.
+;
+; Screen model (SAM Coupe mode 4)
+;   256x192, 4 bits per pixel, left pixel in the high nibble,
+;   128 bytes per line, linear: addr = base + y*128 + x/2.
+;   Two rows share a 256-byte page, so bit 7 of L is the row parity.
+;
+; Variant naming
+;   <name>_<routine>_<form>_<xe|xo>[_<ye|yo>]
+;   xe/xo  : x is even / odd (which pre-shift the sprite was packed for)
+;   ye/yo  : y is even / odd (which row-step encoding the code uses)
+;   A relocatable routine only moves within the parities it was built for,
+;   so dispatch on (x&1, y&1) - SPR_DISPATCH below does that.
+;-----------------------------------------------------------------------
+
+SPR_SCREEN      EQU $8000       ; display file base; must be 256-byte aligned
+SPR_SCRATCH     EQU $E000       ; save/restore scratch, just past the screen
+
+;-----------------------------------------------------------------------
+; SPR_ADDR - HL = screen address of pixel (x, y)
+;
+; Entry: D = y, E = x        Exit: HL = address, A trashed
+; Cost : 32T
+;
+; addr = base + y*128 + x/2, and y*128 is (y>>1) pages plus (y&1)*128,
+; which is exactly the parity bit in L.
+;-----------------------------------------------------------------------
+                MACRO SPR_ADDR
+                LD   A,D                ; [4T]  y
+                RRA                     ; [4T]  carry = y&1, A = y>>1
+                ADD  A,SPR_SCREEN / 256 ; [7T]  high byte
+                LD   H,A                ; [4T]
+                LD   A,E                ; [4T]  x
+                RRA                     ; [4T]  A = x/2, bit 7 = old carry = y&1
+                LD   L,A                ; [4T]
+                ENDM
+
+;-----------------------------------------------------------------------
+; SPR_SETPOS_REGS - load the three registers a patched setpos wants
+;
+; Entry: D = y, E = x
+; Exit : B, C, D as the patcher expects; A and HL trashed
+;
+;   C = (y&1)*128 + x/2      low byte source for even sprite rows
+;   B = ((y&1)^1)*128 + x/2  low byte source for odd sprite rows
+;   D = screen_high + (y>>1) high byte source for every row
+;
+; B and C differ only in bit 7 - the row parity bit - so one XOR makes
+; the second from the first.
+;-----------------------------------------------------------------------
+                MACRO SPR_SETPOS_REGS
+                SPR_ADDR                ; [31T] HL = address of (x, y)
+                LD   C,L                ; [4T]  C = parity*128 + x/2
+                LD   A,L                ; [4T]
+                XOR  $80                ; [7T]  flip the row parity bit
+                LD   B,A                ; [4T]  B = the other parity's low byte
+                LD   D,H                ; [4T]  D = high byte
+                ENDM
+
+;-----------------------------------------------------------------------
+; SPR_AT name, form - move a patched sprite, then draw it
+;
+; Entry: D = y, E = x, both matching the variant's parities.
+;-----------------------------------------------------------------------
+                MACRO SPR_AT name?, suffix?
+                SPR_SETPOS_REGS
+                CALL name?_draw_single_suffix?_setpos
+                CALL name?_draw_single_suffix?
+                ENDM
+
+;-----------------------------------------------------------------------
+; SPR_DRAW_REG name, suffix - draw a register-relocated sprite
+;
+; Entry: D = y, E = x.  The routine wants the address in HL.
+;-----------------------------------------------------------------------
+                MACRO SPR_DRAW_REG name?, suffix?
+                SPR_ADDR
+                CALL name?_draw_single_suffix?
+                ENDM
+
+;-----------------------------------------------------------------------
+; The list protocol
+;
+; A list-form routine reads its item addresses off the stack, so the
+; caller builds the frame and jumps rather than calling:
+;
+;       push the return address
+;       push the item addresses, LAST item first
+;       B = number of items
+;       JP  <routine>          ; its final RET lands on the return address
+;
+; Every item in one list must share the sprite's x and y parity, since
+; one list feeds one variant.  Sort items into up to four lists.
+;
+; SPR_LIST_BEGIN reserves the frame; SPR_LIST_ADD pushes one address;
+; SPR_LIST_CALL sets the count and jumps.  Interrupts must be off while
+; the list is on the stack if an interrupt handler uses the stack, since
+; SP points at the item list rather than a normal stack frame.
+;-----------------------------------------------------------------------
+                MACRO SPR_LIST_BEGIN
+                LD   HL,.spr_list_done? ; return address for the routine's RET
+                PUSH HL
+                ENDM
+
+; Entry: HL = screen address of one item (use SPR_ADDR to compute it).
+                MACRO SPR_LIST_ADD
+                PUSH HL
+                ENDM
+
+; Entry: A = item count.  Falls through to the return address on completion.
+                MACRO SPR_LIST_CALL routine?
+                LD   B,A
+                JP   routine?
+.spr_list_done?:
+                ENDM
+
+;-----------------------------------------------------------------------
+; Register and interrupt contract
+;
+;   * Every generated routine may use AF, BC, DE, HL, IX and the
+;     alternate bank BC'/DE'/HL'.  IY is never touched.
+;   * A routine that writes through the stack disables interrupts, saves
+;     SP into its own code, and restores both before returning.  If your
+;     interrupt handler must keep running, generate with --stack raw and
+;     take responsibility for SP yourself.
+;   * A patched routine rewrites its own immediates, so it must live in
+;     RAM that is paged in while it runs.
+;   * Nothing here pages memory: the display file and the code must be in
+;     the CPU's address space together (HMPR = VMPR for a screen at $8000).
+;-----------------------------------------------------------------------

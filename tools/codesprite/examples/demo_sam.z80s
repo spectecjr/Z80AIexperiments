@@ -1,0 +1,110 @@
+;-----------------------------------------------------------------------
+; demo_sam.z80s - a worked example of using compiled sprites
+;
+; This shows the calling sequences, not a finished game.  Everything to do
+; with sprites here is real and verified; the hardware setup at the top is
+; deliberately left as a stub, because codesprite never touches hardware
+; and the right mode/palette/paging code belongs to your program.
+;
+; Build (once sjasmplus is on PATH):
+;     sjasmplus examples/demo_sam.z80s
+;
+; The generated files were produced by:
+;     codesprite compile examples/ship14.txt --name spr_ship \
+;         --out-dir examples/generated --reloc patch \
+;         --routines draw,erase,save,restore
+;     codesprite compile examples/solid16.txt --name tile \
+;         --out-dir examples/generated --reloc register --form list \
+;         --x-align 2 --y-align 2
+;-----------------------------------------------------------------------
+
+                ORG  $8000 - $4000      ; code below the display file
+
+                INCLUDE "../runtime/sprite_rt.z80s"
+
+;-----------------------------------------------------------------------
+; TODO (yours): select mode 4, point VMPR/HMPR at the display page so the
+; whole 24K screen is contiguous at SPR_SCREEN, and load the palette.
+; codesprite assumes only that:
+;   * the display file starts at SPR_SCREEN and is 256-byte aligned,
+;   * the code and the screen are paged in together,
+;   * patched routines live in RAM (they rewrite their own immediates).
+;-----------------------------------------------------------------------
+setup_hardware:
+                RET
+
+;-----------------------------------------------------------------------
+; A row of identical tiles, drawn by one list-form routine.
+;
+; The tile is byte-aligned and even-row only (--x-align 2 --y-align 2), so
+; a single variant covers every position it is used at.
+;-----------------------------------------------------------------------
+TILE_COUNT      EQU  8
+TILE_Y          EQU  32
+
+draw_tile_row:
+                SPR_LIST_BEGIN                  ; push the return address
+                LD   B,TILE_COUNT
+                LD   D,TILE_Y
+                LD   E,(TILE_COUNT - 1) * 16    ; rightmost tile first
+.push_one:
+                PUSH BC
+                PUSH DE
+                SPR_ADDR                        ; HL = address of (E, D)
+                SPR_LIST_ADD                    ; push it as an item
+                POP  DE
+                POP  BC
+                LD   A,E
+                SUB  16
+                LD   E,A
+                DJNZ .push_one
+
+                LD   A,TILE_COUNT
+                SPR_LIST_CALL tile_draw_list_xe
+                RET
+
+;-----------------------------------------------------------------------
+; One moving sprite: keep what is under it, draw, then put it back.
+;
+; The patched variant is compiled for even x and even y, so this loop
+; steps two pixels at a time.  Odd positions would call the xo/yo files.
+;-----------------------------------------------------------------------
+SHIP_Y          EQU  80
+
+move_ship:
+                LD   E,0                ; x
+.step:
+                PUSH DE
+                LD   D,SHIP_Y
+
+                ; Position every routine that is about to run.
+                SPR_SETPOS_REGS
+                CALL spr_ship_save_single_xe_ye_setpos
+                CALL spr_ship_draw_single_xe_ye_setpos
+                CALL spr_ship_restore_single_xe_ye_setpos
+
+                CALL spr_ship_save_single_xe_ye     ; keep the background
+                CALL spr_ship_draw_single_xe_ye     ; draw the ship
+                HALT                                ; wait for the frame
+                CALL spr_ship_restore_single_xe_ye  ; put it back
+
+                POP  DE
+                LD   A,E
+                ADD  A,2                ; stay on an even x for this variant
+                LD   E,A
+                CP   240
+                JP   NZ,.step
+                RET
+
+;-----------------------------------------------------------------------
+main:
+                CALL setup_hardware
+                CALL draw_tile_row
+                CALL move_ship
+                RET
+
+                INCLUDE "generated/tile_draw_list_xe.z80s"
+                INCLUDE "generated/spr_ship_draw_single_xe_ye.z80s"
+                INCLUDE "generated/spr_ship_save_single_xe_ye.z80s"
+                INCLUDE "generated/spr_ship_restore_single_xe_ye.z80s"
+                INCLUDE "generated/spr_ship_erase_single_xe_ye.z80s"

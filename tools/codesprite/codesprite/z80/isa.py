@@ -757,6 +757,10 @@ class Simple(Op):
         "SCF": (bytes([0x37]), 4),
         "CCF": (bytes([0x3F]), 4),
         "CPL": (bytes([0x2F]), 4),
+        "RLCA": (bytes([0x07]), 4),
+        "RRCA": (bytes([0x0F]), 4),
+        "RLA": (bytes([0x17]), 4),
+        "RRA": (bytes([0x1F]), 4),
         "HALT": (bytes([0x76]), 4),
     }
 
@@ -810,6 +814,35 @@ class Jump(Op):
 
     def text(self) -> str:
         return f"JP {self.label}"
+
+    @property
+    def tstates(self) -> int:
+        return 10
+
+
+CONDITIONS = {"NZ": 0, "Z": 1, "NC": 2, "C": 3, "PO": 4, "PE": 5, "P": 6, "M": 7}
+
+
+@dataclass(frozen=True)
+class JumpCond(Op):
+    """``JP cc,nn`` - 10T, 3 bytes.
+
+    The list loop uses ``DEC B : JP NZ,loop`` when the body is too long for
+    a DJNZ displacement.
+    """
+
+    condition: str
+    label: str
+    target: int = 0
+
+    mnemonic = "JP cc,nn"
+
+    def encode(self) -> bytes:
+        value = _u16(self.target)
+        return bytes([0xC2 | (CONDITIONS[self.condition] << 3), value & 0xFF, value >> 8])
+
+    def text(self) -> str:
+        return f"JP {self.condition},{self.label}"
 
     @property
     def tstates(self) -> int:
@@ -900,7 +933,7 @@ def assemble(ops: list[Op], origin: int = 0) -> tuple[bytes, dict[str, int]]:
     out = bytearray()
     address = origin
     for op in ops:
-        if isinstance(op, (Jump, Call)):
+        if isinstance(op, (Jump, Call, JumpCond)):
             target = labels.get(op.label)
             if target is None:
                 raise KeyError(f"unresolved label {op.label!r}")

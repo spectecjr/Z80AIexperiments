@@ -35,7 +35,7 @@ from ..sprite import Cell, MASK_BOTH
 from ..z80 import isa
 from .navigate import Navigator
 from .regalloc import EXX_COST, LOAD_PAIR_COST, ByteCache, PairCache
-from .state import MachineState
+from .state import PAIR_HALVES, MachineState
 
 
 @dataclass
@@ -109,6 +109,9 @@ class DrawGenerator:
         patch_weight: float | None = None,
         entry_pointer: bool | None = None,
         use_alternate: bool = True,
+        initial_state: MachineState | None = None,
+        manage_sp: bool = True,
+        reserved: frozenset[str] = frozenset(),
     ) -> None:
         self.plan = plan
         self.context = context
@@ -119,7 +122,8 @@ class DrawGenerator:
         self.entry_pointer = (
             context.reloc is Reloc.REGISTER if entry_pointer is None else entry_pointer
         )
-        self.state = MachineState()
+        self.state = initial_state.copy() if initial_state else MachineState()
+        self.manage_sp = manage_sp
         self.program = Program()
         self.uses_stack = any(p.mode is Mode.STACK for p in plan.pieces)
         # HL doubles as a data pair only when addresses are baked in.  With
@@ -127,8 +131,29 @@ class DrawGenerator:
         # from, and seating SP through it is what keeps row steps patch-free.
         hl_is_data = context.reloc is Reloc.NONE and not self.entry_pointer
         pairs = ("BC", "DE", "HL") if hl_is_data else ("BC", "DE")
+        # A register the caller owns - the list form's loop counter in B -
+        # must not be handed to a cache, and neither must the pair it sits in.
+        self.reserved = reserved
+        if reserved:
+            pairs = tuple(
+                pair
+                for pair in pairs
+                if not set(PAIR_HALVES[pair]) & reserved
+            )
+        # EXX swaps HL as well as BC and DE, so a routine that navigates from
+        # a caller-supplied anchor cannot reach the alternate bank without
+        # losing that anchor.  Register relocation therefore gives up the
+        # alternate pairs.  (Keeping a copy of the anchor in HL' would buy
+        # them back; that is a later refinement, not a correctness issue.)
+        if self.entry_pointer:
+            use_alternate = False
+        if not pairs:
+            raise ValueError("no register pair is free for stack writes")
         self.pair_cache = PairCache(pairs=pairs, use_alternate=use_alternate)
-        self.byte_cache = None if self.uses_stack else ByteCache()
+        byte_pool = tuple(r for r in ("B", "C", "D", "E") if r not in reserved)
+        self.byte_cache = (
+            None if self.uses_stack or not byte_pool else ByteCache(registers=byte_pool)
+        )
         self.sp_label = f"{context.label}_sprestore"
 
     # -- helpers -----------------------------------------------------------
@@ -176,7 +201,7 @@ class DrawGenerator:
         if self.entry_pointer:
             self.state.set_pointer(self.context.address_at(0, 0))
 
-        if self.uses_stack:
+        if self.uses_stack and self.manage_sp:
             self.emit_stack_prologue()
 
         if self.context.reloc is Reloc.PATCH and self.state.pointer is None:
@@ -207,7 +232,7 @@ class DrawGenerator:
             else:  # pragma: no cover - Mode is exhaustive
                 raise NotImplementedError(piece.mode)
 
-        if self.uses_stack:
+        if self.uses_stack and self.manage_sp:
             self.emit_stack_epilogue()
         return self.program
 
@@ -387,7 +412,25 @@ class DrawGenerator:
             base = self.state.index["IX"]
             if base is None or not -128 <= target - base <= 127:
                 base = self.context.address_at(cell.row, 0)
-                self.emit([isa.LdPairImm("IX", base)], (cell.row, cell.col))
+                # The seat holds a screen address, so it needs patch points
+                # like any other; the displacements stay valid because they
+                # are relative to it.
+                patching = self.context.reloc is Reloc.PATCH
+                self.emit(
+                    [
+                        isa.LdPairImm(
+                            "IX",
+                            base,
+                            patch_lo=isa.Patch(isa.PatchKind.L, cell.row, 0)
+                            if patching
+                            else None,
+                            patch_hi=isa.Patch(isa.PatchKind.H, cell.row, 0)
+                            if patching
+                            else None,
+                        )
+                    ],
+                    (cell.row, cell.col),
+                )
                 self.state.index["IX"] = base
             if cell.opaque:
                 self.emit(
@@ -416,6 +459,9 @@ def generate_draw(
     patch_weight: float | None = None,
     entry_pointer: bool | None = None,
     use_alternate: bool = True,
+    initial_state: MachineState | None = None,
+    manage_sp: bool = True,
+    reserved: frozenset[str] = frozenset(),
 ) -> Program:
     """Generate the body of a draw routine for ``plan``."""
     return DrawGenerator(
@@ -424,4 +470,16 @@ def generate_draw(
         patch_weight=patch_weight,
         entry_pointer=entry_pointer,
         use_alternate=use_alternate,
+        initial_state=initial_state,
+        manage_sp=manage_sp,
+        reserved=reserved,
     ).generate()
+
+
+def generate_draw_state(
+    plan: Plan, context: DrawContext, **kwargs
+) -> tuple[Program, MachineState]:
+    """Generate a draw body and report the machine state it leaves behind."""
+    generator = DrawGenerator(plan, context, **kwargs)
+    program = generator.generate()
+    return program, generator.state
