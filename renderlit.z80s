@@ -1,0 +1,987 @@
+;------------------------------------------------------------------
+; renderlit.z80s - render.z80s with face lighting
+;
+;   rndl_init    blank both buffers and build the shade ramp
+;   rndl_frame   clear what was drawn last time, draw the cube, flip
+;
+; Same rasteriser as render.z80s - SAM Coupe MODE 4, 256x192 in 16
+; colours, two pixels a byte, 128 bytes a line, double buffered at
+; 0x8000 and 0x2000, faces walked with Bresenham into a pair of
+; scanline arrays and filled between - so only what is different is
+; described here. That is the shading, and the visibility test, which
+; the shading pays for.
+;
+; LIGHTING. Each face gets a diffuse level from N.L, and draws in
+; rndl_base[face] + level. RNDL_LEVELS is how many shades a ramp has
+; (8: level 0 black, level 7 full) and RNDL_AMBIENT the level a face
+; gets with the light behind it, so a ramp of eight and an ambient of
+; two puts every visible face somewhere in 2..7. Sixteen CLUT entries
+; hold two ramps of eight; opposite faces share one, since you never
+; see both at once. rndl_init turns the level curve into a 256-byte
+; table indexed by the diffuse term, so a different response - more
+; ambient, a gamma, a banded cartoon look - is a different table and
+; costs nothing at run time.
+;
+; NORMALS. A cube's face normals are the columns of the rotation
+; matrix: the +X face's normal is M*(1,0,0), which is (m00, m10, m20),
+; and the -X face's is its negative. Nothing has to be computed to get
+; them, and anything of the form N.w for all six faces is one
+; transposed matrix-vector product, nine multiplies:
+;
+;   (N_+a).w = column a of M . w = (M' w)_a  ,  (N_-a).w = -(M' w)_a
+;
+; VISIBILITY. Which is why the screen-space cross product render.z80s
+; uses is worth replacing here. The face plane goes through T + S*N
+; with the eye at the origin, so a face is towards us exactly when
+;
+;   N.(T + S*N) < 0   which for a unit N is   N.T + S < 0
+;
+; and one more M'w - w = T, the cube's centre - decides all six faces.
+; That is exact under perspective, needs no projected geometry, and
+; replaces two multiplies and a corner gather per face with nine
+; multiplies per frame, so the lighting very nearly pays for itself.
+;
+; Fixed point makes the two tests disagree on 0.79% of face tests over
+; the demo, all of them within about a degree of edge on, and it is
+; safe either way round: a face wrongly kept is wound backwards on
+; screen, every one of its spans comes out empty, and nothing is drawn.
+;
+; The translation is read as T >> 8, the high byte of each 9.7
+; component, so |tx| + |ty| + |tz| must stay inside 255 world units.
+;
+; Measured, over the 400 demo frames of tests/test_renderlit.py, which
+; checks the shade ramp and every drawn byte against a model of the
+; same arithmetic:
+;
+;   rndl_frame            min  47,953   mean  90,439   max 121,003
+;     one face visible    min  47,953   mean  64,347   max  79,078
+;     two faces           min  65,488   mean  86,410   max 106,262
+;     three faces         min  84,347   mean 103,219   max 121,003
+;   rndl_light            8,829, once a frame, all six faces
+;     of which one M'w    3,050
+;   rndl_init            37,583, once
+;
+; against render.z80s's 86,717 unlit: lighting and the new visibility
+; test together cost 3,722 T-states a frame, 4.3%. With democube's
+; 21,782 in front of it a frame is 112,221 T-states, 94% of the
+; 120,000 a 6 MHz SAM has between 50 Hz interrupts. Raw T-states;
+; real SAM screen contention is on top.
+;
+; A light fixed on an axis in view space - (0,0,-1), a headlight - is
+; the cheap case: M'L is then a row of the matrix negated, three byte
+; copies rather than 3,050 T-states, and the lighting costs about 700
+; T-states a frame over the unlit renderer.
+;
+; 2,048 bytes: 1,280 of code and small tables, 256 for the shade ramp,
+; 512 for the two scanline arrays.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+RNDL_LEVELS:     EQU 8           ; shades in a face's ramp: 0 is black,
+                                 ; RNDL_LEVELS-1 is full brightness
+RNDL_AMBIENT:    EQU 2           ; the level a face gets with the light
+                                 ; behind it. 0 is pure diffuse, which
+                                 ; sinks a fifth of the visible faces
+                                 ; into the background; must be less
+                                 ; than RNDL_LEVELS
+RNDL_S:          EQU 40          ; the cube's half side, world units
+RNDL_CULL:       EQU 64 * RNDL_S ; the N.T threshold that goes with it
+RNDL_BUF0:       EQU 0x80        ; high byte of the first buffer
+RNDL_BUF1:       EQU 0x20        ; and the second
+RNDL_H:          EQU 192
+
+;------------------------------------------------------------------
+; rndl_init - blank both buffers and start on the first
+;------------------------------------------------------------------
+
+rndl_init:
+        LD   A,RNDL_BUF0
+        LD   (rndl_back),A
+        LD   A,RNDL_BUF1
+        LD   (rndl_front),A
+        LD   HL,rndl_dirty0  ; nothing drawn yet, so nothing to erase
+        LD   (HL),0         ; ytop
+        INC  HL
+        LD   (HL),0         ; ybot
+        INC  HL
+        LD   (HL),0
+        INC  HL
+        LD   (HL),0
+        LD   HL,rndl_dirty1
+        LD   (HL),0
+        INC  HL
+        LD   (HL),0
+        INC  HL
+        LD   (HL),0
+        INC  HL
+        LD   (HL),0
+
+        LD   HL,rndl_ramp   ; a face turned away from the light gets
+        LD   B,128          ; the ambient level
+        LD   A,RNDL_AMBIENT
+rndl_ir0:
+        LD   (HL),A
+        INC  HL
+        DJNZ rndl_ir0
+        LD   C,0            ; and the lit half is a straight ramp,
+rndl_ir1:                   ; level = shade * LEVELS >> 7
+        PUSH HL
+        LD   D,0
+        LD   E,C
+        LD   HL,0
+        LD   B,RNDL_LEVELS - RNDL_AMBIENT
+rndl_ir3:
+        ADD  HL,DE          ; shade * the range above ambient
+        DJNZ rndl_ir3
+        ADD  HL,HL          ; >> 7 is << 1 and keep the high byte
+        LD   A,H
+        ADD  A,RNDL_AMBIENT
+        CP   RNDL_LEVELS
+        JR   C,rndl_ir2
+        LD   A,RNDL_LEVELS - 1
+rndl_ir2:
+        POP  HL
+        LD   (HL),A
+        INC  HL
+        INC  C
+        BIT  7,C
+        JR   Z,rndl_ir1
+        RET
+
+;------------------------------------------------------------------
+; rndl_frame - one frame's worth of drawing
+;
+; Entry : (rndl_pts) points at eight screen coordinate pairs
+;         (rndl_colour) holds the six face colours, 0..15
+; Trash : everything except IY
+;------------------------------------------------------------------
+
+rndl_frame:
+        CALL rndl_erase      ; wipe what this buffer held two frames ago
+        CALL rndl_light      ; shade and cull all six faces at once
+        LD   IX,rndl_faces
+        LD   B,6
+        LD   A,0
+        LD   (rndl_face),A
+rndl_floop:
+        PUSH BC
+        LD   A,(rndl_face)
+        LD   E,A
+        LD   D,0
+        LD   HL,rndl_vis
+        ADD  HL,DE
+        LD   A,(HL)
+        OR   A
+        JR   Z,rndl_fnext
+        CALL rndl_quad
+rndl_fnext:
+        LD   BC,4
+        ADD  IX,BC          ; on to the next face
+        LD   A,(rndl_face)
+        INC  A
+        LD   (rndl_face),A
+        POP  BC
+        DJNZ rndl_floop
+        CALL rndl_bbox       ; remember what to erase next time
+        ; fall through into the flip
+
+;------------------------------------------------------------------
+; rndl_flip - swap the buffers. The hardware half is left to you.
+;------------------------------------------------------------------
+
+rndl_flip:
+        LD   A,(rndl_back)
+        LD   B,A
+        LD   A,(rndl_front)
+        LD   (rndl_back),A
+        LD   A,B
+        LD   (rndl_front),A
+        RET                 ; <- tell the display hardware here
+
+;------------------------------------------------------------------
+; rndl_light - shade and cull all six faces, once for the frame
+;
+; A cube's face normals are the columns of the rotation matrix: the
+; +X face's normal is M*(1,0,0), which is (m00, m10, m20), and the -X
+; face's is its negative. Nothing has to be computed to get them, and
+; anything of the form N.w for all six faces is one transposed
+; matrix-vector product:
+;
+;   (N_+a).w = column a of M . w = (M' w)_a  ,  (N_-a).w = -(M' w)_a
+;
+; Nine multiplies for six faces, whichever w is wanted. Two are:
+;
+;   w = L, the light direction in view space, giving the diffuse term
+;       N.L for each face, which the ramp table turns into a level;
+;
+;   w = T, the cube's centre. The face plane goes through T + S*N with
+;       the eye at the origin, so the face is towards us exactly when
+;       N.(T + S*N) < 0, and with N a unit vector that is N.T + S < 0.
+;       Exact under perspective, and it needs no projected geometry.
+;
+; That second one replaces the screen-space cross product the unlit
+; renderer uses - a face at a time, two multiplies each - so the
+; lighting very nearly pays for itself. Fixed point makes the two
+; tests disagree only within about a degree of edge on, and it is safe
+; either way round: a face wrongly kept is wound backwards on screen,
+; every one of its spans comes out empty, and nothing is drawn.
+;
+; The translation is taken as T >> 8, the high byte of each 9.7
+; component, so |tx| + |ty| + |tz| must stay inside 255 units and the
+; dot product inside 30,000.
+;
+; Exit  : rndl_vis+f   nonzero if face f is towards us
+;         rndl_fcol+f  its colour byte, base + level in both nibbles
+; Trash : AF, BC, DE, HL
+;------------------------------------------------------------------
+
+rndl_light:
+        LD   A,(t3d_tx+1)   ; T >> 8, one signed byte an axis
+        LD   (rndl_w+0),A
+        LD   A,(t3d_ty+1)
+        LD   (rndl_w+1),A
+        LD   A,(t3d_tz+1)
+        LD   (rndl_w+2),A
+        LD   DE,rndl_cv
+        CALL rndl_mtv       ; the three N.T, times 64
+
+        LD   HL,(rndl_lite)
+        LD   (rndl_w+0),HL
+        LD   A,(rndl_lite+2)
+        LD   (rndl_w+2),A
+        LD   DE,rndl_lv
+        CALL rndl_mtv       ; the three N.L, times 128*128
+
+        XOR  A
+        LD   (rndl_axis),A
+rndl_lax:
+        LD   A,(rndl_axis)  ; DE = the axis's N.L sum
+        ADD  A,A
+        LD   E,A
+        LD   D,0
+        LD   HL,rndl_lv
+        ADD  HL,DE
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        LD   A,D            ; shade = that >> 7, into a signed byte
+        ADD  A,64           ; inside [-16384, 16383]?
+        CP   128
+        JR   C,rndl_lfit
+        LD   A,D            ; no - peg it at whichever end of the ramp
+        RLA
+        SBC  A,A
+        XOR  0x7F           ; 127 if it was positive, -128 if negative
+        JR   rndl_lsh
+rndl_lfit:
+        EX   DE,HL
+        ADD  HL,HL          ; >> 7 is << 1 and keep the high byte
+        LD   A,H
+rndl_lsh:
+        LD   (rndl_sh),A
+
+        LD   A,(rndl_axis)  ; DE = the axis's N.T sum, times 64
+        ADD  A,A
+        LD   E,A
+        LD   D,0
+        LD   HL,rndl_cv
+        ADD  HL,DE
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        PUSH DE
+
+        LD   HL,RNDL_CULL   ; face 2a is towards us if N.T + S < 0
+        ADD  HL,DE
+        LD   A,H
+        RLA
+        SBC  A,A            ; 0xFF when it is, 0 when it is not
+        LD   C,A
+        LD   A,(rndl_axis)
+        ADD  A,A
+        LD   B,A
+        LD   A,(rndl_sh)
+        CALL rndl_setface
+
+        POP  DE             ; face 2a+1 has the opposite normal, so it
+        LD   HL,-RNDL_CULL  ; is towards us if N.T - S > 0
+        ADD  HL,DE
+        LD   C,0
+        LD   A,H
+        OR   A
+        JP   M,rndl_lneg
+        OR   L
+        JR   Z,rndl_lneg
+        DEC  C              ; C = 0xFF
+rndl_lneg:
+        LD   A,(rndl_axis)
+        ADD  A,A
+        INC  A
+        LD   B,A
+        LD   A,(rndl_sh)    ; and the opposite diffuse term
+        NEG
+        JP   PO,rndl_lneg2
+        LD   A,127          ; -(-128) does not fit
+rndl_lneg2:
+        CALL rndl_setface
+
+        LD   A,(rndl_axis)
+        INC  A
+        LD   (rndl_axis),A
+        CP   3
+        JR   C,rndl_lax
+        RET
+
+;------------------------------------------------------------------
+; rndl_setface - record one face's visibility and its lit colour
+;
+; Entry : A = the diffuse term, signed; B = face; C = 0 or 0xFF
+;------------------------------------------------------------------
+
+rndl_setface:
+        XOR  0x80           ; the ramp is indexed by shade + 128
+        LD   L,A
+        LD   H,rndl_ramp / 256
+        LD   A,(HL)         ; the level, 0 to RNDL_LEVELS-1
+        LD   E,B
+        LD   D,0
+        LD   HL,rndl_base
+        ADD  HL,DE
+        ADD  A,(HL)         ; the face's ramp starts there
+        AND  15
+        LD   L,A
+        RLCA
+        RLCA
+        RLCA
+        RLCA
+        OR   L              ; the colour in both nibbles
+        LD   HL,rndl_fcol
+        ADD  HL,DE
+        LD   (HL),A
+        LD   HL,rndl_vis
+        ADD  HL,DE
+        LD   (HL),C
+        RET
+
+;------------------------------------------------------------------
+; rndl_mtv - dot the vector at rndl_w with each column of the matrix
+;
+;   out[a] = sum over k of m[k*3+a] * w[k], signed, 16 bits
+;
+; Entry : DE -> three 16-bit results
+; Trash : AF, BC, DE, HL
+;------------------------------------------------------------------
+
+rndl_mtv:
+        LD   (rndl_mout),DE
+        LD   IX,t3d_m
+        LD   A,3
+        LD   (rndl_mac),A
+rndl_mta:
+        EXX                 ; the running sum lives in HL', out of the
+        LD   HL,0           ; way of the multiply
+        EXX
+        LD   B,(IX+0)       ; m[0][a] * w[0]
+        LD   A,(rndl_w+0)
+        LD   C,A
+        CALL rndl_smul
+        PUSH DE
+        EXX
+        POP  DE
+        ADD  HL,DE
+        EXX
+        LD   B,(IX+3)       ; m[1][a] * w[1]
+        LD   A,(rndl_w+1)
+        LD   C,A
+        CALL rndl_smul
+        PUSH DE
+        EXX
+        POP  DE
+        ADD  HL,DE
+        EXX
+        LD   B,(IX+6)       ; m[2][a] * w[2]
+        LD   A,(rndl_w+2)
+        LD   C,A
+        CALL rndl_smul
+        PUSH DE
+        EXX
+        POP  DE
+        ADD  HL,DE
+        PUSH HL
+        EXX
+        POP  DE             ; DE = the column's dot product
+        LD   HL,(rndl_mout) ; store it and move on a column
+        LD   (HL),E
+        INC  HL
+        LD   (HL),D
+        INC  HL
+        LD   (rndl_mout),HL
+        INC  IX
+        LD   A,(rndl_mac)
+        DEC  A
+        LD   (rndl_mac),A
+        JR   NZ,rndl_mta
+        RET
+
+;------------------------------------------------------------------
+; rndl_smul - signed 8x8 -> 16, out of the quarter square multiply
+;
+; qsmul8 is unsigned, and taking absolute values and putting the sign
+; back afterwards costs as much again as the multiply. Correcting the
+; unsigned product instead costs at most two subtractions, because the
+; correction is a multiple of 256 and so lands entirely in the high
+; byte. qsmul8 leaves B and C alone, which is what makes it work.
+;
+; Entry : B, C signed      Exit : DE = B*C      Trash : AF, DE, HL
+;         B and C are preserved.
+;------------------------------------------------------------------
+
+rndl_smul:
+        CALL qsmul8         ; the product of the two bit patterns read
+        LD   A,B            ; unsigned. With a = au - 256p and b = bu - 256q,
+        RLA                 ; a*b = au*bu - 256*(q*au + p*bu) modulo 65536,
+        JR   NC,rndl_sm1      ; and a multiple of 256 only touches the high
+        LD   A,D            ; byte - so a negative operand costs one SUB.
+        SUB  C
+        LD   D,A
+rndl_sm1:
+        LD   A,C
+        RLA
+        RET  NC
+        LD   A,D
+        SUB  B
+        LD   D,A
+        RET
+
+;------------------------------------------------------------------
+; rndl_quad - fill one face
+;
+; Entry : IX -> the face's four vertex offsets, (rndl_face) = its index
+; Trash : everything except IY
+;------------------------------------------------------------------
+
+rndl_quad:
+        LD   A,(rndl_face)   ; the lit colour, worked out by rndl_light
+        LD   E,A
+        LD   D,0
+        LD   HL,rndl_fcol
+        ADD  HL,DE
+        LD   A,(HL)
+        LD   (rndl_col),A
+
+        LD   HL,(rndl_pts)   ; gather the four corners
+        LD   B,4
+        LD   C,0
+rndl_gath:
+        PUSH HL
+        LD   E,(IX+0)
+        LD   D,0
+        ADD  HL,DE
+        LD   E,(HL)         ; x
+        INC  HL
+        LD   D,(HL)         ; y
+        LD   HL,rndl_qx      ; qx and qy sit four bytes apart, so bit 2
+        LD   A,L            ; of L picks between them
+        ADD  A,C
+        LD   L,A
+        LD   (HL),E
+        SET  2,L
+        LD   (HL),D
+        POP  HL
+        INC  IX
+        INC  C
+        DJNZ rndl_gath
+        LD   DE,-4
+        ADD  IX,DE
+
+        LD   HL,rndl_qy      ; top and bottom of the face
+        LD   B,(HL)
+        LD   C,B
+        LD   E,3
+rndl_mnmx:
+        INC  L
+        LD   A,(HL)
+        CP   B
+        JR   NC,rndl_mm1
+        LD   B,A
+rndl_mm1:
+        CP   C
+        JR   C,rndl_mm2
+        LD   C,A
+rndl_mm2:
+        DEC  E
+        JR   NZ,rndl_mnmx
+        LD   A,B
+        LD   (rndl_ytop),A
+        LD   A,C
+        LD   (rndl_ybot),A
+        CP   B
+        RET  Z              ; no height, nothing to draw
+
+        LD   B,4            ; walk the four edges into the arrays
+        LD   C,0
+rndl_eloop:
+        PUSH BC
+        LD   HL,rndl_qx
+        LD   A,L
+        ADD  A,C
+        LD   L,A
+        LD   E,(HL)         ; x0
+        SET  2,L
+        LD   D,(HL)         ; y0
+        LD   A,C
+        INC  A
+        AND  3
+        ADD  A,rndl_qx & 255
+        LD   L,A
+        SET  2,L
+        LD   B,(HL)         ; y1
+        RES  2,L
+        LD   C,(HL)         ; x1
+        LD   A,D
+        CP   B
+        JR   Z,rndl_enext    ; horizontal edges contribute nothing
+        JR   C,rndl_edown
+        LD   A,D            ; climbing: swap the ends so the walk still
+        LD   D,B            ; runs downwards, and send it to the other
+        LD   B,A            ; array
+        LD   A,E
+        LD   E,C
+        LD   C,A
+        LD   A,rndl_xl / 256
+        JR   rndl_ego
+rndl_edown:
+        LD   A,rndl_xr / 256
+rndl_ego:
+        CALL rndl_edge
+rndl_enext:
+        POP  BC
+        INC  C
+        DJNZ rndl_eloop
+        ; fall through into the fill
+
+;------------------------------------------------------------------
+; rndl_fill - fill between the two scanline arrays
+;------------------------------------------------------------------
+
+rndl_fill:
+        LD   A,(rndl_ytop)
+        LD   E,A            ; the screen line address for ytop
+        AND  1
+        RRCA
+        LD   L,A            ; 0 or 128
+        LD   A,E
+        SRL  A
+        LD   D,A
+        LD   A,(rndl_back)
+        ADD  A,D
+        LD   H,A            ; HL = the line
+        LD   A,(rndl_ybot)
+        SUB  E
+        RET  Z
+        LD   D,A            ; D = scanline count
+        LD   A,(rndl_col)
+        LD   C,A            ; C = the colour byte
+        LD   A,rndl_xl / 256 ; the shadow set walks the arrays
+        PUSH AF
+        LD   A,E
+        PUSH AF
+        EXX
+        POP  AF
+        LD   L,A
+        POP  AF
+        LD   H,A            ; HL' -> rndl_xl[ytop]
+        EXX
+        LD   B,D            ; B = scanline count
+rndl_floop2:
+        EXX
+        LD   E,(HL)         ; xl
+        INC  H
+        LD   D,(HL)         ; xr
+        DEC  H
+        INC  L
+        PUSH DE
+        EXX
+        POP  DE
+        LD   A,D            ; xl > xr is an empty span - the two sides
+        CP   E              ; cross on the sliver scanlines of a face seen
+        JR   C,rndl_fok      ; nearly edge on - so it draws nothing
+        PUSH BC
+        CALL rndl_span
+        POP  BC
+rndl_fok:
+        LD   A,128          ; the next line down
+        ADD  A,L
+        LD   L,A
+        JR   NC,rndl_fnc
+        INC  H
+rndl_fnc:
+        DJNZ rndl_floop2
+        RET
+
+;------------------------------------------------------------------
+; rndl_edge - Bresenham one edge into a scanline array
+;
+; Entry : A = array page, D = y0, B = y1 (y1 > y0), E = x0, C = x1
+; Trash : AF, BC, DE, HL
+;
+; 39 T-states a scanline, plus 27 for each pixel of sideways travel.
+; It assumes dy + |dx| stays under 256, which a face of a cube this
+; size comfortably does.
+;------------------------------------------------------------------
+
+rndl_edge:
+        LD   H,A
+        LD   L,D            ; HL -> arr[y0]
+        LD   A,B
+        SUB  D
+        LD   B,A            ; B = dy = how many scanlines
+        LD   D,A            ; D = dy
+        SRL  A              ; err starts at dy/2, so the line rounds
+        PUSH AF
+        LD   A,C
+        SUB  E              ; dx
+        JR   NC,rndl_epos
+        NEG                 ; |dx|
+        LD   C,A
+        POP  AF
+        JR   rndl_edgen
+rndl_epos:
+        LD   C,A            ; C = |dx|
+        POP  AF
+
+rndl_edgep:                  ; x climbing
+        LD   (HL),E         ; [7T]
+        INC  L              ; [4T]
+        ADD  A,C            ; [4T]  err += |dx|
+rndl_ep1:
+        CP   D              ; [4T]
+        JR   C,rndl_ep2      ; [7/12T]
+        SUB  D              ; [4T]
+        INC  E              ; [4T]
+        JR   rndl_ep1        ; [12T]
+rndl_ep2:
+        DJNZ rndl_edgep      ; [13/8T]
+        RET
+
+rndl_edgen:                  ; x falling
+        LD   (HL),E
+        INC  L
+        ADD  A,C
+rndl_en1:
+        CP   D
+        JR   C,rndl_en2
+        SUB  D
+        DEC  E
+        JR   rndl_en1
+rndl_en2:
+        DJNZ rndl_edgen
+        RET
+
+;------------------------------------------------------------------
+; rndl_span - one run of pixels in one colour
+;
+; Entry : HL = the line's address, E = x0, D = x1 (x0 <= x1),
+;         C = the colour in both nibbles
+; Exit  : HL preserved
+; Trash : AF, B, DE
+;
+; The two ends may be half a byte, so they are read-modify-written
+; through a mask; everything between is whole bytes.
+;------------------------------------------------------------------
+
+rndl_span:
+        PUSH HL
+        LD   A,E
+        SRL  A
+        LD   B,A            ; B = the left byte
+        ADD  A,L
+        LD   L,A            ; HL -> it
+        LD   A,D
+        SRL  A              ; the right byte
+        SUB  B
+        LD   B,A            ; B = how many bytes apart they are
+        LD   A,E            ; the left end's keep-mask: a run starting on
+        RRA                 ; an odd pixel keeps the high nibble of its
+        SBC  A,A            ; first byte, else nothing
+        AND  0xF0
+        LD   E,A
+        LD   A,B
+        OR   A
+        JR   NZ,rndl_spmulti
+
+        LD   A,D            ; both ends in one byte: keep from both
+        RRA
+        SBC  A,A
+        CPL
+        AND  0x0F
+        OR   E
+        LD   E,A
+        JR   rndl_spend
+
+rndl_spmulti:
+        LD   A,(HL)         ; the left end, masked
+        XOR  C
+        AND  E
+        XOR  C
+        LD   (HL),A
+        INC  L
+        DEC  B              ; whole bytes left between the ends
+        JR   Z,rndl_spright
+        SRL  B              ; B = pairs of them, carry = an odd one over
+        JR   NC,rndl_speven
+        LD   (HL),C
+        INC  L
+rndl_speven:
+        LD   A,B
+        OR   A
+        JR   Z,rndl_spright
+rndl_spfill:
+        LD   (HL),C         ; [7T]  two bytes, four pixels, a pass
+        INC  L              ; [4T]
+        LD   (HL),C         ; [7T]
+        INC  L              ; [4T]
+        DJNZ rndl_spfill     ; [13/8T]
+
+rndl_spright:
+        LD   A,D            ; the right end's keep-mask: a run stopping on
+        RRA                 ; an even pixel keeps the low nibble of its
+        SBC  A,A            ; last byte, else nothing
+        CPL
+        AND  0x0F
+        LD   E,A
+rndl_spend:
+        LD   A,(HL)         ; (old & keep) | (colour & ~keep)
+        XOR  C
+        AND  E
+        XOR  C
+        LD   (HL),A
+        POP  HL
+        RET
+
+;------------------------------------------------------------------
+; rndl_bbox - the box the cube covered, kept for erasing it later
+;------------------------------------------------------------------
+
+rndl_bbox:
+        LD   HL,(rndl_pts)
+        LD   A,255
+        LD   (rndl_bxmin),A
+        LD   (rndl_bymin),A
+        XOR  A
+        LD   (rndl_bxmax),A
+        LD   (rndl_bymax),A
+        LD   B,8
+rndl_bbl:
+        LD   C,(HL)         ; x
+        LD   A,(rndl_bxmin)
+        CP   C
+        JR   C,rndl_bb1
+        LD   A,C
+        LD   (rndl_bxmin),A
+rndl_bb1:
+        LD   A,(rndl_bxmax)
+        CP   C
+        JR   NC,rndl_bb2
+        LD   A,C
+        LD   (rndl_bxmax),A
+rndl_bb2:
+        INC  HL
+        LD   C,(HL)         ; y
+        LD   A,(rndl_bymin)
+        CP   C
+        JR   C,rndl_bb3
+        LD   A,C
+        LD   (rndl_bymin),A
+rndl_bb3:
+        LD   A,(rndl_bymax)
+        CP   C
+        JR   NC,rndl_bb4
+        LD   A,C
+        LD   (rndl_bymax),A
+rndl_bb4:
+        INC  HL
+        DJNZ rndl_bbl
+        CALL rndl_dirty      ; write it into this buffer's record
+        LD   A,(rndl_bymin)
+        LD   (HL),A
+        INC  HL
+        LD   A,(rndl_bymax)
+        INC  A              ; the fill covers [ytop, ybot)
+        LD   (HL),A
+        INC  HL
+        LD   A,(rndl_bxmin)
+        SRL  A
+        LD   (HL),A
+        INC  HL
+        LD   A,(rndl_bxmax)
+        SRL  A
+        LD   (HL),A
+        RET
+
+rndl_dirty:                  ; HL -> the back buffer's dirty record
+        LD   A,(rndl_back)
+        CP   RNDL_BUF0
+        LD   HL,rndl_dirty0
+        RET  Z
+        LD   HL,rndl_dirty1
+        RET
+
+;------------------------------------------------------------------
+; rndl_erase - blank the box this buffer held two frames ago
+;------------------------------------------------------------------
+
+rndl_erase:
+        CALL rndl_dirty
+        LD   E,(HL)         ; ytop
+        INC  HL
+        LD   A,(HL)         ; ybot
+        INC  HL
+        LD   C,(HL)         ; left byte
+        INC  HL
+        LD   B,(HL)         ; right byte
+        SUB  E
+        RET  Z              ; nothing was drawn into this buffer yet
+        LD   (rndl_lines),A
+
+        RES  0,C            ; widen the box to whole pairs of bytes, so
+        SET  0,B            ; every line is an exact run of PUSHes
+        LD   A,B
+        SUB  C
+        INC  A
+        RRCA
+        LD   B,A            ; B = pairs across, 1..64
+
+        LD   A,E            ; DE -> the top left byte of the box
+        AND  1
+        RRCA                ; 0 or 128
+        ADD  A,C
+        LD   L,A
+        LD   A,E
+        SRL  A
+        LD   E,A
+        LD   A,(rndl_back)
+        ADD  A,E
+        LD   D,A
+        LD   A,B            ; and on to one past the top right
+        ADD  A,A
+        ADD  A,L
+        LD   E,A
+        JR   NC,rndl_ernc0
+        INC  D
+rndl_ernc0:
+        LD   A,rndl_pushend & 255
+        SUB  B              ; B pairs enter the run B PUSHes from its end
+        LD   L,A
+        LD   H,rndl_pushend / 256
+        JR   NC,rndl_ernc1
+        DEC  H
+rndl_ernc1:
+        PUSH HL
+        POP  IX
+        LD   IY,rndl_erback
+        LD   A,(rndl_lines)
+        LD   B,A
+        DI
+        LD   (rndl_sp),SP
+rndl_erl:
+        LD   H,D            ; SP -> one past this line's right hand end
+        LD   L,E
+        LD   SP,HL
+        LD   A,128          ; and DE on to the next line down
+        ADD  A,E
+        LD   E,A
+        JR   NC,rndl_erl1
+        INC  D
+rndl_erl1:
+        LD   HL,0
+        JP   (IX)           ; into the run of PUSHes
+rndl_erback:
+        DJNZ rndl_erl
+        LD   SP,(rndl_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; rndl_pushes - a run of 64 PUSH HLs, entered n from its end to write
+; 2n bytes of HL downwards from SP. Two bytes every 11 T-states, or
+; 5.5 a byte, against the 30 an LD (HL),0 / INC L / DJNZ loop costs.
+; The caller points SP one past the last byte to write and IY at
+; where it wants to come back to.
+;------------------------------------------------------------------
+
+        ALIGN 128
+rndl_pushes:
+        DEFS 64,0xE5        ; PUSH HL, sixty four times
+rndl_pushend:
+        JP   (IY)
+
+
+;------------------------------------------------------------------
+; The face table: four vertex offsets each, wound so the screen cross
+; product comes out positive when the face is towards us. In the order
+; +X -X +Y -Y +Z -Z, matching rndl_colour.
+;------------------------------------------------------------------
+
+rndl_faces:
+        DEFB 6,2,0,4
+        DEFB 10,14,12,8
+        DEFB 2,10,8,0
+        DEFB 14,6,4,12
+        DEFB 8,12,4,0
+        DEFB 14,10,2,6
+
+rndl_base:      DEFB 0,0,8,8,0,8 ; where each face's ramp starts in the
+                                 ; CLUT: two ramps of eight, 0..7 and
+                                 ; 8..15, each starting at black.
+                                 ; Opposite faces can share one - you
+                                 ; never see both at once.
+rndl_lite:      DEFB -52,52,-104 ; light direction in view space, 1.7:
+                                 ; over the viewer's left shoulder. The
+                                 ; ramp absorbs the length, so it need
+                                 ; not be a unit vector.
+rndl_vis:       DEFS 6           ; per face, from rndl_light
+rndl_fcol:      DEFS 6
+rndl_w:         DEFS 3           ; the vector rndl_mtv is dotting with
+rndl_cv:        DEFS 6           ; the three N.T, times 64
+rndl_lv:        DEFS 6           ; the three N.L, times 128*128
+rndl_mout:      DEFS 2
+rndl_mac:       DEFS 1
+rndl_macc:      DEFS 2
+rndl_axis:      DEFS 1
+rndl_sh:        DEFS 1
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+rndl_pts:        DEFW demo_screen ; where the eight projected corners live
+rndl_back:       DEFB RNDL_BUF0    ; high byte of the buffer being drawn
+rndl_front:      DEFB RNDL_BUF1
+rndl_dirty0:     DEFS 4           ; ytop, ybot, left byte, right byte
+rndl_dirty1:     DEFS 4
+rndl_sp:         DEFS 2           ; SP parked while the stack fills the screen
+rndl_lines:      DEFS 1
+rndl_face:       DEFS 1
+rndl_col:        DEFS 1
+rndl_ytop:       DEFS 1
+rndl_ybot:       DEFS 1
+rndl_bxmin:      DEFS 1
+rndl_bxmax:      DEFS 1
+rndl_bymin:      DEFS 1
+rndl_bymax:      DEFS 1
+
+        ALIGN 8
+rndl_qx:         DEFS 4           ; the face being drawn: x then y
+rndl_qy:         DEFS 4
+
+        ALIGN 256
+rndl_ramp:       DEFS 256         ; shade + 128 -> level, built by rndl_init
+rndl_xl:         DEFS 256         ; one x per scanline, per side
+rndl_xr:         DEFS 256
+
+rndl_end:
+RNDL_SIZE:       EQU rndl_end - rndl_init
+
+;------------------------------------------------------------

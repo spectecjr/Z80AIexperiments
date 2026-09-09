@@ -10,5 +10,6 @@ start:
                 INCLUDE "transform3d.z80s"
                 INCLUDE "democube.z80s"
                 INCLUDE "render.z80s"
+                INCLUDE "renderlit.z80s"
 end:            equ $
 codelen:        equ end - start
