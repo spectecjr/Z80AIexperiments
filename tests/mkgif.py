@@ -97,7 +97,7 @@ def sam_rgb(v):
     return (r, g, b)
 
 
-def copper(frames, pars, fog):
+def copper(frames, pars, fog, haze=None):
     """Flatten per-scanline palettes into one indexed image and palette.
 
     A routine that flips two palette entries a scanline shows more
@@ -122,6 +122,8 @@ def copper(frames, pars, fog):
                 a, b = b, a
             g[y][f[y] == 1] = slot(sam_rgb(a))
             g[y][f[y] == 2] = slot(sam_rgb(b))
+            if haze is not None:
+                g[y][f[y] == 3] = slot(sam_rgb(haze[y]))
         out.append(g)
     if len(pal) > 256:
         raise SystemExit("copper: %d colours, more than a GIF holds"
@@ -324,6 +326,38 @@ def twist(outdir, seconds=6):
     report(p, size, n, durs, secs, got, bad)
 
 
+def harrier(outdir, seconds=6):
+    """harrier at its measured rate: 221,420 T-states a frame, 25 Hz.
+
+    The same floor as chequer, with every boundary on its exact pixel
+    instead of a four pixel grid. Compare demo/chequer.gif.
+    """
+    import math
+    b = Bench("harness_hr.asm", org=0)
+    s = b.syms
+    b.call_regs(s["hr_init"])
+    fog = b.peek(s["hr_fog"], 2 * 192)
+    haze = b.peek(s["hr_hazec"], 192)
+    n = int(seconds * 25)
+    frames, pars, ts = [], [], []
+    for t in range(n):
+        camx = int(1400 * math.sin(2 * math.pi * t / 95))
+        camz = (t * 52) & 0xFFFF
+        b.poke(s["hr_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["hr_camz"], camz.to_bytes(2, "little"))
+        into = b.peek(s["hr_back"], 1)[0]
+        tt, _ = b.call_regs(s["hr_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+        pars.append(list(b.peek(s["hr_par"], 192)))
+    idx, pal = copper(frames, pars, fog, haze)
+    p = "%s/harrier.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, idx, pal, durs)
+    got, bad, secs = check_gif(p, idx, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 if __name__ == "__main__":
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
     cube(d)
@@ -332,4 +366,5 @@ if __name__ == "__main__":
     maze(d, harness="harness_wolf96.asm", name="maze96")
     maze(d, harness="harness_wolfwide.asm", name="mazewide")
     chequer(d)
+    harrier(d)
     twist(d)

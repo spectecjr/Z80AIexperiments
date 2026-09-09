@@ -1,0 +1,324 @@
+;------------------------------------------------------------------
+; harrier.z80s - the Space Harrier floor again, at pixel accuracy
+;
+;   hr_init      fill both buffers, once
+;   hr_frame     draw from (hr_camx, hr_camz) and flip
+;
+; chequer.z80s draws this board with a square's width and phase
+; quantised to four pixels, because a scanline there is one compiled
+; run of PUSHes and a PUSH is four pixels. This file puts every
+; boundary on its exact pixel. It costs a dispatch per square rather
+; than per scanline, and it is about twice the price - a 25 Hz routine
+; where the other is a 50 Hz one - so keep both.
+;
+; WHAT PIXEL ACCURACY COSTS. A PUSH writes two bytes, and a byte is two
+; pixels, so a boundary that does not land on a four pixel grid has to
+; be carried in the *value* pushed: hr_mx holds, for each of the four
+; offsets and each way round, the pair with a pixel of each colour in
+; the right place. So a square is a run of PUSHes of one colour
+; followed by one PUSH that straddles the boundary. Two runs, one per
+; colour, each falling through into its own boundary code, and a third
+; that falls into the row loop for the last square of a line.
+;
+; What is left quantised is nothing: the width of a square is exact
+; pixels, and the phase is exact pixels, because both live in the
+; accumulator rather than in the compiled run.
+;
+; Below eight pixels a square is too narrow to draw honestly and the
+; board gives way to a haze, which is what distance does to it anyway.
+; Those rows never change, so hr_init draws them and the frame does
+; not touch them.
+;
+; Everything else is chequer.z80s: the depth stripes are the palette's
+; job, one parity byte a scanline, and forward motion costs nothing in
+; pixels. Read chequer.md first.
+;
+; Needs qsmul8 from mul8x8_qs.z80s, once a frame.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+HR_BUF0:        EQU 0x80
+HR_BUF1:        EQU 0x20
+HR_C1:          EQU 0x1111
+HR_C2:          EQU 0x2222
+
+;------------------------------------------------------------------
+; hr_init - sky, haze, and the board's rows left to the frame
+;------------------------------------------------------------------
+
+hr_init:
+        LD   A,HR_BUF0
+        LD   (hr_back),A
+        LD   A,HR_BUF1
+        LD   (hr_front),A
+        LD   H,HR_BUF0
+        CALL hr_fill
+        LD   H,HR_BUF1
+        ; fall through
+
+hr_fill:
+        LD   L,0
+        PUSH HL
+        LD   D,0x60
+hr_f1:
+        LD   B,0
+hr_f2:
+        LD   (HL),HR_C1 & 255
+        INC  HL
+        DJNZ hr_f2
+        DEC  D
+        JR   NZ,hr_f1
+        POP  HL                 ; then the haze band, over the rows too
+        LD   DE,(HR_HZ + 1) * 128   ; far away to draw a board on
+        ADD  HL,DE
+        LD   D,HR_TOP - HR_HZ - 1
+hr_f3:
+        LD   B,128
+hr_f4:
+        LD   (HL),HR_HAZE
+        INC  HL
+        DJNZ hr_f4
+        DEC  D
+        JR   NZ,hr_f3
+        RET
+
+;------------------------------------------------------------------
+; hr_frame - one frame
+;------------------------------------------------------------------
+
+hr_frame:
+        CALL hr_par8
+        CALL hr_draw
+        LD   A,(hr_back)
+        LD   B,A
+        LD   A,(hr_front)
+        LD   (hr_back),A
+        LD   A,B
+        LD   (hr_front),A
+        RET
+
+;------------------------------------------------------------------
+; hr_par8 - which way round the palette goes on each scanline
+;------------------------------------------------------------------
+
+hr_par8:
+        LD   A,(hr_camz)
+        LD   (hr_pz1+1),A
+        LD   A,(hr_camz+1)
+        LD   (hr_pz2+1),A
+        LD   HL,hr_ztab + 2 * (HR_HZ + 1)
+        LD   DE,hr_par + HR_HZ + 1
+        LD   B,191 - HR_HZ
+hr_p1:
+        LD   A,(HL)
+        INC  HL
+hr_pz1:
+        ADD  A,0
+        LD   A,(HL)
+        INC  HL
+hr_pz2:
+        ADC  A,0
+        AND  1
+        LD   (DE),A
+        INC  DE
+        DJNZ hr_p1
+        RET
+
+;------------------------------------------------------------------
+; hr_draw - the board, one scanline at a time
+;
+; D is the PUSH the last boundary fell in, E the next boundary in
+; pixels, BC whichever colour is being pushed. The row pointer, its
+; step and the scanline count live in the other register set.
+;------------------------------------------------------------------
+
+hr_draw:
+        DI
+        LD   (hr_sp),SP
+        LD   A,(hr_camx)
+        LD   (hr_cx),A
+        LD   B,A                ; the camera's offset inside a square,
+        LD   A,(hr_row + 4 * HR_TOP)   ; scaled to the first row drawn
+        LD   C,A
+        CALL qsmul8
+        LD   (hr_phi),DE
+        LD   IX,hr_row + 4 * HR_TOP
+        LD   A,(hr_back)
+        EXX
+        LD   H,A
+        LD   L,0
+        LD   DE,(HR_TOP + 1) * 128
+        ADD  HL,DE              ; one past the last byte of the first row
+        LD   DE,128
+        LD   B,192 - HR_TOP
+        EXX
+hr_row1:
+        BIT  7,(IX+3)           ; a wider square here than on the row
+        JR   Z,hr_r2            ; above, so the offset scales up with it
+        LD   HL,(hr_phi)
+        LD   A,(hr_cx)
+        LD   C,A
+        LD   B,0
+        ADD  HL,BC
+        LD   (hr_phi),HL
+hr_r2:
+        LD   A,(hr_phi+1)
+        LD   C,A                ; C = phi, the offset in whole pixels
+        LD   A,(IX+0)
+        LD   (hr_pa+1),A        ; p goes into both boundary steps
+        LD   (hr_pb+1),A
+        LD   B,A                ; B = p
+        LD   A,(IX+2)           ; is there a boundary the camera's own
+        ADD  A,C                ; offset has brought onto the screen?
+        CP   B
+        JR   C,hr_r3
+        LD   A,(IX+1)           ; yes: one square further out
+        SUB  C
+        ADD  A,B
+        LD   E,A
+        LD   A,(IX+3)
+        INC  A
+        JR   hr_r4
+hr_r3:
+        LD   A,(IX+1)           ; no: the rightmost boundary as it is
+        SUB  C
+        LD   E,A
+        LD   A,(IX+3)
+hr_r4:
+        AND  1                  ; and which colour the right edge is
+        LD   D,64               ; nothing pushed yet
+        EXX
+        LD   SP,HL              ; the runs fill rightwards to leftwards
+        ADD  HL,DE
+        EXX
+        LD   BC,4
+        ADD  IX,BC
+        JP   NZ,hr_c2
+        JP   hr_c1
+
+;------------------------------------------------------------------
+; A square of colour 1, then the PUSH that straddles its boundary
+;------------------------------------------------------------------
+
+hr_c1:
+        LD   A,E                ; which PUSH the boundary falls in
+        RRCA
+        RRCA
+        AND  0x3F
+        LD   L,A                ; and it is where the next one starts from
+        LD   A,65               ; so this many whole PUSHes before it,
+        SUB  D                  ; entered that far from the run's end
+        LD   D,L
+        ADD  A,L
+        LD   BC,HR_C1
+        LD   H,hr_run1 / 256
+        LD   L,A
+        JP   (HL)
+
+hr_c2:
+        LD   A,E
+        RRCA
+        RRCA
+        AND  0x3F
+        LD   L,A
+        LD   A,D
+        SUB  L
+        NEG
+        ADD  A,65
+        LD   (hr_j2+1),A
+        LD   D,L
+        LD   BC,HR_C2
+hr_j2:
+        JP   hr_run2
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+hr_back:        DEFB HR_BUF0
+hr_front:       DEFB HR_BUF1
+hr_camx:        DEFW 0
+hr_camz:        DEFW 0
+hr_cx:          DEFS 1
+hr_phi:         DEFS 2
+hr_sp:          DEFS 2
+
+        ALIGN 256
+hr_par:         DEFS 192
+
+;------------------------------------------------------------------
+; The three runs. Each is 64 PUSHes entered as many from the end as
+; the square is wide, falling out of the bottom into what comes next -
+; the boundary PUSH for the two colours, and the row loop for the last
+; square of a scanline.
+;------------------------------------------------------------------
+
+        ALIGN 256
+hr_run1:
+        DEFS 64,0xC5
+hr_m1:
+        LD   A,E                ; the pair with the boundary in it
+        AND  3
+        ADD  A,A
+        LD   L,A
+        LD   H,hr_mx / 256
+        LD   C,(HL)
+        INC  L
+        LD   B,(HL)
+        PUSH BC
+        LD   A,E
+hr_pa:
+        SUB  0                  ; patched: a square's width in pixels
+        JR   C,hr_fin2
+        LD   E,A
+        JP   hr_c2
+
+hr_fin2:
+        LD   A,64               ; the rest of the line is colour 2
+        SUB  D
+        LD   BC,HR_C2
+        LD   H,hr_run3 / 256
+        LD   L,A
+        JP   (HL)
+
+        ALIGN 256
+hr_run2:
+        DEFS 64,0xC5
+hr_m2:
+        LD   A,E
+        AND  3
+        ADD  A,A
+        ADD  A,8                ; the other way round
+        LD   L,A
+        LD   H,hr_mx / 256
+        LD   C,(HL)
+        INC  L
+        LD   B,(HL)
+        PUSH BC
+        LD   A,E
+hr_pb:
+        SUB  0
+        JR   C,hr_fin1
+        LD   E,A
+        JP   hr_c1
+
+hr_fin1:
+        LD   A,64
+        SUB  D
+        LD   BC,HR_C1
+        LD   H,hr_run3 / 256
+        LD   L,A
+        JP   (HL)
+
+        ALIGN 256
+hr_run3:
+        DEFS 64,0xC5
+hr_next:
+        EXX
+        DEC  B
+        EXX
+        JP   NZ,hr_row1
+        LD   SP,(hr_sp)
+        EI
+        RET
