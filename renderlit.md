@@ -111,8 +111,11 @@ through renderlit still matches its model byte for byte. What did it:
    30 T-states a face - is now two walked pointers.
 
 What it bought, at the demos that use it: prism 493,506 → 457,869 T-states
-a frame, prismpre 245,608 → 210,693 (24.4 Hz → **28.5**), cubes 449,675 →
-419,478.
+a frame, prismpre 245,608 → 210,693 (24.4 Hz → 28.5), cubes 449,675 →
+419,478. Both prisms then went further by skipping `rndl_setface` and
+`rndl_six` altogether and calling `rndl_quad` for the faces they actually
+draw — 446,602 and 204,625 (**29.3 Hz**). `rndl_six` is still there for
+`cubes` and `democube`, which want the whole six-face pass.
 
 **What is left is the span setup**, ~160 T-states of it a scanline against
 17.5 a byte of actual filling, and the byte addresses and end masks inside

@@ -1,7 +1,7 @@
 # prism.z80s — design notes
 
 A lit extruded logo, cut into convex quads and drawn with `renderlit.z80s`'s
-own rasteriser. **457,869 T-states a frame, 13.1 Hz**, verified byte-for-byte
+own rasteriser. **446,602 T-states a frame, 13.4 Hz**, verified byte-for-byte
 against `tests/prism.py` over 256 frames.
 
 > **The shape is provisional.** It is a serif sigma of 45° angles and a
@@ -65,18 +65,21 @@ vertices are signed bytes, which caps a coordinate at 127 independently.
 
 | | T-states | |
 |---|---|---|
-| `pr_draw` | 208,313 | 46% — faces and fill, seven pieces |
-| `pr_proj` | 83,969 | 18% — 56 corners projected, and seven screen boxes |
-| `pr_light` | 73,704 | 16% — two transposed products, then 18 normals |
+| `pr_draw` | 197,046 | 44% — faces and fill, seven pieces |
+| `pr_proj` | 83,969 | 19% — 56 corners projected, and seven screen boxes |
+| `pr_light` | 73,704 | 17% — two transposed products, then 18 normals |
 | `pr_order` | 33,161 | 7% — 21 separating planes, then a topological sort |
 | `pr_tables` | 27,649 | 6% |
 | `rndl_erase` | 24,022 | 5% — one box for the whole logo |
 | `demo_spin` | 6,628 | 1% |
 | `pr_box`, `rndl_flip` | 273 | — |
-| **`pr_frame`** | **min 368,966, mean 457,869, max 525,186** | 13.1 Hz |
+| **`pr_frame`** | **min 357,539, mean 446,602, max 513,944** | 13.4 Hz |
 
-`pr_draw` came down from 243,950 when renderlit's rasteriser was gone over
-a second time — see `renderlit.md`.
+`pr_draw` came down from 243,950: renderlit's rasteriser was gone over a
+second time (`renderlit.md`), and `pr_one` now works out each visible
+face's colour itself and calls `rndl_quad` straight away. Going through
+`rndl_setface` and then `rndl_six` meant writing two bytes for all six
+faces and then walking all six again, for the two or three that get drawn.
 
 **Ordering the pieces properly cost 3.5% of the frame.** The centroid
 sort was 18,835 T-states and wrong; the separating planes are 33,161 and

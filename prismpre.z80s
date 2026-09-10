@@ -38,7 +38,32 @@ pp_init:
         CALL rndl_init
         XOR  A
         LD   (pp_f),A
-        RET
+
+        LD   HL,pp_ctab         ; level and ramp -> the colour byte, in
+        LD   C,0                ; both nibbles, for both ramps
+pp_it0:
+        LD   B,16
+        LD   E,0
+pp_it1:
+        LD   A,E
+        AND  7
+        ADD  A,C
+        AND  15
+        LD   D,A
+        RLCA
+        RLCA
+        RLCA
+        RLCA
+        OR   D
+        LD   (HL),A
+        INC  HL
+        INC  E
+        DJNZ pp_it1
+        LD   A,C
+        OR   A
+        RET  NZ
+        LD   C,8
+        JR   pp_it0
 
 ;------------------------------------------------------------------
 ; pp_frame - one frame, read rather than worked out
@@ -117,13 +142,16 @@ pp_one:
         ADD  HL,DE
         LD   (rndl_pts),HL
 
-        LD   A,(pp_pi)          ; which ramp it uses
+        LD   A,(pp_pi)          ; which ramp it wears, as a table half
         LD   L,A
         LD   H,0
         LD   DE,pp_base
         ADD  HL,DE
         LD   A,(HL)
-        LD   (pp_b),A
+        AND  8
+        ADD  A,A                ; 0 or 16
+        ADD  A,pp_ctab & 0xFF   ; the table is aligned, so this is the
+        LD   (pp_boff),A        ; whole address bar its page
 
         LD   A,(pp_pi)          ; three bytes of face nibble a piece
         LD   L,A
@@ -136,57 +164,58 @@ pp_one:
         ADD  HL,DE
         LD   DE,PP_NP + 4       ; past the order and the box
         ADD  HL,DE
+        LD   (pp_np),HL
 
-        LD   DE,rndl_vis
-        LD   IX,rndl_fcol
-        LD   B,3
+        LD   IX,rndl_faces      ; renderlit's own face table, walked
+        LD   A,3
+        LD   (pp_k),A
 pp_on1:
+        LD   HL,(pp_np)
         LD   A,(HL)
-        PUSH AF
-        AND  0x0F
-        CALL pp_face
-        POP  AF
-        RRCA
-        RRCA
-        RRCA
-        RRCA
-        AND  0x0F
-        CALL pp_face
         INC  HL
-        DJNZ pp_on1
-        JP   rndl_six
+        LD   (pp_np),HL
+        LD   (pp_n),A
+        AND  0x0F
+        CALL pp_face
+        LD   A,(pp_n)
+        RRCA
+        RRCA
+        RRCA
+        RRCA
+        AND  0x0F
+        CALL pp_face
+        LD   A,(pp_k)
+        DEC  A
+        LD   (pp_k),A
+        JR   NZ,pp_on1
+        RET
 
 ;------------------------------------------------------------------
-; pp_face - one nibble into renderlit's two per-face bytes
+; pp_face - one face's nibble, drawn or not
 ;
-; Entry : A = level, bit 3 set if the face is turned away
-;         DE -> its rndl_vis byte, IX -> its rndl_fcol byte
-; Exit  : both advanced. B and HL are the caller's loop, and stay put
+; The nibble is the ramp level with bit 3 set when the face is turned
+; away, and pp_ctab turns level and ramp into the colour byte
+; renderlit wants, in both nibbles, in one read. So a face that is not
+; drawn costs a bit test and an index register bump, and one that is
+; goes straight into rndl_quad - no rndl_vis or rndl_fcol to write and
+; nothing to walk them again afterwards.
+;
+; Entry : A = the nibble, IX -> the face's four corners
 ;------------------------------------------------------------------
 
 pp_face:
-        LD   C,A
-        AND  8
-        LD   A,0                ; turned away
-        JR   NZ,pp_fa1
-        DEC  A                  ; or 0xFF, which is what rndl_six wants
+        BIT  3,A
+        JR   NZ,pp_fa1          ; turned away
+        LD   HL,pp_boff
+        ADD  A,(HL)
+        LD   L,A
+        LD   H,pp_ctab / 256
+        LD   A,(HL)
+        LD   (rndl_col),A
+        CALL rndl_quad
 pp_fa1:
-        LD   (DE),A
-        INC  DE
-        LD   A,C
-        AND  7                  ; the level, and the piece's ramp start
-        LD   C,A
-        LD   A,(pp_b)
-        ADD  A,C
-        AND  15
-        LD   C,A
-        RLCA
-        RLCA
-        RLCA
-        RLCA
-        OR   C                  ; the colour in both nibbles
-        LD   (IX+0),A
-        INC  IX
+        LD   DE,4
+        ADD  IX,DE
         RET
 
 ;------------------------------------------------------------------
@@ -198,5 +227,12 @@ pp_rp:          DEFS 2      ; this frame's record
 pp_pp:          DEFS 2      ; and its points
 pp_pi:          DEFS 1
 pp_b:           DEFS 1
+pp_boff:        DEFS 1
+pp_np:          DEFS 2
+pp_n:           DEFS 1
+pp_k:           DEFS 1
+
+        ALIGN 32
+pp_ctab:        DEFS 32     ; the two ramps, built by pp_init
 
 PP_SIZE:        EQU $ - pp_init

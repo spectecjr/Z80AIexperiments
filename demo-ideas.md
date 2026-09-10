@@ -224,14 +224,14 @@ Same as the existing room kind of implementation, but now it actually renders a 
 
 ### 6. Lit 3D Convex Shapes  — **BUILT, on a provisional shape**
 
-`prism.z80s`, 457,869 T-states a frame, 13.1 Hz. An extruded quad has
+`prism.z80s`, 446,602 T-states a frame, 13.4 Hz. An extruded quad has
 exactly a cube's shape - eight vertices, six quad faces - so a logo cut into
 convex quads is a handful of cubes that are not cubes, and renderlit draws
 them unchanged. The sigma and the triangle are built from the description
 below rather than from the artwork; swapping the shape is a data change.
 See `prism.md`.
 
-**Precomputed, it runs at 28.5 Hz.** `prismpre.z80s`, 210,693 T-states a
+**Precomputed, it runs at 29.3 Hz.** `prismpre.z80s`, 204,625 T-states a
 frame: the spin, the multiply tables, the 56 projected vertices, the 18
 normals' shading and the back-to-front sort are all functions of the frame
 number alone, so they go into a 144-byte-a-frame table and the frame becomes

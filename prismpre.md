@@ -1,7 +1,7 @@
 # prismpre.z80s — design notes
 
-`prism.z80s` with the whole frame precomputed. **210,693 T-states a frame,
-28.5 Hz** — against prism's 457,869 and 13.1 Hz — and the frames are the
+`prism.z80s` with the whole frame precomputed. **204,625 T-states a frame,
+29.3 Hz** — against prism's 446,602 and 13.4 Hz — and the frames are the
 same frames: verified byte-for-byte both against `tests/prism.py`'s model
 and against `prism.z80s` itself, run side by side at the same turn rates,
 over two full times round the loop.
@@ -24,7 +24,16 @@ Everything in a prism frame that depends on nothing but the frame number:
 | the rest | ~11,700 | the ramp lookup in `rndl_setface`, and the frame's own box |
 | **removed** | **~248,000** | 50% of the frame |
 
-What is left is `rndl_erase` (22,766) and renderlit's span fill (187,926).
+What is left is `rndl_erase` (22,766) and the drawing (181,858).
+
+**The lighting is not worked out here at all** - each face's shade is a
+nibble in the table. What used to be live was unpacking that nibble into
+renderlit's two per-face bytes and then letting `rndl_six` walk all six
+faces again to read them back: 42 faces of bookkeeping a frame for the
+thirteen that get drawn, and measured at about 18,700 T-states. Now
+`pp_ctab` - 32 bytes, built by `pp_init` - turns a level and a ramp into
+the colour byte in one read, and `pp_one` calls `rndl_quad` itself. A face
+that is turned away costs a bit test and an index bump.
 There is no multiply anywhere in the frame, and `transform3d.z80s` and
 `democube.z80s` are not needed at all — the harness keeps four of their
 labels alive (`demo_screen`, `t3d_m`, `t3d_tx/ty/tz`, 31 bytes) because
@@ -85,8 +94,8 @@ Two more:
 The fill is 89% of what is left, so this is a rasteriser benchmark — and
 after renderlit's rasteriser was gone over a second time (`renderlit.md`)
 it **clears 25 Hz with room to spare**: 240,000 is the budget and the mean
-frame is 210,693, the minimum 127,126 and the maximum 261,493. Only the
-broadside poses miss it, and the worst is 22.9 Hz. Fewer, larger pieces would help everywhere;
+frame is 204,625, the minimum 121,115 and the maximum 255,391. Only the
+broadside poses miss it, and the worst is 23.5 Hz. Fewer, larger pieces would help everywhere;
 so would a span fill that pushes constant runs the way `chequer3` does.
 
 ## Invariants

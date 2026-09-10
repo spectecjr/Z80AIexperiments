@@ -725,17 +725,12 @@ pr_dr1:
 
 pr_one:                         ; the piece whose index is A
         LD   (pr_pi),A
-        LD   L,A                ; its ramp, into all six of renderlit's
-        LD   H,0
+        LD   L,A                ; where its ramp starts, kept for the
+        LD   H,0                ; six faces to share
         LD   DE,pr_base
         ADD  HL,DE
         LD   A,(HL)
-        LD   HL,rndl_base
-        LD   B,6
-pr_on1:
-        LD   (HL),A
-        INC  HL
-        DJNZ pr_on1
+        LD   (pr_pb),A
 
         LD   A,(pr_pi)          ; pr_proj put its corners here already
         CALL pr_pp
@@ -754,6 +749,7 @@ pr_on1:
         LD   DE,pr_face
         ADD  HL,DE
         LD   (pr_fp),HL
+        LD   IX,rndl_faces      ; walked alongside, four bytes a face
         XOR  A
         LD   (pr_fi),A
 pr_on2:
@@ -793,17 +789,39 @@ pr_on2:
         JR   Z,pr_on8           ; outside of anything
         LD   C,0
 pr_on8:
-        LD   A,(pr_fi)
-        LD   B,A
-        LD   A,(pr_fsh)
-        CALL rndl_setface       ; renderlit's own colour and visibility
+        INC  C                  ; 0xFF -> 0, so zero means draw it
+        JR   NZ,pr_on9
+
+; The face is towards us, so work its colour out and hand it straight
+; to renderlit's quad. Going through rndl_setface and then rndl_six
+; meant writing two bytes a face and walking all six of them again
+; afterwards, for the two or three that get drawn.
+
+        LD   A,(pr_fsh)         ; shade -> level, off the ramp
+        XOR  0x80
+        LD   L,A
+        LD   H,rndl_ramp / 256
+        LD   A,(HL)
+        LD   HL,pr_pb
+        ADD  A,(HL)             ; where this piece's ramp starts
+        AND  15
+        LD   L,A
+        RLCA
+        RLCA
+        RLCA
+        RLCA
+        OR   L                  ; the colour in both nibbles
+        LD   (rndl_col),A
+        CALL rndl_quad
+pr_on9:
+        LD   DE,4
+        ADD  IX,DE
         LD   A,(pr_fi)
         INC  A
         LD   (pr_fi),A
         CP   6
         JP   C,pr_on2
-
-        JP   rndl_six           ; and renderlit draws them
+        RET
 
 ;------------------------------------------------------------------
 ; pr_box - one box for the whole logo, into this buffer's record
@@ -853,6 +871,7 @@ pr_pi:          DEFS 1
 pr_fp:          DEFS 2
 pr_fi:          DEFS 1
 pr_fn:          DEFS 1
+pr_pb:          DEFS 1
 pr_off:         DEFS 2
 pr_fsh:         DEFS 1
 pr_ord:         DEFS PR_NP
