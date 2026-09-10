@@ -62,7 +62,11 @@
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
 
-DEMO_S:         EQU 40         ; cube half-side, world units
+    IFNDEF DEMO_HALF            ; cube half-side, world units. A file
+DEMO_S:         EQU 40      ; driving this one - cubes.z80s does -
+    ELSE                        ; DEFINEs DEMO_HALF before including it,
+DEMO_S:         EQU DEMO_HALF   ; because the half side sets how far a
+    ENDIF                       ; centre may go before 16 bits overflow
 DEMO_XLIM:      EQU 11520      ; the box, inset by the bounding sphere
 DEMO_YLIM:      EQU 6400       ; radius of 70: |x|<=90, |y|<=50,
 DEMO_ZMIN:      EQU 19200      ; 150 <= z <= 170
@@ -516,14 +520,14 @@ dsm_neg:
 ;------------------------------------------------------------------
 
 demo_verts:                 ; the eight corners, signed bytes
-        DEFB 40,40,40
-        DEFB 40,40,216
-        DEFB 40,216,40
-        DEFB 40,216,216
-        DEFB 216,40,40
-        DEFB 216,40,216
-        DEFB 216,216,40
-        DEFB 216,216,216
+        DEFB DEMO_S,DEMO_S,DEMO_S
+        DEFB DEMO_S,DEMO_S,-DEMO_S
+        DEFB DEMO_S,-DEMO_S,DEMO_S
+        DEFB DEMO_S,-DEMO_S,-DEMO_S
+        DEFB -DEMO_S,DEMO_S,DEMO_S
+        DEFB -DEMO_S,DEMO_S,-DEMO_S
+        DEFB -DEMO_S,-DEMO_S,DEMO_S
+        DEFB -DEMO_S,-DEMO_S,-DEMO_S
 
 demo_dax:       DEFB 3      ; how fast it spins, in 1/256 turns a frame
 demo_day:       DEFB 5

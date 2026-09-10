@@ -428,6 +428,34 @@ def chequer3(outdir, seconds=8):
     report(p, size, n, durs, secs, got, bad)
 
 
+CUBES_PAL = ([(36 * i, 13 * i, 9 * i) for i in range(8)]
+             + [(9 * i, 15 * i, 36 * i) for i in range(8)])
+
+
+def cubes(outdir, seconds=12):
+    """cubes at its measured rate: 444,593 T-states a frame, 13.5 Hz.
+
+    Four lit cubes bouncing in a room, with gravity, off the walls and
+    off each other. Compare demo/cube.gif, which is one of them with
+    no room and no gravity.
+    """
+    b = Bench("harness_cubes.asm", org=0)
+    s = b.syms
+    b.call_regs(s["cb_init"])
+    n = int(seconds * 13.5)
+    frames, ts = [], []
+    for t in range(n):
+        into = b.peek(s["rndl_back"], 1)[0]
+        tt, _ = b.call_regs(s["cb_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    p = "%s/cubes.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, frames, CUBES_PAL, durs)
+    got, bad, secs = check_gif(p, frames, CUBES_PAL, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 ROTO_PAL = ([(0, 0, 0)]
             + [(30 + 30 * i, 10 + 12 * i, 60 + 26 * i) for i in range(7)]
             + [(40 + 28 * i, 30 + 26 * i, 20 + 10 * i) for i in range(8)])
@@ -548,6 +576,7 @@ def chequer2(outdir, seconds=8):
 if __name__ == "__main__":
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
     cube(d)
+    cubes(d)
     room(d)
     portal(d)
     maze(d)

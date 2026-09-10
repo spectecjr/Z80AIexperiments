@@ -1,0 +1,969 @@
+;------------------------------------------------------------------
+; cubes.z80s - four lit cubes bouncing in a room you can see
+;
+;   cb_init    blank both buffers, paint the room's front face, place
+;              the cubes
+;   cb_frame   erase, move, draw the room, draw the cubes, flip
+;
+; democube.z80s moves one cube around a box and renderlit.z80s draws
+; it. This does the same for four of them, with gravity, with the
+; cubes bouncing off each other as well as off the walls, and with the
+; room drawn as a wire frame so that the box they are in is something
+; you can see rather than something you have to believe.
+;
+; THE PHYSICS IS INTEGERS AND NO MULTIPLICATION ANYWHERE:
+;
+;   v.y -= G                    gravity, one add a frame
+;   p   += (v + f) >> 4         democube's step, the remainder kept
+;   wall:  p to the wall, and v = -v if it was heading out
+;   cube:  swap the two v's along the axis they overlap least in
+;
+; All of it elastic, so it runs for ever without either dying down or
+; running away - tests/cubes.py checks that over a million frames. The
+; wall holds the position as well as turning it round, because a cube
+; squeezed between a wall and another cube would otherwise burrow out
+; of the room a step a frame for as long as the squeeze lasted.
+;
+; THE ROOM. Its front face is the viewport, so the frame around the
+; viewport is painted once and never touched again: the room's own
+; walls keep the cubes off it. The other eight edges are drawn every
+; frame, because a cube goes in front of them and the erase takes them
+; with it when it goes.
+;
+; WHAT IT COSTS. Four cubes is four of everything renderlit does once,
+; and the erase is four boxes rather than one - see cubes.md.
+;
+; Needs democube.z80s (the spin, the step and the multiply tables),
+; transform3d.z80s and renderlit.z80s.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+CB_ST:          EQU 24          ; bytes of state a cube gets
+CB_DA:          EQU 0           ; dax,day,daz,ax,ay,az, as democube keeps them
+CB_X:           EQU 6           ; px(2) vx(2) fx(1), and the same for y and z
+CB_Y:           EQU 11
+CB_Z:           EQU 16
+
+;------------------------------------------------------------------
+; cb_init - both buffers blank, the room painted, the cubes placed
+;------------------------------------------------------------------
+
+cb_init:
+        CALL rndl_init
+        LD   HL,cb_start        ; the cubes' opening state
+        LD   DE,cb_state
+        LD   BC,CB_N * CB_ST
+        LDIR
+        LD   HL,cb_rec          ; nothing drawn yet, so nothing to erase
+        LD   (HL),0
+        LD   DE,cb_rec + 1
+        LD   BC,8 * CB_N - 1
+        LDIR
+        LD   A,(rndl_back)      ; the room's front face, into both buffers
+        CALL cb_border
+        LD   A,(rndl_front)
+        JP   cb_border
+
+;------------------------------------------------------------------
+; cb_border - the frame around the viewport, which is the room's front
+; face seen end on. A pixel at a time, and run twice in a lifetime.
+;------------------------------------------------------------------
+
+cb_border:
+        LD   (cb_bpg),A
+        LD   C,0
+cb_bo1:
+        LD   A,C                ; HL -> this row
+        SRL  A
+        LD   B,A
+        LD   A,(cb_bpg)
+        ADD  A,B
+        LD   H,A
+        LD   A,C
+        AND  1
+        RRCA
+        LD   L,A
+        LD   B,128
+        LD   E,0
+cb_bo2:
+        PUSH BC
+        LD   D,(HL)
+        LD   A,E                ; the left hand pixel of this byte
+        ADD  A,A
+        CALL cb_inb
+        JR   NC,cb_bo3
+        LD   A,D
+        AND  0x0F
+        OR   CB_ROOM * 16
+        LD   D,A
+cb_bo3:
+        LD   A,E                ; and the right hand one
+        ADD  A,A
+        INC  A
+        CALL cb_inb
+        JR   NC,cb_bo4
+        LD   A,D
+        AND  0xF0
+        OR   CB_ROOM
+        LD   D,A
+cb_bo4:
+        LD   (HL),D
+        INC  HL
+        INC  E
+        POP  BC
+        DJNZ cb_bo2
+        INC  C
+        LD   A,C
+        CP   192
+        JR   C,cb_bo1
+        RET
+
+cb_inb:                         ; A = x, C = y -> carry if it is border
+        CP   CB_LX + 1
+        RET  C
+        CP   CB_RX
+        JR   C,cb_in1
+        SCF
+        RET
+cb_in1:
+        LD   A,C
+        CP   CB_TOP + 1
+        RET  C
+        CP   CB_BOT
+        CCF
+        RET
+
+;------------------------------------------------------------------
+; cb_frame - one frame
+;------------------------------------------------------------------
+
+cb_frame:
+        CALL cb_erase           ; the boxes this buffer held two frames ago
+        CALL cb_phys            ; gravity, walls, each other
+        CALL cb_room            ; the eight edges a cube can cover
+        CALL cb_order           ; farthest first, so the near ones win
+        CALL cb_draw
+        JP   rndl_flip
+
+;------------------------------------------------------------------
+; cb_erase - blank each cube's own box, not the union of them
+;------------------------------------------------------------------
+
+cb_erase:
+        CALL cb_recs
+        LD   B,CB_N
+cb_er1:
+        PUSH BC
+        PUSH HL
+        CALL rndl_erasebox
+        POP  HL
+        LD   DE,4
+        ADD  HL,DE
+        POP  BC
+        DJNZ cb_er1
+        RET
+
+cb_recs:                        ; HL -> this buffer's four dirty records
+        LD   A,(rndl_back)
+        CP   RNDL_BUF0
+        LD   HL,cb_rec
+        RET  Z
+        LD   HL,cb_rec + 4 * CB_N
+        RET
+
+;------------------------------------------------------------------
+; cb_phys - every cube moves, then every pair meets
+;------------------------------------------------------------------
+
+cb_phys:
+        LD   IX,cb_state
+        LD   B,CB_N
+cb_ph1:
+        PUSH BC
+        CALL cb_move
+        LD   BC,CB_ST
+        ADD  IX,BC
+        POP  BC
+        DJNZ cb_ph1
+        ; and now the pairs
+        LD   IX,cb_state
+        LD   C,0
+cb_ph2:
+        LD   A,C
+        INC  A
+        LD   B,A
+cb_ph3:
+        LD   A,B
+        CP   CB_N
+        JR   NC,cb_ph4
+        PUSH BC
+        CALL cb_pair            ; IX against cube B
+        POP  BC
+        INC  B
+        JR   cb_ph3
+cb_ph4:
+        LD   DE,CB_ST
+        ADD  IX,DE
+        INC  C
+        LD   A,C
+        CP   CB_N - 1
+        JR   C,cb_ph2
+        RET
+
+;------------------------------------------------------------------
+; cb_move - gravity, the step, and the walls, for the cube at IX
+;------------------------------------------------------------------
+
+cb_move:
+        LD   L,(IX+CB_Y+2)      ; v.y -= G
+        LD   H,(IX+CB_Y+3)
+        LD   DE,-CB_G
+        ADD  HL,DE
+        LD   (IX+CB_Y+2),L
+        LD   (IX+CB_Y+3),H
+        PUSH IX
+        POP  HL
+        LD   DE,CB_X
+        ADD  HL,DE              ; HL -> the x block
+        LD   DE,cb_lim
+        LD   B,3
+cb_mv1:
+        PUSH BC
+        PUSH HL
+        PUSH DE
+        CALL cb_axis
+        POP  DE
+        POP  HL
+        LD   BC,5
+        ADD  HL,BC              ; on to the next axis and its limits
+        EX   DE,HL
+        LD   BC,4
+        ADD  HL,BC
+        EX   DE,HL
+        POP  BC
+        DJNZ cb_mv1
+        RET
+
+;------------------------------------------------------------------
+; cb_axis - one axis: p += (v + f) >> 4, then the two walls
+;
+; Entry : HL -> p(2) v(2) f(1), DE -> hi(2) lo(2)
+;------------------------------------------------------------------
+
+cb_axis:
+        LD   (cb_bp),HL
+        LD   (cb_lp),DE
+        LD   D,H
+        LD   E,L                ; DE -> p
+        INC  HL
+        INC  HL                 ; HL -> v
+        LD   B,H
+        LD   C,L
+        INC  BC
+        INC  BC                 ; BC -> f
+        CALL demo_step          ; democube's, remainder and all
+
+        LD   HL,(cb_bp)
+        LD   C,(HL)
+        INC  HL
+        LD   B,(HL)             ; BC = p
+        LD   HL,(cb_lp)
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)             ; DE = the high wall
+        LD   H,B
+        LD   L,C
+        OR   A
+        SBC  HL,DE
+        JP   M,cb_axlo
+        CALL cb_axset           ; p = hi
+        BIT  7,D                ; and turn it round if it was heading out
+        RET  NZ
+        JP   cb_axneg
+cb_axlo:
+        LD   HL,(cb_lp)
+        INC  HL
+        INC  HL
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)             ; DE = the low wall
+        LD   H,B
+        LD   L,C
+        OR   A
+        SBC  HL,DE
+        RET  P
+        CALL cb_axset           ; p = lo
+        BIT  7,D
+        RET  Z
+cb_axneg:                       ; DE = v, (cb_bp) -> p
+        LD   HL,0
+        OR   A
+        SBC  HL,DE
+        EX   DE,HL
+        LD   HL,(cb_bp)
+        INC  HL
+        INC  HL
+        LD   (HL),E
+        INC  HL
+        LD   (HL),D
+        RET
+
+cb_axset:                       ; p = DE, then DE = v
+        LD   HL,(cb_bp)
+        LD   (HL),E
+        INC  HL
+        LD   (HL),D
+        INC  HL
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        RET
+
+  ;------------------------------------------------------------------
+; cb_pair - the cube at IX against cube B
+;
+; They overlap when they overlap on all three axes, and the axis they
+; overlap least in is the one they met on. Swapping the two velocity
+; components along it is what two equal masses do in a head on hit -
+; no multiplication, and no energy either made or lost.
+;
+; The test is on the cubes' unrotated extent, not on their bounding
+; spheres: four spheres do not fit in this room with any freedom, and
+; a corner that dips into a neighbour for a frame is not what anybody
+; is looking at.
+;------------------------------------------------------------------
+
+cb_pair:
+        LD   HL,cb_state        ; IY -> the other cube
+        LD   DE,CB_ST
+        INC  B
+cb_pr0:
+        DEC  B
+        JR   Z,cb_pr0d
+        ADD  HL,DE
+        JR   cb_pr0
+cb_pr0d:
+        PUSH HL
+        POP  IY
+
+        LD   HL,cb_dov          ; d and the overlap, an axis at a time
+        LD   (cb_op),HL
+        LD   C,CB_X
+        LD   B,3
+cb_pr1:
+        PUSH BC
+        LD   A,C
+        CALL cb_getd            ; HL = mine - theirs on this axis
+        LD   DE,(cb_op)
+        LD   A,L
+        LD   (DE),A
+        INC  DE
+        LD   A,H
+        LD   (DE),A
+        INC  DE
+        BIT  7,H                ; |d|
+        JR   Z,cb_pr2
+        PUSH DE
+        EX   DE,HL
+        LD   HL,0
+        OR   A
+        SBC  HL,DE
+        POP  DE
+cb_pr2:
+        PUSH DE
+        LD   DE,CB_D            ; how far they overlap, which may be
+        EX   DE,HL              ; negative, meaning not at all
+        OR   A
+        SBC  HL,DE
+        POP  DE
+        LD   A,L
+        LD   (DE),A
+        INC  DE
+        LD   A,H
+        LD   (DE),A
+        INC  DE
+        LD   (cb_op),DE
+        POP  BC
+        LD   A,C
+        ADD  A,5
+        LD   C,A
+        DJNZ cb_pr1
+
+        LD   HL,cb_dov + 2      ; three overlaps, all of them wanted
+        LD   B,3
+cb_pr3:
+        LD   A,(HL)
+        INC  HL
+        OR   (HL)
+        RET  Z
+        LD   A,(HL)
+        AND  0x80
+        RET  NZ
+        LD   DE,3
+        ADD  HL,DE
+        DJNZ cb_pr3
+
+        LD   HL,0x7FFF          ; and the least of them is the axis
+        LD   (cb_best),HL
+        LD   HL,cb_dov + 2
+        LD   B,3
+cb_pr4:
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        DEC  HL
+        PUSH HL
+        LD   HL,(cb_best)
+        OR   A
+        SBC  HL,DE              ; best - this
+        POP  HL
+        JP   M,cb_pr5
+        JR   Z,cb_pr5
+        LD   (cb_best),DE
+        LD   A,3
+        SUB  B
+        LD   (cb_ax),A
+cb_pr5:
+        LD   DE,4
+        ADD  HL,DE
+        DJNZ cb_pr4
+
+        LD   A,(cb_ax)          ; that axis's d, and where it lives in
+        LD   L,A                ; a state block
+        LD   H,0
+        ADD  HL,HL
+        ADD  HL,HL
+        LD   DE,cb_dov
+        ADD  HL,DE
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        LD   (cb_d),DE
+        LD   A,(cb_ax)
+        LD   B,A
+        ADD  A,A
+        ADD  A,A
+        ADD  A,B
+        ADD  A,CB_X + 2         ; the velocity, not the position
+        LD   C,A
+
+        LD   E,C                ; HL -> my v, DE -> theirs
+        LD   D,0
+        PUSH IX
+        POP  HL
+        ADD  HL,DE
+        PUSH HL
+        LD   E,C
+        LD   D,0
+        PUSH IY
+        POP  HL
+        ADD  HL,DE
+        EX   DE,HL
+        POP  HL
+        LD   (cb_vp),HL
+        LD   (cb_vq),DE
+
+        LD   C,(HL)             ; rel = mine - theirs
+        INC  HL
+        LD   B,(HL)
+        LD   A,(DE)
+        LD   L,A
+        INC  DE
+        LD   A,(DE)
+        LD   H,A
+        EX   DE,HL
+        LD   H,B
+        LD   L,C
+        OR   A
+        SBC  HL,DE              ; HL = rel, DE = theirs
+
+        LD   A,(cb_d+1)         ; parting already?
+        BIT  7,A
+        JR   NZ,cb_prneg
+        LD   A,(cb_d)
+        OR   0                  ; d > 0 unless d is zero altogether
+        JR   NZ,cb_prpos
+        LD   A,(cb_d+1)
+        OR   A
+        JR   Z,cb_prswap        ; d = 0: they are exactly level
+cb_prpos:
+        BIT  7,H                ; d > 0, so they close only if rel < 0
+        RET  Z
+        JR   cb_prswap
+cb_prneg:
+        LD   A,H                ; d < 0, so they close only if rel > 0
+        OR   L
+        RET  Z
+        BIT  7,H
+        RET  NZ
+
+cb_prswap:
+        LD   HL,(cb_vp)
+        LD   DE,(cb_vq)
+        LD   C,(HL)
+        LD   A,(DE)
+        LD   (HL),A
+        LD   A,C
+        LD   (DE),A
+        INC  HL
+        INC  DE
+        LD   C,(HL)
+        LD   A,(DE)
+        LD   (HL),A
+        LD   A,C
+        LD   (DE),A
+        RET
+
+cb_getd:                        ; A = an axis offset -> HL = mine - theirs
+        LD   E,A
+        LD   D,0
+        PUSH IX
+        POP  HL
+        ADD  HL,DE
+        LD   C,(HL)
+        INC  HL
+        LD   B,(HL)             ; BC = mine
+        PUSH IY
+        POP  HL
+        ADD  HL,DE
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)             ; DE = theirs
+        LD   H,B
+        LD   L,C
+        OR   A
+        SBC  HL,DE
+        RET
+
+;------------------------------------------------------------------
+; cb_room - the eight edges of the room a cube can cover
+;------------------------------------------------------------------
+
+cb_room:
+        LD   HL,cb_edges
+        LD   B,8
+cb_rm1:
+        PUSH BC
+        LD   A,(HL)
+        LD   (cb_x0),A
+        INC  HL
+        LD   A,(HL)
+        LD   (cb_y0),A
+        INC  HL
+        LD   A,(HL)
+        LD   (cb_x1),A
+        INC  HL
+        LD   A,(HL)
+        LD   (cb_y1),A
+        INC  HL
+        PUSH HL
+        CALL cb_line
+        POP  HL
+        POP  BC
+        DJNZ cb_rm1
+        RET
+
+;------------------------------------------------------------------
+; cb_line - Bresenham on the major axis, in the room's colour
+;
+; The edges come out of the table with their major axis increasing, so
+; the fast step is always forwards and the address can be walked
+; rather than worked out: along a row the nibble alternates and the
+; byte moves on every second pixel, and down a column it is 128 bytes
+; a scanline with the nibble standing still. That is what makes this
+; 55 T-states a pixel rather than the 285 it cost when every pixel
+; found its own address.
+;------------------------------------------------------------------
+
+cb_line:
+        LD   A,(cb_x1)          ; dx, which the table says is not negative
+        LD   B,A                ; on an x major edge
+        LD   A,(cb_x0)
+        SUB  B
+        JR   NC,cb_ln1
+        NEG
+cb_ln1:
+        LD   (cb_dx),A
+        LD   A,(cb_y1)
+        LD   B,A
+        LD   A,(cb_y0)
+        SUB  B
+        LD   BC,128             ; and the row step, forwards or back
+        JR   NC,cb_ln2
+        NEG
+        JR   cb_ln3
+cb_ln2:
+        LD   BC,-128
+cb_ln3:
+        LD   (cb_dy),A
+        LD   (cb_rs),BC
+
+        LD   C,A                ; which axis is the major one
+        LD   A,(cb_dx)
+        CP   C
+        JR   C,cb_lnym
+
+        LD   A,(cb_dy)          ; x major: the minor step is y, and the
+        LD   (cb_xe2+1),A       ; row step already knows which way
+        LD   (cb_xo2+1),A
+        LD   A,(cb_dx)
+        LD   (cb_xe4+1),A
+        LD   (cb_xo4+1),A
+        CALL cb_lnset
+        JP   Z,cb_xe
+        JP   cb_xo
+
+cb_lnym:
+        LD   A,(cb_dx)          ; y major: the minor step is x, so it is
+        LD   (cb_yd1+1),A       ; dx that comes off the error and dy that
+        LD   (cb_yd3+1),A       ; goes back on
+        LD   A,(cb_dy)
+        LD   (cb_yd2+1),A
+        LD   (cb_yd4+1),A
+        LD   A,(cb_x1)          ; and which way that step goes
+        LD   C,A
+        LD   A,(cb_x0)
+        CP   C
+        LD   HL,cb_yo           ; leaning right: the next pixel is the
+        LD   (cb_yex+1),HL      ; low nibble of this byte, and the one
+        LD   HL,cb_ynx          ; after that the high nibble of the next
+        LD   (cb_yox+1),HL
+        JR   C,cb_ln4
+        LD   HL,cb_ypv          ; leaning left, so the other way round
+        LD   (cb_yex+1),HL
+        LD   HL,cb_ye
+        LD   (cb_yox+1),HL
+cb_ln4:
+        LD   A,(cb_dy)
+        CALL cb_lnset
+        JP   Z,cb_ye
+        JP   cb_yo
+
+cb_lnset:                       ; A = the major span: sets the error and
+        LD   E,A                ; the count, points HL at the first byte
+        SRL  A                  ; and says which nibble it is
+        LD   D,A
+        INC  E
+        LD   A,(cb_y0)
+        LD   C,A
+        SRL  A
+        LD   L,A
+        LD   A,(rndl_back)
+        ADD  A,L
+        LD   H,A
+        LD   A,C
+        AND  1
+        RRCA
+        LD   L,A
+        LD   A,(cb_x0)
+        SRL  A
+        ADD  A,L
+        LD   L,A
+        LD   BC,(cb_rs)
+        LD   A,(cb_x0)
+        AND  1
+        RET
+
+cb_xe:                          ; along a row, the high nibble
+        LD   A,(HL)
+        AND  0x0F
+        OR   CB_ROOM * 16
+        LD   (HL),A
+        LD   A,D
+cb_xe2:
+        SUB  0
+        LD   D,A
+        JP   P,cb_xe3
+cb_xe4:
+        ADD  A,0
+        LD   D,A
+        ADD  HL,BC
+cb_xe3:
+        DEC  E
+        RET  Z
+cb_xo:                          ; and the low one, in the same byte
+        LD   A,(HL)
+        AND  0xF0
+        OR   CB_ROOM
+        LD   (HL),A
+        LD   A,D
+cb_xo2:
+        SUB  0
+        LD   D,A
+        JP   P,cb_xo3
+cb_xo4:
+        ADD  A,0
+        LD   D,A
+        ADD  HL,BC
+cb_xo3:
+        DEC  E
+        RET  Z
+        INC  HL
+        JP   cb_xe
+
+cb_ye:                          ; down a column, the high nibble
+        LD   A,(HL)
+        AND  0x0F
+        OR   CB_ROOM * 16
+        LD   (HL),A
+        ADD  HL,BC
+        LD   A,D
+cb_yd1:
+        SUB  0
+        LD   D,A
+        JP   P,cb_ye3
+cb_yd2:
+        ADD  A,0
+        LD   D,A
+        DEC  E
+        RET  Z
+cb_yex:
+        JP   cb_yo              ; patched: which way the minor step goes
+cb_ye3:
+        DEC  E
+        RET  Z
+        JP   cb_ye
+
+cb_yo:                          ; and the low one
+        LD   A,(HL)
+        AND  0xF0
+        OR   CB_ROOM
+        LD   (HL),A
+        ADD  HL,BC
+        LD   A,D
+cb_yd3:
+        SUB  0
+        LD   D,A
+        JP   P,cb_yo3
+cb_yd4:
+        ADD  A,0
+        LD   D,A
+        DEC  E
+        RET  Z
+cb_yox:
+        JP   cb_ye              ; patched
+cb_yo3:
+        DEC  E
+        RET  Z
+        JP   cb_yo
+
+cb_ynx:                         ; the minor step, when it crosses a byte
+        INC  HL
+        JP   cb_ye
+cb_ypv:
+        DEC  HL
+        JP   cb_yo
+
+;------------------------------------------------------------------
+; cb_order - the cubes farthest first, so the near ones paint last
+;------------------------------------------------------------------
+
+cb_order:
+        LD   HL,cb_ord          ; start with the order they are stored in
+        LD   B,CB_N
+        XOR  A
+cb_or1:
+        LD   (HL),A
+        INC  HL
+        INC  A
+        DJNZ cb_or1
+        LD   B,CB_N - 1         ; and bubble the far ones to the front
+cb_or2:
+        PUSH BC
+        LD   HL,cb_ord
+        LD   B,CB_N - 1
+cb_or3:
+        PUSH BC
+        PUSH HL
+        LD   A,(HL)
+        INC  HL
+        LD   C,(HL)
+        CALL cb_zcmp            ; z of A against z of C
+        POP  HL
+        JP   P,cb_or4
+        LD   A,(HL)             ; the nearer one is in front: swap
+        INC  HL
+        LD   C,(HL)
+        LD   (HL),A
+        DEC  HL
+        LD   (HL),C
+cb_or4:
+        INC  HL
+        POP  BC
+        DJNZ cb_or3
+        POP  BC
+        DJNZ cb_or2
+        RET
+
+cb_zcmp:                        ; sign of z(A) - z(C), both of them indices
+        PUSH BC
+        CALL cb_zget
+        POP  BC
+        PUSH HL
+        LD   A,C
+        CALL cb_zget
+        POP  DE
+        EX   DE,HL
+        OR   A
+        SBC  HL,DE
+        RET
+
+cb_zget:                        ; A = a cube -> HL = its z
+        LD   H,0
+        LD   L,A
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL              ; times eight
+        LD   D,H
+        LD   E,L
+        ADD  HL,HL              ; and sixteen
+        ADD  HL,DE              ; makes CB_ST, which is twenty four
+        LD   DE,cb_state + CB_Z
+        ADD  HL,DE
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        EX   DE,HL
+        RET
+
+;------------------------------------------------------------------
+; cb_draw - every cube, in that order
+;------------------------------------------------------------------
+
+cb_draw:
+        LD   B,CB_N
+        LD   C,0
+cb_dr1:
+        PUSH BC
+        LD   HL,cb_ord
+        LD   E,C
+        LD   D,0
+        ADD  HL,DE
+        LD   A,(HL)
+        CALL cb_one
+        POP  BC
+        INC  C
+        DJNZ cb_dr1
+        RET
+
+;------------------------------------------------------------------
+; cb_one - spin, transform, light and draw the cube whose index is A
+;
+; democube's spin and multiply tables and renderlit's light and faces,
+; one cube at a time. The state block goes into democube's own six
+; angle bytes and comes back out again, so that its spin serves here
+; unchanged.
+;------------------------------------------------------------------
+
+cb_one:
+        LD   (cb_ci),A
+        LD   H,0
+        LD   L,A
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        LD   D,H
+        LD   E,L
+        ADD  HL,HL
+        ADD  HL,DE
+        LD   DE,cb_state
+        ADD  HL,DE
+        LD   (cb_sp),HL
+
+        LD   DE,demo_dax        ; the angles and their rates
+        LD   BC,6
+        LDIR
+        CALL demo_spin          ; advances them and builds the matrix
+        LD   HL,demo_dax
+        LD   DE,(cb_sp)
+        LD   BC,6
+        LDIR
+        CALL demo_tables
+
+        LD   HL,(cb_sp)         ; the centre is the translation
+        LD   DE,CB_X
+        ADD  HL,DE
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        LD   (t3d_tx),DE
+        LD   DE,CB_Y - CB_X - 1
+        ADD  HL,DE
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        LD   (t3d_ty),DE
+        LD   DE,CB_Z - CB_Y - 1
+        ADD  HL,DE
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        LD   (t3d_tz),DE
+
+        LD   HL,demo_verts      ; democube's corners, which are this
+        LD   DE,cb_pts          ; cube's too - same half size
+        LD   B,8
+        CALL t3d_run
+        LD   HL,cb_pts
+        LD   (rndl_pts),HL
+
+        LD   A,(cb_ci)          ; which pair of ramps this cube wears
+        LD   L,A
+        LD   H,0
+        ADD  HL,HL
+        LD   D,H
+        LD   E,L
+        ADD  HL,HL
+        ADD  HL,DE              ; six bytes a cube
+        LD   DE,cb_pal
+        ADD  HL,DE
+        LD   DE,rndl_base
+        LD   BC,6
+        LDIR
+
+        CALL rndl_light
+        CALL rndl_six
+        CALL rndl_bbox          ; into this buffer's own record, and then
+        CALL rndl_dirty         ; into this cube's, because the erase has
+        PUSH HL                 ; four boxes to do and not one
+        CALL cb_recs
+        LD   A,(cb_ci)
+        ADD  A,A
+        ADD  A,A
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        EX   DE,HL
+        POP  HL
+        LD   BC,4
+        LDIR
+        RET
+
+;------------------------------------------------------------------
+; Workspace and data
+;------------------------------------------------------------------
+
+cb_bpg:         DEFS 1
+cb_bp:          DEFS 2
+cb_lp:          DEFS 2
+cb_op:          DEFS 2
+cb_sp:          DEFS 2
+cb_ci:          DEFS 1
+cb_d:           DEFS 2
+cb_best:        DEFS 2
+cb_ax:          DEFS 1
+cb_vp:          DEFS 2
+cb_vq:          DEFS 2
+cb_dov:         DEFS 12
+cb_x0:          DEFS 1
+cb_y0:          DEFS 1
+cb_x1:          DEFS 1
+cb_y1:          DEFS 1
+cb_dx:          DEFS 1
+cb_dy:          DEFS 1
+cb_rs:          DEFS 2
+cb_ord:         DEFS CB_N
+cb_pts:         DEFS 16
+cb_state:       DEFS CB_N * CB_ST
+cb_rec:         DEFS 8 * CB_N

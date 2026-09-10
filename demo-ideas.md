@@ -230,7 +230,15 @@ with a hole cut out of the middle, entering the space to the left of the sigma. 
 image later. The triangle is red, the sigma is white, and the entire form should be extruded by some
 amount so that it's not flat. The size of the object can be limited to 1/4 of the screen maximum in scale
 
-### 7. Bouncing cubes
+### 7. Bouncing cubes  — **BUILT**
+
+`cubes.z80s`, 444,593 T-states a frame, 13.5 Hz. Four lit cubes with
+gravity, bouncing off the walls and off each other with integer physics and
+no multiplication, in a room drawn as a wire frame. See `cubes.md` - the
+room's far wall is where 16 bits ran out, and the line drawer is worth
+130,000 T-states of the frame.
+
+What follows is the original note.
 
 We can limit the scale of the cubes so that they only take up 1/8th of the screen maximum. Then we
 could render multiple cubes, and have them bounce with simple (integer math, no multiplication) physics

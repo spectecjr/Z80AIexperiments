@@ -166,6 +166,19 @@ rndl_ir2:
 rndl_frame:
         CALL rndl_erase      ; wipe what this buffer held two frames ago
         CALL rndl_light      ; shade and cull all six faces at once
+        CALL rndl_six        ; and draw them
+        CALL rndl_bbox       ; remember what to erase next time
+        JP   rndl_flip
+
+;------------------------------------------------------------------
+; rndl_six - draw the six faces of the cube (rndl_pts) points at
+;
+; Split out of rndl_frame so that something drawing more than one cube
+; a frame - cubes.z80s - can run the light and the draw per cube and
+; keep the erase, the dirty box and the flip for itself.
+;------------------------------------------------------------------
+
+rndl_six:
         LD   IX,rndl_faces
         LD   B,6
         LD   A,0
@@ -189,8 +202,7 @@ rndl_fnext:
         LD   (rndl_face),A
         POP  BC
         DJNZ rndl_floop
-        CALL rndl_bbox       ; remember what to erase next time
-        ; fall through into the flip
+        RET
 
 ;------------------------------------------------------------------
 ; rndl_flip - swap the buffers. The hardware half is left to you.
@@ -810,6 +822,7 @@ rndl_bb4:
         INC  HL
         DJNZ rndl_bbl
         CALL rndl_dirty      ; write it into this buffer's record
+rndl_bstore:                 ; HL -> a four byte record to write it into
         LD   A,(rndl_bymin)
         LD   (HL),A
         INC  HL
@@ -840,6 +853,7 @@ rndl_dirty:                  ; HL -> the back buffer's dirty record
 
 rndl_erase:
         CALL rndl_dirty
+rndl_erasebox:              ; HL -> a four byte record to blank
         LD   E,(HL)         ; ytop
         INC  HL
         LD   A,(HL)         ; ybot
