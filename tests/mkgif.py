@@ -433,7 +433,7 @@ PRISM_PAL = ([(32 * i, 32 * i, 30 * i) for i in range(8)]
 
 
 def prismpre(outdir, seconds=14):
-    """prismpre at its measured rate: 245,608 T-states a frame, 24.4 Hz.
+    """prismpre at its measured rate: 210,693 T-states a frame, 28.5 Hz.
 
     The same logo as prism, frame for frame, with the spin, the
     transform, the lighting and the sort read out of a 9,216-byte
@@ -444,7 +444,7 @@ def prismpre(outdir, seconds=14):
     b = Bench("harness_prismpre.asm", org=0)
     s = b.syms
     b.call_regs(s["pp_init"])
-    n = int(seconds * 24.4)
+    n = int(seconds * 28.5)
     frames, ts = [], []
     for t in range(n):
         into = b.peek(s["rndl_back"], 1)[0]
@@ -459,7 +459,7 @@ def prismpre(outdir, seconds=14):
 
 
 def prism(outdir, seconds=14):
-    """prism at its measured rate: 493,506 T-states a frame, 12.2 Hz.
+    """prism at its measured rate: 457,869 T-states a frame, 13.1 Hz.
 
     A logo cut into seven convex quads and extruded, drawn with
     renderlit's rasteriser and face table: an extruded quad has the
@@ -470,7 +470,7 @@ def prism(outdir, seconds=14):
     b = Bench("harness_prism.asm", org=0)
     s = b.syms
     b.call_regs(s["pr_init"])
-    n = int(seconds * 12.2)
+    n = int(seconds * 13.1)
     frames, ts = [], []
     for t in range(n):
         into = b.peek(s["rndl_back"], 1)[0]
@@ -489,7 +489,7 @@ CUBES_PAL = ([(36 * i, 13 * i, 9 * i) for i in range(8)]
 
 
 def cubes(outdir, seconds=12):
-    """cubes at its measured rate: 444,593 T-states a frame, 13.5 Hz.
+    """cubes at its measured rate: 419,478 T-states a frame, 13.5 Hz.
 
     Four lit cubes bouncing in a room, with gravity, off the walls and
     off each other. Compare demo/cube.gif, which is one of them with

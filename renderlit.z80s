@@ -180,28 +180,27 @@ rndl_frame:
 
 rndl_six:
         LD   IX,rndl_faces
-        LD   B,6
-        LD   A,0
-        LD   (rndl_face),A
-rndl_floop:
-        PUSH BC
-        LD   A,(rndl_face)
-        LD   E,A
-        LD   D,0
-        LD   HL,rndl_vis
-        ADD  HL,DE
+        LD   HL,rndl_vis    ; both walked as pointers: the face index it
+        LD   DE,rndl_fcol   ; used to keep in memory cost 30 T-states a
+rndl_floop:                 ; face to read, bump and write back
         LD   A,(HL)
+        INC  HL
         OR   A
         JR   Z,rndl_fnext
+        LD   A,(DE)         ; the colour rndl_light left for this face
+        LD   (rndl_col),A
+        PUSH DE
+        PUSH HL
         CALL rndl_quad
+        POP  HL
+        POP  DE
 rndl_fnext:
+        INC  DE
         LD   BC,4
         ADD  IX,BC          ; on to the next face
-        LD   A,(rndl_face)
-        INC  A
-        LD   (rndl_face),A
-        POP  BC
-        DJNZ rndl_floop
+        LD   A,L            ; six of them, and rndl_vis is aligned so
+        CP   (rndl_vis + 6) & 0xFF   ; the low byte is enough
+        JR   NZ,rndl_floop
         RET
 
 ;------------------------------------------------------------------
@@ -475,43 +474,54 @@ rndl_sm1:
 ;------------------------------------------------------------------
 ; rndl_quad - fill one face
 ;
-; Entry : IX -> the face's four vertex offsets, (rndl_face) = its index
+; Entry : IX -> the face's four vertex offsets, (rndl_col) = its colour
 ; Trash : everything except IY
 ;------------------------------------------------------------------
 
 rndl_quad:
-        LD   A,(rndl_face)   ; the lit colour, worked out by rndl_light
-        LD   E,A
+; Gathering the four corners was a loop with a PUSH, a POP and eleven
+; instructions of pointer arithmetic a point - 149 T-states each. Four
+; corners is few enough to write out, and then the stores are absolute
+; and the index register is read where it stands: 91 a point.
+
+        LD   BC,(rndl_pts)   ; the eight projected corners
         LD   D,0
-        LD   HL,rndl_fcol
+        LD   E,(IX+0)       ; the first corner this face names
+        LD   H,B
+        LD   L,C
         ADD  HL,DE
         LD   A,(HL)
-        LD   (rndl_col),A
-
-        LD   HL,(rndl_pts)   ; gather the four corners
-        LD   B,4
-        LD   C,0
-rndl_gath:
-        PUSH HL
-        LD   E,(IX+0)
-        LD   D,0
-        ADD  HL,DE
-        LD   E,(HL)         ; x
+        LD   (rndl_qx + 0),A
         INC  HL
-        LD   D,(HL)         ; y
-        LD   HL,rndl_qx      ; qx and qy sit four bytes apart, so bit 2
-        LD   A,L            ; of L picks between them
-        ADD  A,C
-        LD   L,A
-        LD   (HL),E
-        SET  2,L
-        LD   (HL),D
-        POP  HL
-        INC  IX
-        INC  C
-        DJNZ rndl_gath
-        LD   DE,-4
-        ADD  IX,DE
+        LD   A,(HL)
+        LD   (rndl_qy + 0),A
+        LD   E,(IX+1)
+        LD   H,B
+        LD   L,C
+        ADD  HL,DE
+        LD   A,(HL)
+        LD   (rndl_qx + 1),A
+        INC  HL
+        LD   A,(HL)
+        LD   (rndl_qy + 1),A
+        LD   E,(IX+2)
+        LD   H,B
+        LD   L,C
+        ADD  HL,DE
+        LD   A,(HL)
+        LD   (rndl_qx + 2),A
+        INC  HL
+        LD   A,(HL)
+        LD   (rndl_qy + 2),A
+        LD   E,(IX+3)
+        LD   H,B
+        LD   L,C
+        ADD  HL,DE
+        LD   A,(HL)
+        LD   (rndl_qx + 3),A
+        INC  HL
+        LD   A,(HL)
+        LD   (rndl_qy + 3),A
 
         LD   HL,rndl_qy      ; top and bottom of the face
         LD   B,(HL)
@@ -598,43 +608,133 @@ rndl_fill:
         LD   A,(rndl_ybot)
         SUB  E
         RET  Z
-        LD   D,A            ; D = scanline count
+        LD   B,A            ; B = scanline count, for later
         LD   A,(rndl_col)
         LD   C,A            ; C = the colour byte
-        LD   A,rndl_xl / 256 ; the shadow set walks the arrays
-        PUSH AF
-        LD   A,E
-        PUSH AF
-        EXX
-        POP  AF
+
+; The screen pointer and the colour go in the other set, and the
+; scanline arrays are read in this one. That is the way round it has
+; to be: the span wants HL and C, and it runs once a scanline - but
+; reading the arrays here costs 26 T-states where fetching them across
+; the sets cost 55. It also leaves the span B to itself, so the PUSH
+; BC and POP BC that used to guard the call are gone as well.
+
+        EXX                 ; the screen and the colour, parked
+        LD   A,(rndl_ytop)
         LD   L,A
-        POP  AF
-        LD   H,A            ; HL' -> rndl_xl[ytop]
+        LD   H,rndl_xl / 256
         EXX
-        LD   B,D            ; B = scanline count
+        LD   A,B
+        EXX
+        LD   B,A            ; B = the scanline count, in this set
 rndl_floop2:
-        EXX
         LD   E,(HL)         ; xl
         INC  H
         LD   D,(HL)         ; xr
         DEC  H
         INC  L
-        PUSH DE
-        EXX
-        POP  DE
         LD   A,D            ; xl > xr is an empty span - the two sides
-        CP   E              ; cross on the sliver scanlines of a face seen
-        JR   C,rndl_fok      ; nearly edge on - so it draws nothing
-        PUSH BC
-        CALL rndl_span
-        POP  BC
+        CP   E              ; cross on the sliver scanlines of a face
+        JR   C,rndl_fok     ; seen nearly edge on, so it draws nothing
+        PUSH DE
+        EXX                 ; over to the screen
+        POP  DE
+
+; The span is written out here rather than called. It had one caller,
+; and a CALL and a RET either side of 160 T-states of work is 17 of
+; them for nothing - 5,000 a frame at 298 spans.
+
+        PUSH HL
+        LD   A,E
+        SRL  A
+        LD   B,A            ; B = the left byte
+        ADD  A,L
+        LD   L,A            ; HL -> it
+        LD   A,D
+        SRL  A              ; the right byte
+        SUB  B
+        LD   B,A            ; B = how many bytes apart they are
+        JR   NZ,rndl_zpmulti
+
+        BIT  0,E            ; both ends in the one byte
+        JR   NZ,rndl_zp1lo
+        BIT  0,D
+        JR   NZ,rndl_zp1all
+        LD   A,(HL)         ; even to even: one pixel, the high nibble
+        XOR  C
+        AND  0x0F
+        XOR  C
+        LD   (HL),A
+        POP  HL
+        JR   rndl_fadv
+rndl_zp1lo:
+        LD   A,(HL)         ; odd to odd: one pixel, the low nibble
+        XOR  C
+        AND  0xF0
+        XOR  C
+        LD   (HL),A
+        POP  HL
+        JR   rndl_fadv
+rndl_zp1all:
+        LD   (HL),C         ; even to odd: the whole byte
+        POP  HL
+        JR   rndl_fadv
+
+rndl_zpmulti:
+        BIT  0,E            ; the left end
+        JR   Z,rndl_zpl0
+        LD   A,(HL)         ; starting odd: keep the high nibble
+        XOR  C
+        AND  0xF0
+        XOR  C
+        LD   (HL),A
+        JR   rndl_zpl1
+rndl_zpl0:
+        LD   (HL),C         ; starting even: the whole byte
+rndl_zpl1:
+        INC  L
+        DEC  B              ; whole bytes left between the ends
+        JR   Z,rndl_zpright
+        SRL  B              ; B = pairs of them, carry = an odd one over
+        JR   NC,rndl_zpeven
+        LD   (HL),C
+        INC  L
+rndl_zpeven:
+        LD   A,B
+        OR   A
+        JR   Z,rndl_zpright
+rndl_zpfill:
+        LD   (HL),C         ; [7T]  two bytes, four pixels, a pass
+        INC  L              ; [4T]
+        LD   (HL),C         ; [7T]
+        INC  L              ; [4T]
+        DJNZ rndl_zpfill     ; [13/8T]
+
+rndl_zpright:
+        BIT  0,D            ; the right end
+        JR   NZ,rndl_zpr1
+        LD   A,(HL)         ; stopping even: keep the low nibble
+        XOR  C
+        AND  0x0F
+        XOR  C
+        LD   (HL),A
+        POP  HL
+        JR   rndl_fadv
+rndl_zpr1:
+        LD   (HL),C         ; stopping odd: the whole byte
+        POP  HL
+        JR   rndl_fadv
+
 rndl_fok:
+        EXX
+rndl_fadv:
         LD   A,128          ; the next line down
         ADD  A,L
         LD   L,A
         JR   NC,rndl_fnc
         INC  H
 rndl_fnc:
+        EXX                 ; and back to the arrays
         DJNZ rndl_floop2
         RET
 
@@ -669,31 +769,43 @@ rndl_epos:
         LD   C,A            ; C = |dx|
         POP  AF
 
+; The branch is the other way round from the obvious one: a scanline
+; that moves x along at all is the exception on a steep edge, so the
+; test falls through when there is nothing to do - 39 T-states a
+; scanline rather than 44 - and the sideways travel is off to one side
+; where it costs 24 a pixel rather than 27.
+
 rndl_edgep:                  ; x climbing
         LD   (HL),E         ; [7T]
         INC  L              ; [4T]
         ADD  A,C            ; [4T]  err += |dx|
-rndl_ep1:
         CP   D              ; [4T]
-        JR   C,rndl_ep2      ; [7/12T]
-        SUB  D              ; [4T]
-        INC  E              ; [4T]
-        JR   rndl_ep1        ; [12T]
+        JR   NC,rndl_ep3     ; [7T] when x stays put, which is the rule
 rndl_ep2:
         DJNZ rndl_edgep      ; [13/8T]
+        RET
+rndl_ep3:
+        SUB  D              ; [4T]
+        INC  E              ; [4T]
+        CP   D              ; [4T]
+        JR   NC,rndl_ep3     ; [12T] more than one pixel over, which is
+        DJNZ rndl_edgep      ; rare enough to pay for itself
         RET
 
 rndl_edgen:                  ; x falling
         LD   (HL),E
         INC  L
         ADD  A,C
-rndl_en1:
         CP   D
-        JR   C,rndl_en2
+        JR   NC,rndl_en3
+rndl_en2:
+        DJNZ rndl_edgen
+        RET
+rndl_en3:
         SUB  D
         DEC  E
-        JR   rndl_en1
-rndl_en2:
+        CP   D
+        JR   NC,rndl_en3
         DJNZ rndl_edgen
         RET
 
@@ -705,78 +817,18 @@ rndl_en2:
 ; Exit  : HL preserved
 ; Trash : AF, B, DE
 ;
-; The two ends may be half a byte, so they are read-modify-written
-; through a mask; everything between is whole bytes.
+; The two ends may be half a byte. Which half is decided by nothing
+; but the parity of x0 and x1, so rather than building a keep-mask out
+; of RRA and SBC A,A - 23 T-states an end - each end branches on its
+; own bit 0 and uses an immediate, and the halves that turn out to be
+; whole bytes are a plain store.
+;
+; That matters because the spans are short. Over prism's 256 frames
+; the mean span is 5.9 bytes and a tenth of them are one byte: the
+; filling is 103 T-states where the setup was 187, so the setup is
+; what a frame is made of. This saves about 26 a span, and 68 on the
+; one-byte ones.
 ;------------------------------------------------------------------
-
-rndl_span:
-        PUSH HL
-        LD   A,E
-        SRL  A
-        LD   B,A            ; B = the left byte
-        ADD  A,L
-        LD   L,A            ; HL -> it
-        LD   A,D
-        SRL  A              ; the right byte
-        SUB  B
-        LD   B,A            ; B = how many bytes apart they are
-        LD   A,E            ; the left end's keep-mask: a run starting on
-        RRA                 ; an odd pixel keeps the high nibble of its
-        SBC  A,A            ; first byte, else nothing
-        AND  0xF0
-        LD   E,A
-        LD   A,B
-        OR   A
-        JR   NZ,rndl_spmulti
-
-        LD   A,D            ; both ends in one byte: keep from both
-        RRA
-        SBC  A,A
-        CPL
-        AND  0x0F
-        OR   E
-        LD   E,A
-        JR   rndl_spend
-
-rndl_spmulti:
-        LD   A,(HL)         ; the left end, masked
-        XOR  C
-        AND  E
-        XOR  C
-        LD   (HL),A
-        INC  L
-        DEC  B              ; whole bytes left between the ends
-        JR   Z,rndl_spright
-        SRL  B              ; B = pairs of them, carry = an odd one over
-        JR   NC,rndl_speven
-        LD   (HL),C
-        INC  L
-rndl_speven:
-        LD   A,B
-        OR   A
-        JR   Z,rndl_spright
-rndl_spfill:
-        LD   (HL),C         ; [7T]  two bytes, four pixels, a pass
-        INC  L              ; [4T]
-        LD   (HL),C         ; [7T]
-        INC  L              ; [4T]
-        DJNZ rndl_spfill     ; [13/8T]
-
-rndl_spright:
-        LD   A,D            ; the right end's keep-mask: a run stopping on
-        RRA                 ; an even pixel keeps the low nibble of its
-        SBC  A,A            ; last byte, else nothing
-        CPL
-        AND  0x0F
-        LD   E,A
-rndl_spend:
-        LD   A,(HL)         ; (old & keep) | (colour & ~keep)
-        XOR  C
-        AND  E
-        XOR  C
-        LD   (HL),A
-        POP  HL
-        RET
 
 ;------------------------------------------------------------------
 ; rndl_bbox - the box the cube covered, kept for erasing it later
@@ -983,7 +1035,6 @@ rndl_dirty0:     DEFS 4           ; ytop, ybot, left byte, right byte
 rndl_dirty1:     DEFS 4
 rndl_sp:         DEFS 2           ; SP parked while the stack fills the screen
 rndl_lines:      DEFS 1
-rndl_face:       DEFS 1
 rndl_col:        DEFS 1
 rndl_ytop:       DEFS 1
 rndl_ybot:       DEFS 1

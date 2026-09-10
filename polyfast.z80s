@@ -39,7 +39,7 @@
 ; for the numbers and what would have to change.
 ;
 ; Entry is the same as rndl_quad's: IX -> four vertex indices, with
-; (rndl_pts), (rndl_face) and rndl_fcol set. pf_six replaces
+; (rndl_pts) and (pf_col) set. pf_six replaces
 ; rndl_six, so anything that draws through renderlit can use it.
 ;
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
@@ -85,26 +85,27 @@ pf_in1:
 
 pf_six:
         LD   IX,rndl_faces
-        LD   B,6
-        XOR  A
-        LD   (rndl_face),A
-pf_sx1:
-        PUSH BC
-        LD   A,(rndl_face)
-        LD   E,A
-        LD   D,0
         LD   HL,rndl_vis
-        ADD  HL,DE
+        LD   DE,rndl_fcol
+pf_sx1:
         LD   A,(HL)
+        INC  HL
         OR   A
-        CALL NZ,pf_quad
+        JR   Z,pf_sx2
+        LD   A,(DE)
+        LD   (pf_col),A
+        PUSH DE
+        PUSH HL
+        CALL pf_quad
+        POP  HL
+        POP  DE
+pf_sx2:
+        INC  DE
         LD   BC,4
         ADD  IX,BC
-        LD   A,(rndl_face)
-        INC  A
-        LD   (rndl_face),A
-        POP  BC
-        DJNZ pf_sx1
+        LD   A,L
+        CP   (rndl_vis + 6) & 0xFF
+        JR   NZ,pf_sx1
         RET
 
 ;------------------------------------------------------------------
@@ -113,14 +114,6 @@ pf_sx1:
 ;------------------------------------------------------------------
 
 pf_quad:
-        LD   A,(rndl_face)      ; the colour rndl_light worked out
-        LD   E,A
-        LD   D,0
-        LD   HL,rndl_fcol
-        ADD  HL,DE
-        LD   A,(HL)
-        LD   (pf_col),A
-
         LD   HL,(rndl_pts)      ; gather the four corners
         LD   B,4
         LD   C,0

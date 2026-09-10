@@ -1,7 +1,7 @@
 # prismpre.z80s — design notes
 
-`prism.z80s` with the whole frame precomputed. **245,608 T-states a frame,
-24.4 Hz** — against prism's 493,506 and 12.2 Hz — and the frames are the
+`prism.z80s` with the whole frame precomputed. **210,693 T-states a frame,
+28.5 Hz** — against prism's 457,869 and 13.1 Hz — and the frames are the
 same frames: verified byte-for-byte both against `tests/prism.py`'s model
 and against `prism.z80s` itself, run side by side at the same turn rates,
 over two full times round the loop.
@@ -24,7 +24,7 @@ Everything in a prism frame that depends on nothing but the frame number:
 | the rest | ~11,700 | the ramp lookup in `rndl_setface`, and the frame's own box |
 | **removed** | **~248,000** | 50% of the frame |
 
-What is left is `rndl_erase` (22,766) and renderlit's span fill (222,841).
+What is left is `rndl_erase` (22,766) and renderlit's span fill (187,926).
 There is no multiply anywhere in the frame, and `transform3d.z80s` and
 `democube.z80s` are not needed at all — the harness keeps four of their
 labels alive (`demo_screen`, `t3d_m`, `t3d_tx/ty/tz`, 31 bytes) because
@@ -82,10 +82,11 @@ Two more:
 
 ## What it does not buy
 
-The fill is 91% of what is left, so this is now a rasteriser benchmark, and
-it lands **5,608 T-states short of 25 Hz**: 240,000 is the budget and the
-mean frame is 245,608, with the minimum at 145,060 and the maximum at
-305,889. Most orientations already hold 25 Hz; the broadside ones do not. Fewer, larger pieces would help everywhere;
+The fill is 89% of what is left, so this is a rasteriser benchmark — and
+after renderlit's rasteriser was gone over a second time (`renderlit.md`)
+it **clears 25 Hz with room to spare**: 240,000 is the budget and the mean
+frame is 210,693, the minimum 127,126 and the maximum 261,493. Only the
+broadside poses miss it, and the worst is 22.9 Hz. Fewer, larger pieces would help everywhere;
 so would a span fill that pushes constant runs the way `chequer3` does.
 
 ## Invariants

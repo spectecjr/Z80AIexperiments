@@ -59,22 +59,65 @@ so a face lit straight on gets level 7 and one facing away gets 2, never 0
 
 |  | min | mean | max |
 |---|---|---|---|
-| `rndl_frame` | 47,953 | 90,439 | 121,003 |
-| `render.z80s` unlit | 43,807 | 86,717 | 116,941 |
+| `rndl_frame` | 43,588 | 81,072 | 107,681 |
 
-So lighting and the new visibility test together cost 3,722 T-states a
-frame, 4.3%. `rndl_light` is 8,829 of that; one `Mᵀw` is 3,050;
-`rndl_init` is 37,583 once.
+`rndl_light` is 8,829 of that; one `Mᵀw` is 3,050; `rndl_init` is 37,583
+once.
 
-With `democube`'s 21,782 in front of it a mean frame is 112,221 T-states,
-94% of the 120,000 a 6 MHz SAM has between 50 Hz interrupts. **The worst
-pose does not fit**: 121,003 for the renderer alone. Over the 500 frames of
+With `democube`'s 21,782 in front of it a mean frame is 102,854 T-states,
+86% of the 120,000 a 6 MHz SAM has between 50 Hz interrupts. Over the 500 frames of
 `demo/lit_cube.gif`, 333 are held for one display frame and 167 for two —
 37.5 Hz, not 50. Raw T-states throughout; real SAM screen contention is on
 top of all of it.
 
 2,048 bytes: 1,280 code and small tables, 256 for the shade ramp, 512 for
 the two scanline arrays.
+
+## The rasteriser, after the second look
+
+The first version of these notes said the rasteriser was close to its
+floor. It was not. Measuring a single quad of a known size gave
+
+| | a face | a scanline |
+|---|---|---|
+| before | 3,040 | 798.5 |
+| **now** | **2,274** | **713.5** |
+
+and none of it changed a pixel — every one of the six demos that draw
+through renderlit still matches its model byte for byte. What did it:
+
+1. **The span's end masks are immediates, not arithmetic.** Which half of
+   a byte an end covers is decided by nothing but the parity of x, so each
+   end branches on its own bit 0 rather than building a keep-mask out of
+   `RRA` and `SBC A,A` — 23 T-states an end. The ends that turn out to be
+   whole bytes become a plain store. Worth about 26 T-states a span, and 68
+   on the one-byte ones. **The spans are short**: over prism's 256 frames
+   the mean is 5.9 bytes and a tenth are one byte, so 103 T-states of
+   filling sat behind 187 of setup.
+2. **The screen pointer moved into the other register set**, and the
+   scanline arrays are read in the main one. Reading them there is 26
+   T-states where fetching them across the sets was 55, and it leaves the
+   span `B` to itself, so the `PUSH BC`/`POP BC` that guarded the call went
+   too.
+3. **The span is written out rather than called.** It had one caller, and a
+   `CALL` and a `RET` around 160 T-states of work is 17 for nothing.
+4. **The edge walk's branch is the other way round.** A scanline that moves
+   x along at all is the exception on a steep edge, so the test now falls
+   through when there is nothing to do: 39 T-states a scanline rather than
+   44, and sideways travel costs 24 a pixel rather than 27.
+5. **The gather and the six-face dispatch lost their loops.** Four corners
+   is few enough to write out (91 T-states a point against 149), and the
+   face index that used to live in memory - read, bumped and written back,
+   30 T-states a face - is now two walked pointers.
+
+What it bought, at the demos that use it: prism 493,506 → 457,869 T-states
+a frame, prismpre 245,608 → 210,693 (24.4 Hz → **28.5**), cubes 449,675 →
+419,478.
+
+**What is left is the span setup**, ~160 T-states of it a scanline against
+17.5 a byte of actual filling, and the byte addresses and end masks inside
+it. `polyfast.md` is the measured account of one attempt to go further, and
+of why it did not.
 
 ## The cheap case, if you want the T-states back
 

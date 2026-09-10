@@ -8,7 +8,14 @@ actually draws it is 11% slower than the rasteriser it was meant to beat.**
 That is the useful part. The numbers below say where a polygon fill's time
 really goes on a Z80, and they are all measured.
 
-## Where renderlit's time goes
+> **Since this was written, renderlit's rasteriser was gone over a second
+> time and is now 2,274 T-states a face and 713.5 a scanline** — see
+> `renderlit.md`. It is now ahead of polyfast on *both* terms, so the two
+> no longer cross at all. What follows is the measurement as it stood, and
+> `tests/test_polyfast.py` prints both curves live so the comparison never
+> goes stale.
+
+## Where renderlit's time went
 
 Timing `rndl_six` on a single quad of a known size, on the emulated Z80:
 
@@ -77,7 +84,10 @@ are the span setup and the loop itself, and they are the same in both.**
 1. **The span setup, not the edges.** ~300 T-states a scanline of the 431 is
    working out byte addresses, two end masks and loop bookkeeping for a span
    that then fills ten bytes at 17.5 each. That is the term to attack, in
-   either rasteriser.
+   either rasteriser — and going after it in renderlit is exactly what took
+   it to 713.5 a scanline and prismpre to 28.5 Hz. polyfast never got the
+   same treatment, which is most of why it is now behind on the scanline
+   too.
 2. **Fewer spans.** Measured separately: merging the logo's coplanar front
    faces into one polygon each would remove 30 spans a frame of 120 — 25% —
    worth about 13,600 T-states, but it needs a rasteriser that can put more

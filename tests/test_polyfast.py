@@ -80,8 +80,12 @@ def curve(b, s):
           % ("renderlit", rf, rs))
     print("  %-12s %6.0f T-states a face + %5.1f a scanline"
           % ("polyfast", pf, ps))
-    print("  %-12s %6.0f scanlines a face, and prism's faces average 23"
-          % ("even at", (pf - rf) / (rs - ps)))
+    if ps < rs and pf > rf:
+        print("  %-12s %6.0f scanlines a face, and prism's faces average 23"
+              % ("even at", (pf - rf) / (rs - ps)))
+    else:
+        print("  %-12s renderlit is ahead on both terms, so they never cross"
+              % "even at")
     print()
     print("  a 40 by 32 quad, as its edges lean over:")
     for sl in (0, 16, 32, 64):

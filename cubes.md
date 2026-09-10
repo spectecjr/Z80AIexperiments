@@ -1,8 +1,8 @@
 # cubes.z80s — design notes
 
 Four lit cubes bouncing in a room you can see: gravity, walls, each other,
-and a wire frame around the box they are in. **444,593 T-states a frame,
-13.5 Hz**, verified byte-for-byte against `tests/cubes.py` over 300 frames.
+and a wire frame around the box they are in. **419,478 T-states a frame,
+14.3 Hz**, verified byte-for-byte against `tests/cubes.py` over 300 frames.
 
 `democube.z80s` moves one cube and `renderlit.z80s` draws it; this does the
 same for four, so most of the file is about what having four of something
@@ -93,7 +93,7 @@ cube size decides how much room the centre has before 16 bits overflow, and
 | `cb_erase` | 31,464 | 7% |
 | `cb_phys` | 20,259 | 5% — four cubes and six pairs |
 | `cb_order` | 4,734 | 1% |
-| **`cb_frame`** | **min 374,586, mean 444,593, max 490,739** | 13.5 Hz |
+| **`cb_frame`** | **min 371,142, mean 419,478, max 472,588** | 14.3 Hz |
 
 Held to the flyback, `demo/cubes.gif` runs at 12.4 Hz.
 
