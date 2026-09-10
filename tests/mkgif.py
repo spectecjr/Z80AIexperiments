@@ -484,6 +484,28 @@ def prismpre(outdir, seconds=14):
     report(p, size, n, durs, secs, got, bad)
 
 
+STAR_PAL = [(32 * i, 32 * i, 30 * i) for i in range(8)] + [(0, 0, 0)] * 8
+
+
+def stars(outdir, seconds=8):
+    """A 3D starfield: 197,813 T-states a frame, 30.3 Hz, 192 stars."""
+    b = Bench("harness_stars.asm", org=0)
+    s = b.syms
+    b.call_regs(s["st_init"])
+    n = int(seconds * 30.3)
+    frames, ts = [], []
+    for t in range(n):
+        into = b.peek(s["st_back"], 1)[0]
+        tt, _ = b.call_regs(s["st_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    p = "%s/stars.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, frames, STAR_PAL, durs)
+    got, bad, secs = check_gif(p, frames, STAR_PAL, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 def prism(outdir, seconds=14):
     """prism at its measured rate: 446,602 T-states a frame, 13.4 Hz.
 
@@ -659,6 +681,7 @@ if __name__ == "__main__":
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
     cube(d)
     cubes(d)
+    stars(d)
     prism(d)
     prismpre(d)
     entropypre(d)

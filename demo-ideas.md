@@ -294,6 +294,16 @@ of its frame on the span fill, and this one spends none. It is the natural
 thing to put *behind* something else - a twister, a scroller, the cubes -
 because it costs nothing that the foreground wanted.
 
+### 9. Starfield  — **BUILT**
+
+`stars.z80s`, 197,813 T-states a frame, 30.3 Hz, 192 stars — **and the
+estimate below was wrong by three and a half times.** It said 300
+T-states a star; the measurement says 1,030, of which only 332 is the two
+multiplies and the rest is bookkeeping. 116 stars fit 50 Hz. See
+`stars.md`.
+
+What follows is the original note.
+
 ### 9. Starfield  — *estimated 20,000 T-states for 500 stars, 50 Hz*
 
 Each star is one pixel: erase where it was, move it, plot it. Measured

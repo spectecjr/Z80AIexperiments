@@ -1,0 +1,262 @@
+;------------------------------------------------------------------
+; stars.z80s - a 3D starfield
+;
+; A star is a direction and a distance: x and y are signed bytes and z
+; runs from 255 down to ST_ZMIN, so the screen offset from the middle
+; is x*64/z. That is transform3d's projection with the rotation taken
+; out - one reciprocal lookup and two 8x8 multiplies a star - and it
+; is the whole of the arithmetic.
+;
+; Nothing is ever cleared. Each star remembers the byte it last lit in
+; each buffer and blanks that nibble before lighting the new one, so
+; the cost is per star and not per screen: a full screen erase is
+; 135,000 T-states and this is a few hundred a star.
+;
+; Two buffers means the byte to blank is the one from two frames ago,
+; which is why there are two sets of records.
+;
+; Needs mul8x8_qs. Nothing else.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+ST_BUF0:        EQU 0x80
+ST_BUF1:        EQU 0x20
+
+;------------------------------------------------------------------
+; st_init - blank both buffers and forget where everything was
+;------------------------------------------------------------------
+
+st_init:
+        LD   A,ST_BUF0
+        LD   (st_back),A
+        LD   A,ST_BUF1
+        LD   (st_front),A
+        LD   HL,ST_SEED
+        LD   (st_lfsr),HL
+
+        LD   HL,st_old0         ; no star has been anywhere yet
+        LD   BC,6 * ST_N
+        XOR  A
+st_in1:
+        LD   (HL),A
+        INC  HL
+        DEC  BC
+        LD   D,A
+        OR   B
+        OR   C
+        LD   A,D
+        JR   NZ,st_in1
+
+        LD   H,ST_BUF0          ; and both buffers are black
+        CALL st_wipe
+        LD   H,ST_BUF1
+st_wipe:
+        LD   L,0
+        LD   B,96
+st_wp1:
+        PUSH BC
+        LD   B,0
+        XOR  A
+st_wp2:
+        LD   (HL),A
+        INC  HL
+        DJNZ st_wp2
+        POP  BC
+        DJNZ st_wp1
+        RET
+
+;------------------------------------------------------------------
+; st_frame - move and redraw every star
+;------------------------------------------------------------------
+
+st_frame:
+        LD   HL,st_old0         ; which set of records belongs to the
+        LD   A,(st_back)        ; buffer being drawn
+        CP   ST_BUF0
+        JR   Z,st_fr1
+        LD   HL,st_old1
+st_fr1:
+        PUSH HL
+        POP  IX
+        LD   IY,st_star
+        LD   A,ST_N
+        LD   (st_n),A
+
+st_loop:
+        LD   H,(IX+1)           ; blank where it was, if it was anywhere
+        LD   A,H
+        OR   A
+        JR   Z,st_nb
+        LD   L,(IX+0)
+        LD   A,(HL)
+        AND  (IX+2)
+        LD   (HL),A
+st_nb:
+        LD   A,(IY+2)           ; a little nearer
+        SUB  ST_SPEED
+        CP   ST_ZMIN
+        JR   NC,st_near
+        CALL st_spawn
+        JR   st_proj
+st_near:
+        LD   (IY+2),A
+st_proj:
+        LD   A,(IY+2)           ; 64/z, near enough
+        LD   L,A
+        LD   H,st_recip / 256
+        LD   C,(HL)
+
+        LD   A,(IY+1)           ; y first: it is the one that can leave
+        CALL st_smul            ; the screen
+        LD   E,A
+        ADD  A,ST_YLIM
+        CP   2 * ST_YLIM + 1
+        JR   C,st_yok
+        CALL st_spawn           ; gone: start it again at the back, where
+        LD   A,(IY+2)           ; it is always on screen
+        LD   L,A
+        LD   H,st_recip / 256
+        LD   C,(HL)
+        LD   A,(IY+1)
+        CALL st_smul
+        LD   E,A
+st_yok:
+        LD   A,96               ; sy = 96 - oy
+        SUB  E
+        EX   AF,AF'             ; parked: qsmul8 answers in DE, so the
+                                ; other multiply is about to eat E
+        LD   A,(IY+0)           ; and x, which cannot leave the screen
+        CALL st_smul
+        ADD  A,128              ; sx = 128 + ox
+        LD   B,A
+        EX   AF,AF'
+        LD   E,A
+
+        LD   A,E                ; the byte it lands in
+        AND  1
+        RRCA
+        LD   L,A                ; 0 or 128
+        LD   A,E
+        SRL  A
+        LD   D,A
+        LD   A,(st_back)
+        ADD  A,D
+        LD   H,A
+        LD   A,B
+        SRL  A
+        ADD  A,L
+        LD   L,A                ; HL = the byte
+
+        LD   A,(IY+2)           ; its shade, from how far away it is
+        LD   E,A
+        LD   D,st_col / 256
+        LD   A,(DE)
+        LD   C,A                ; C = the colour in both nibbles
+
+        LD   (IX+0),L           ; remember it for next time round
+        LD   (IX+1),H
+        BIT  0,B
+        JR   NZ,st_odd
+        LD   (IX+2),0x0F        ; an even pixel keeps the low nibble
+        LD   A,(HL)
+        XOR  C
+        AND  0x0F
+        XOR  C
+        LD   (HL),A
+        JR   st_next
+st_odd:
+        LD   (IX+2),0xF0
+        LD   A,(HL)
+        XOR  C
+        AND  0xF0
+        XOR  C
+        LD   (HL),A
+
+st_next:
+        LD   BC,3
+        ADD  IX,BC
+        ADD  IY,BC
+        LD   A,(st_n)
+        DEC  A
+        LD   (st_n),A
+        JP   NZ,st_loop
+
+        LD   A,(st_back)        ; swap the buffers
+        LD   B,A
+        LD   A,(st_front)
+        LD   (st_back),A
+        LD   A,B
+        LD   (st_front),A
+        RET
+
+;------------------------------------------------------------------
+; st_smul - (A * C) >> 8, signed in A, which is transform3d's own
+;------------------------------------------------------------------
+
+st_smul:
+        OR   A
+        JP   M,st_sm1
+        LD   B,A
+        CALL qsmul8
+        LD   A,D
+        RET
+st_sm1:
+        NEG
+        LD   B,A
+        CALL qsmul8
+        LD   A,D
+        NEG
+        RET
+
+;------------------------------------------------------------------
+; st_spawn - a new direction, and back to the far plane
+;------------------------------------------------------------------
+
+st_spawn:
+        CALL st_rnd
+        LD   (IY+0),A
+        CALL st_rnd
+        LD   (IY+1),A
+        LD   (IY+2),255
+        RET
+
+;------------------------------------------------------------------
+; st_rnd - a byte from a sixteen bit LFSR, taps at 0, 2, 3 and 5
+;
+; The parity flag does the tap: AND leaves P/V set when an even number
+; of bits survived, so the feedback bit is the odd case.
+;------------------------------------------------------------------
+
+st_rnd:
+        LD   HL,(st_lfsr)
+        LD   B,8
+st_rn1:
+        LD   A,L
+        AND  0x2D
+        JP   PE,st_rn2
+        SCF
+        JR   st_rn3
+st_rn2:
+        OR   A
+st_rn3:
+        RR   H
+        RR   L
+        DJNZ st_rn1
+        LD   (st_lfsr),HL
+        LD   A,L
+        RET
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+st_back:        DEFS 1
+st_front:       DEFS 1
+st_lfsr:        DEFS 2
+st_n:           DEFS 1
+
+st_old0:        DEFS 3 * ST_N   ; where each star is in each buffer
+st_old1:        DEFS 3 * ST_N
+
+ST_SIZE:        EQU $ - st_init
