@@ -4,6 +4,16 @@ Distant thunder, and then rain, out of the two noise generators and
 **not one tone enabled anywhere in the routine**. 3,153 T-states a
 frame — 2.6% of a 50 Hz frame — for both at once.
 
+The routine is a **two-layer noise-score player**, and what it sounds
+like is entirely in the score. Two are built:
+
+| score | |
+|---|---|
+| `stormdata.z80s` | thunder, then rain over the top of it — `demo/storm.wav` |
+| `thunderdata.z80s` | distant thunder alone, both layers of it, deeper — `demo/thunder.wav` |
+
+Only one goes into a build; they define the same symbols.
+
 Verified against `tests/storm.py` the way everything else here is —
 **every OUT, in order, register and value, 7,013 of them** — and then
 that captured stream is played through `tests/saa1099.py` to make
@@ -103,6 +113,46 @@ three amplitudes. The tables are 176 bytes of score and 138 of spread.
   clamps identically.
 - Both layers must run the same number of frames if they are to end
   together — they do, at 700.
+
+## Thunder alone, and how deep it can go
+
+`thunderdata.z80s` spends both layers on the rumble instead of one on
+rain, and it is the more accurate of the two:
+
+| | |
+|---|---|
+| the body, layer 0 | 150 Hz down to 62 Hz over twelve seconds |
+| the gravel, layer 1 | 420 Hz down to 132 Hz, and **gone sooner** |
+
+**62 Hz is the floor.** A tone generator will not go below 30.6 Hz, so
+a mode 3 noise clock will not go below 61 Hz, so **30 Hz is the bottom
+of any rumble this chip can make**. The body sits on it.
+
+The two layers decaying at *different rates* is what does the rest.
+Real thunder loses its top end with distance far faster than its
+bottom — a mile of air absorbs high frequencies and barely touches low
+ones — so the upper layer has to die before the lower one. That
+difference reads as *far away* rather than merely quiet, and it is the
+single thing that most improved this over the first attempt.
+
+Measured on `demo/thunder.wav`:
+
+| | |
+|---|---|
+| under 30 Hz | 14% |
+| 30-60 Hz | 26% |
+| 60-125 Hz | 36% |
+| **under 125 Hz** | **75%** |
+| half the energy is below | **73 Hz** |
+| the roll | peak at 1.6 s, six swells after it, quiet by 11.4 s |
+
+Against the thunder in `stormdata.z80s`, which is 62% under 125 Hz with
+its median at 116 Hz: this one is an octave deeper by that measure.
+
+Two uncorrelated noise streams also matter. One generator modulated
+twice is one sound with two envelopes on it; two generators are two
+sounds, and the rolls in each falling in different places is what stops
+it sounding designed.
 
 ## If you pick this up
 

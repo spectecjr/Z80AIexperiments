@@ -207,9 +207,11 @@ class Layer:
 
 
 class Storm:
-    def __init__(self):
-        self.a = Layer(TH, 0)           # thunder, then the rain's hiss
-        self.b = Layer(RN, 3)           # the rain itself
+    """Two layers of noise, whatever the scores make them."""
+
+    def __init__(self, a=None, b=None):
+        self.a = Layer(a if a is not None else TH, 0)
+        self.b = Layer(b if b is not None else RN, 3)
 
     def play(self):
         self.a.play()

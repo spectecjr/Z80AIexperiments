@@ -69,13 +69,13 @@ sm_init:
         RET
 
 sm_play:
-        LD   HL,sm_th
+        LD   HL,sm_l0
         LD   (sm_a + SM_SP),HL
-        LD   A,SM_THSEGS
+        LD   A,SM_L0SEGS
         LD   (sm_a + SM_SEGS),A
-        LD   HL,sm_rn
+        LD   HL,sm_l1
         LD   (sm_b + SM_SP),HL
-        LD   A,SM_RNSEGS
+        LD   A,SM_L1SEGS
         LD   (sm_b + SM_SEGS),A
         XOR  A
         LD   (sm_a + SM_LEFT),A
@@ -214,9 +214,9 @@ sm_next:
 ; The two layers: state, then the five writes each makes.
 ;------------------------------------------------------------------
 
-sm_a:           DEFS 13         ; the thunder, and later the rain's hiss
+sm_a:           DEFS 13         ; layer 0: channels 0-2
                 DEFW sm_bufa
-sm_b:           DEFS 13         ; the rain
+sm_b:           DEFS 13         ; layer 1: channels 3-5
                 DEFW sm_bufb
 
 sm_bufa:        DEFB 0x10,0     ; channel 0's octave, the low nibble
