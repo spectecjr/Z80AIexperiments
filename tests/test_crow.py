@@ -141,7 +141,7 @@ def main():
         chip_out.run(1 / 50.0)
     x = chip_out.samples()
     path = os.path.join(ROOT, "demo", "crow.wav")
-    S.wav(path, x)
+    S.wav(path, x, mono=True)      # both channels are the same
     print("  %-28s %s, %.2f s" % ("wav", path, len(x) / S.RATE))
 
     # what came out, measured: the caw should be rough, and the energy

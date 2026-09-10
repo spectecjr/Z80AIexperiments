@@ -1,0 +1,401 @@
+;------------------------------------------------------------------
+; ensemble.z80s - the flute and the strings at once, three oscillators
+; each, out of one SAA1099 at 50 Hz
+;
+;   en_init     set the chip up, once
+;   en_play     start them both
+;   en_frame    one 50 Hz frame of both
+;
+;   ch0     the flute's breath      ch3     the strings' root
+;   ch1     the flute, f            ch4     the third
+;   ch2     the flute, 2f           ch5     the fifth
+;
+; WHY THE BREATH IS ON CHANNEL 0. Noise generator 0 serves channels 0
+; to 2, and in mode 3 it is clocked by CHANNEL 0's tone generator -
+; always the first of the group, whichever channel you listen to the
+; noise on. So the breath goes on channel 0 with its tone disabled,
+; which leaves that tone generator free to be a 3.2 kHz clock and
+; nothing else. Put the flute's fundamental there instead and the
+; breath would be clocked at the note, which is a rumble, not air.
+;
+; WHAT THREE CHANNELS COST EACH VOICE. The flute loses 4f, which was
+; only brightness; it keeps the breath and the vibrato, which are what
+; make it a flute. The strings lose all three detuned twins, and with
+; them the one-hertz beating that made them a section - what is left is
+; the spread vibrato, one sine read at +0, +4 and +8, so the three
+; notes still wander against each other, at 4 Hz rather than 1.
+;
+; THE OCTAVE REGISTERS ARE THE AWKWARD PART. Each holds two channels, a
+; nibble each, and the split between the voices falls inside register
+; 0x11: low nibble the flute's 2f, high nibble the strings' root. Two
+; voices that know nothing about each other have to write one byte
+; between them. The tables hold each nibble already shifted into place,
+; so the frame is three ORs - and that is the whole of the interaction.
+;
+; The frame writes fourteen registers whatever is going on, because at
+; this point deciding what changed costs more than writing it: 2,466
+; T-states, 2.1% of a 50 Hz frame, for two instruments.
+;
+; The envelopes, the vibrato tables, the phrase and the chord lengths
+; are shakudata.z80s's and stringsdata.z80s's, unchanged.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+en_init:
+        LD   HL,en_ini
+        LD   E,EN_INITS
+        CALL saa_send
+        XOR  A
+        LD   (en_fleft),A       ; both voices idle
+        LD   (en_fnleft),A
+        LD   (en_pleft),A
+        LD   (en_pcleft),A
+        RET
+
+en_play:
+        LD   HL,sk_phrase       ; the flute's phrase, unchanged
+        LD   (en_fpp),HL
+        LD   A,SK_NOTES
+        LD   (en_fnleft),A
+        LD   HL,en_chords       ; and the pad's chords, repacked
+        LD   (en_pcp),HL
+        LD   A,ST_CHORDS
+        LD   (en_pcleft),A
+        LD   HL,ST_TOTAL
+        LD   (en_ptotal),HL
+        XOR  A
+        LD   (en_fleft),A
+        LD   (en_fk),A
+        LD   (en_fvp),A
+        LD   (en_pleft),A
+        LD   (en_pk),A
+        LD   (en_pvp),A
+        RET
+
+;------------------------------------------------------------------
+; en_frame - both voices, then the fourteen registers.
+;------------------------------------------------------------------
+
+en_frame:
+        CALL en_flute
+        CALL en_pad
+        LD   A,(en_focth)       ; 0x10: the breath's octave, and f's
+        OR   EN_NOISEOCT
+        LD   (en_o0 + 1),A
+        LD   A,(en_foctl)       ; 0x11: 2f's, and the chord root's
+        LD   HL,en_soct0
+        OR   (HL)
+        LD   (en_o1 + 1),A
+        LD   A,(en_soct1)       ; 0x12: the third's and the fifth's
+        LD   HL,en_soct2
+        OR   (HL)
+        LD   (en_o2 + 1),A
+        LD   HL,en_buf
+        LD   E,EN_PAIRS
+        JP   saa_send
+
+;------------------------------------------------------------------
+; en_flute - shaku.z80s's voice with 4f taken away.
+;------------------------------------------------------------------
+
+en_flute:
+        LD   A,(en_fleft)
+        OR   A
+        CALL Z,en_ffetch
+        LD   A,(en_fleft)
+        OR   A
+        JR   Z,en_fhush         ; the phrase is over
+        LD   A,(en_fnote)
+        INC  A
+        JR   Z,en_fhush         ; or this is a rest
+
+        LD   A,(en_fleft)       ; which row of the envelope
+        CP   SK_RELLEN + 1
+        JR   NC,en_fswell
+        LD   B,A
+        LD   A,SK_RELLEN
+        SUB  B
+        LD   HL,sk_rel
+        JR   en_frow
+en_fswell:
+        LD   A,(en_fk)
+        CP   SK_ENVLEN
+        JR   C,en_fs1
+        LD   A,SK_ENVLEN - 1
+en_fs1:
+        LD   HL,sk_env
+en_frow:
+        LD   E,A
+        ADD  A,A
+        ADD  A,E                ; three bytes a row
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   A,(HL)             ; tone level
+        INC  HL
+        LD   C,A
+        LD   A,(HL)             ; breath level
+        INC  HL
+        LD   B,A
+        LD   A,(HL)             ; and the bend
+        EX   AF,AF'
+
+        LD   A,(en_fk)          ; the vibrato, arriving or steady
+        CP   SK_VIBRAMP
+        JR   NC,en_fv1
+        LD   HL,sk_vin
+        JR   en_fv2
+en_fv1:
+        LD   A,(en_fvp)
+        LD   HL,sk_vst
+en_fv2:
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   A,(HL)
+        LD   E,A
+        EX   AF,AF'
+        ADD  A,E
+        LD   E,A
+        LD   A,(en_fn)
+        ADD  A,E
+        LD   (en_f0 + 1),A      ; f
+        LD   (en_f1 + 1),A      ; and 2f, the same byte an octave up
+
+        LD   A,B                ; the breath
+        CALL saa_dup
+        LD   (en_a0 + 1),A
+        LD   A,C
+        CALL saa_dup
+        LD   (en_a1 + 1),A
+        LD   A,C
+        SUB  SK_H2
+        JR   NC,en_fl2
+        XOR  A
+en_fl2:
+        CALL saa_dup
+        LD   (en_a2 + 1),A
+        JR   en_fstep
+
+en_fhush:                       ; a rest, or the end: the note stands still
+        LD   A,(en_fn)
+        LD   (en_f0 + 1),A
+        LD   (en_f1 + 1),A
+        XOR  A
+        LD   (en_a0 + 1),A
+        LD   (en_a1 + 1),A
+        LD   (en_a2 + 1),A
+
+en_fstep:
+        LD   A,(en_fleft)
+        OR   A
+        RET  Z                  ; nothing left to count down
+        DEC  A
+        LD   (en_fleft),A
+        LD   HL,en_fk
+        INC  (HL)
+        JR   NZ,en_fs2
+        DEC  (HL)
+en_fs2:
+        LD   HL,en_fvp
+        INC  (HL)
+        LD   A,(HL)
+        CP   SK_VIBLEN
+        RET  C
+        LD   (HL),0
+        RET
+
+en_ffetch:
+        LD   A,(en_fnleft)
+        OR   A
+        RET  Z
+        DEC  A
+        LD   (en_fnleft),A
+        LD   HL,(en_fpp)
+        LD   A,(HL)
+        INC  HL
+        LD   (en_fnote),A
+        LD   A,(HL)
+        INC  HL
+        LD   (en_fleft),A
+        LD   (en_fpp),HL
+        XOR  A
+        LD   (en_fk),A
+        LD   (en_fvp),A
+        LD   A,(en_fnote)
+        INC  A
+        RET  Z                  ; a rest keeps the last note's pitch
+        DEC  A
+        LD   L,A
+        ADD  A,A
+        ADD  A,L                ; three bytes a note
+        LD   L,A
+        LD   H,0
+        LD   DE,en_notes
+        ADD  HL,DE
+        LD   A,(HL)
+        LD   (en_fn),A
+        INC  HL
+        LD   A,(HL)             ; its octave, for 0x10's high nibble
+        LD   (en_focth),A
+        INC  HL
+        LD   A,(HL)             ; and 2f's, for 0x11's low one
+        LD   (en_foctl),A
+        RET
+
+;------------------------------------------------------------------
+; en_pad - strings.z80s's voice with the detuned twins taken away.
+;------------------------------------------------------------------
+
+en_pad:
+        LD   A,(en_pleft)
+        OR   A
+        CALL Z,en_pfetch
+        LD   A,(en_pleft)
+        OR   A
+        JR   NZ,en_pon
+        XOR  A                  ; the progression is over
+        LD   (en_a3 + 1),A
+        LD   (en_a4 + 1),A
+        LD   (en_a5 + 1),A
+        RET
+en_pon:
+        LD   HL,st_vib          ; the sine, where this frame is in it
+        LD   A,(en_pvp)
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   BC,ST_SPREAD
+        LD   DE,en_pnow
+        LD   A,(DE)             ; the root
+        ADD  A,(HL)
+        LD   (en_f2 + 1),A
+        INC  DE
+        INC  DE
+        ADD  HL,BC
+        LD   A,(DE)             ; the third, a third of a cycle behind
+        ADD  A,(HL)
+        LD   (en_f3 + 1),A
+        INC  DE
+        INC  DE
+        ADD  HL,BC
+        LD   A,(DE)             ; and the fifth
+        ADD  A,(HL)
+        LD   (en_f4 + 1),A
+
+        LD   HL,(en_ptotal)     ; the level: release, attack or the middle
+        LD   A,H
+        OR   A
+        JR   NZ,en_patk
+        LD   A,L
+        CP   ST_RELLEN + 1
+        JR   NC,en_patk
+        LD   B,A
+        LD   A,ST_RELLEN
+        SUB  B
+        LD   HL,st_rel
+        JR   en_plook
+en_patk:
+        LD   A,(en_pk)
+        CP   ST_ATTLEN
+        JR   C,en_pa1
+        LD   A,EN_SUS
+        JR   en_phave
+en_pa1:
+        LD   HL,st_att
+en_plook:
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   A,(HL)
+        CP   EN_SUS             ; the pad is quieter here than it plays alone
+        JR   C,en_phave
+        LD   A,EN_SUS
+en_phave:
+        CALL saa_dup
+        LD   (en_a3 + 1),A
+        LD   (en_a4 + 1),A
+        LD   (en_a5 + 1),A
+
+        LD   HL,en_pleft
+        DEC  (HL)
+        LD   HL,(en_ptotal)
+        DEC  HL
+        LD   (en_ptotal),HL
+        LD   HL,en_pk
+        INC  (HL)
+        JR   NZ,en_ps1
+        DEC  (HL)
+en_ps1:
+        LD   HL,en_pvp
+        INC  (HL)
+        LD   A,(HL)
+        CP   ST_VIBLEN
+        RET  C
+        LD   (HL),0
+        RET
+
+en_pfetch:
+        LD   A,(en_pcleft)
+        OR   A
+        RET  Z
+        DEC  A
+        LD   (en_pcleft),A
+        LD   HL,(en_pcp)
+        LD   DE,en_pnow
+        LD   BC,6
+        LDIR                    ; three (frequency byte, octave nibble)
+        LD   A,(HL)
+        INC  HL
+        LD   (en_pleft),A
+        LD   (en_pcp),HL
+        LD   A,(en_pnow + 1)    ; the root's octave, for 0x11's high nibble
+        LD   (en_soct0),A
+        LD   A,(en_pnow + 3)    ; the third's, for 0x12's low one
+        LD   (en_soct1),A
+        LD   A,(en_pnow + 5)    ; the fifth's, for its high one
+        LD   (en_soct2),A
+        RET
+
+;------------------------------------------------------------------
+; Fourteen registers, every frame.
+;------------------------------------------------------------------
+
+en_buf:
+en_o0:          DEFB 0x10,0     ; breath octave, flute f octave
+en_o1:          DEFB 0x11,0     ; flute 2f octave, chord root octave
+en_o2:          DEFB 0x12,0     ; the third's and the fifth's
+en_f0:          DEFB 0x09,0     ; the flute
+en_f1:          DEFB 0x0A,0     ; and its octave
+en_f2:          DEFB 0x0B,0     ; the chord
+en_f3:          DEFB 0x0C,0
+en_f4:          DEFB 0x0D,0
+en_a0:          DEFB 0x00,0     ; the breath
+en_a1:          DEFB 0x01,0     ; the flute
+en_a2:          DEFB 0x02,0
+en_a3:          DEFB 0x03,0     ; the strings
+en_a4:          DEFB 0x04,0
+en_a5:          DEFB 0x05,0
+EN_PAIRS:       EQU ($ - en_buf) / 2
+
+en_fpp:         DEFW 0          ; the flute
+en_fnleft:      DEFB 0
+en_fnote:       DEFB 0
+en_fleft:       DEFB 0
+en_fn:          DEFB 0
+en_fk:          DEFB 0
+en_fvp:         DEFB 0
+en_focth:       DEFB 0
+en_foctl:       DEFB 0
+
+en_pnow:        DEFS 6          ; the strings
+en_pcp:         DEFW 0
+en_pcleft:      DEFB 0
+en_pleft:       DEFB 0
+en_ptotal:      DEFW 0
+en_pk:          DEFB 0
+en_pvp:         DEFB 0
+en_soct0:       DEFB 0
+en_soct1:       DEFB 0
+en_soct2:       DEFB 0

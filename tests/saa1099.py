@@ -194,16 +194,25 @@ def dcblock(x, rate=RATE, hz=25.0):
     return y
 
 
-def wav(path, stereo, rate=RATE, peak=0.89):
-    """Write float stereo to a 16-bit wav, normalised to `peak`."""
+def wav(path, stereo, rate=RATE, peak=0.89, mono=False):
+    """Write float stereo to a 16-bit wav, normalised to `peak`.
+
+    mono=True writes one channel, and asserts the two are the same -
+    which they are whenever the routine puts the same level in both
+    nibbles of every amplitude register, and it halves the file.
+    """
     import wave
     s = np.stack([dcblock(stereo[:, 0]), dcblock(stereo[:, 1])], axis=1)
+    if mono:
+        assert np.array_equal(stereo[:, 0], stereo[:, 1]), \
+            "the two channels differ; this one wants a stereo wav"
+        s = s[:, :1]
     m = np.abs(s).max()
     if m > 0:
         s = s * (peak / m)
     data = (np.clip(s, -1, 1) * 32767).astype("<i2")
     with wave.open(path, "wb") as f:
-        f.setnchannels(2)
+        f.setnchannels(s.shape[1])
         f.setsampwidth(2)
         f.setframerate(rate)
         f.writeframes(data.tobytes())

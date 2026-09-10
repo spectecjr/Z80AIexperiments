@@ -63,10 +63,16 @@ And moving memory about, measured on the eight-line scroll (`scroll8`):
 | `crow_frame`, silent | 55 | |
 | `crow_frame`, starting a caw | 784 | the LFSR that varies each call |
 | `crow_init` | 1,419 | sixteen registers, once |
+| `sk_frame`, a note going (`shaku`) | **1,554** | a shakuhachi: f, 2f, 4f and a breath channel |
+| `sk_frame`, a note starting | 1,990 | the octave registers as well |
+| `st_frame`, holding a chord (`strings`) | **1,097** | six channels: a triad and a detuned copy of it |
+| `st_frame`, at its busiest | 2,463 | a chord change |
+| `en_frame` (`ensemble`) | **3,360** | both of them at once, three oscillators each |
 
-Verified the same way as everything else - every OUT, in order, against
-`tests/crow.py` - and then played through `tests/saa1099.py` to make
-`demo/crow.wav`. See `crow.md`.
+All verified the same way as everything else - every OUT, in order,
+against the routine's model - and then played through
+`tests/saa1099.py` to make the wavs in `demo/`. See `crow.md`,
+`shaku.md`, `strings.md` and `ensemble.md`.
 
 ## 2. The rasteriser (`renderlit`), before and after
 

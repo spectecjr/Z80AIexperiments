@@ -1,0 +1,264 @@
+;------------------------------------------------------------------
+; shaku.z80s - a shakuhachi, out of one SAA1099, at 50 Hz
+;
+;   sk_init     set the chip up for the flute, once
+;   sk_play     start the phrase
+;   sk_frame    one 50 Hz frame of it
+;
+; A 1.8 shaku flute is bored for D F G A C D, and what makes it sound
+; like bamboo rather than an organ is breath. Three things carry that,
+; and none of them is a sample:
+;
+;   THE BREATH IS A NOISE CHANNEL. Noise generator 1 in mode 3 - clocked
+;   by channel 3's tone generator rather than one of the three fixed
+;   rates - sits under the note the whole time, loud at the attack and
+;   about a third of the tone afterwards. It is most of the instrument.
+;
+;   THE VIBRATO IS THE FRAME RATE. A shakuhachi's yuri is about 4 Hz,
+;   and 4 Hz at 50 frames a second is twelve frames a cycle, so unlike
+;   crow.z80s's roughness this is a modulation the CPU can draw. It
+;   comes in over four cycles, nothing to +-25 cents, which is what a
+;   player does with their head rather than their fingers. Two tables:
+;   forty-eight frames of it arriving, then one cycle for ever.
+;
+;   THE PITCH SAGS AS THE BREATH GOES. The release table takes the note
+;   six units down over its last frames - meri, the flattening that
+;   comes of dropping the chin - and the attack starts three units
+;   under and rises into the note.
+;
+; The tone is three channels: f, 2f and 4f at 0, -2 and -6 levels. An
+; octave up is the SAME frequency byte with the octave register one
+; higher, so one number feeds all three - which is also why the vibrato
+; and the meri only have to be worked out once.
+;
+; A frame is nine register writes at the start of a note and seven
+; after that, which is 1,432 T-states: 1.2% of a frame.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+;------------------------------------------------------------------
+; sk_init - the registers that do not change, and a silent flute.
+;------------------------------------------------------------------
+
+sk_init:
+        LD   HL,sk_ini
+        LD   E,SK_INITS
+        CALL saa_send
+        XOR  A
+        LD   (sk_left),A        ; nothing sounding
+        LD   (sk_nleft),A       ; and nothing to play
+        RET
+
+;------------------------------------------------------------------
+; sk_play - from the top of the phrase, beginning with the next frame.
+;------------------------------------------------------------------
+
+sk_play:
+        LD   HL,sk_phrase
+        LD   (sk_pp),HL
+        LD   A,SK_NOTES
+        LD   (sk_nleft),A
+        XOR  A
+        LD   (sk_left),A
+        RET
+
+;------------------------------------------------------------------
+; sk_frame - one 50 Hz frame.
+;------------------------------------------------------------------
+
+sk_frame:
+        LD   A,(sk_left)
+        OR   A
+        CALL Z,sk_fetch         ; this note is done: take the next
+        LD   A,(sk_left)
+        OR   A
+        RET  Z                  ; and the phrase is over
+        LD   A,(sk_note)
+        INC  A
+        JP   Z,sk_rest          ; SK_REST is 255
+
+;--- which row of the envelope this frame is on
+        LD   A,(sk_left)
+        CP   SK_RELLEN + 1
+        JR   NC,sk_swell
+        LD   B,A                ; inside the release: count from its end
+        LD   A,SK_RELLEN
+        SUB  B
+        LD   HL,sk_rel
+        JR   sk_row
+sk_swell:
+        LD   A,(sk_k)           ; attack and swell, held at the last row
+        CP   SK_ENVLEN
+        JR   C,sk_sw1
+        LD   A,SK_ENVLEN - 1
+sk_sw1:
+        LD   HL,sk_env
+sk_row:
+        LD   E,A
+        ADD  A,A
+        ADD  A,E                ; three bytes a row
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+
+        LD   A,(HL)             ; the tone level
+        INC  HL
+        LD   C,A
+        LD   A,(HL)             ; the noise level
+        INC  HL
+        LD   B,A
+        LD   A,(HL)             ; and where the pitch is bent to
+        EX   AF,AF'             ; park it: the vibrato wants A
+
+;--- the vibrato: coming in, or steady
+        LD   A,(sk_k)
+        CP   SK_VIBRAMP
+        JR   NC,sk_vst1
+        LD   HL,sk_vin
+        JR   sk_vib
+sk_vst1:
+        LD   A,(sk_vp)
+        LD   HL,sk_vst
+sk_vib:
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   A,(HL)
+        LD   E,A
+        EX   AF,AF'             ; the bend back
+        ADD  A,E                ; both offsets together
+        LD   E,A
+        LD   A,(sk_n)
+        ADD  A,E                ; f, and 2f and 4f are the same byte
+        LD   (sk_f0 + 1),A
+        LD   (sk_f1 + 1),A
+        LD   (sk_f2 + 1),A
+
+;--- the four levels
+        LD   A,C
+        CALL saa_dup
+        LD   (sk_a0 + 1),A
+        LD   A,C
+        SUB  SK_H2
+        JR   NC,sk_l2
+        XOR  A
+sk_l2:
+        CALL saa_dup
+        LD   (sk_a1 + 1),A
+        LD   A,C
+        SUB  SK_H4
+        JR   NC,sk_l4
+        XOR  A
+sk_l4:
+        CALL saa_dup
+        LD   (sk_a2 + 1),A
+        LD   A,B
+        CALL saa_dup
+        LD   (sk_a3 + 1),A
+
+;--- send it: the octaves too, but only on the first frame of a note
+        LD   A,(sk_k)
+        OR   A
+        LD   HL,sk_buf
+        LD   E,SK_PAIRS
+        JR   Z,sk_send
+        LD   HL,sk_f0
+        LD   E,SK_PAIRS - 2
+sk_send:
+        CALL saa_send
+        JR   sk_step
+
+sk_rest:                        ; silence, written once and then left
+        LD   A,(sk_k)
+        OR   A
+        JR   NZ,sk_step
+        LD   HL,sk_quiet
+        LD   E,4
+        CALL saa_send
+
+sk_step:
+        LD   HL,sk_left
+        DEC  (HL)
+        LD   HL,sk_k
+        INC  (HL)
+        JR   NZ,sk_st1
+        DEC  (HL)               ; k saturates; the envelope is held anyway
+sk_st1:
+        LD   HL,sk_vp
+        INC  (HL)
+        LD   A,(HL)
+        CP   SK_VIBLEN
+        RET  C
+        LD   (HL),0
+        RET
+
+;------------------------------------------------------------------
+; sk_fetch - the next note of the phrase, or the end of it.
+;------------------------------------------------------------------
+
+sk_fetch:
+        LD   A,(sk_nleft)
+        OR   A
+        RET  Z                  ; the phrase is over
+        DEC  A
+        LD   (sk_nleft),A
+        LD   HL,(sk_pp)
+        LD   A,(HL)             ; which note
+        INC  HL
+        LD   (sk_note),A
+        LD   A,(HL)             ; and for how many frames
+        INC  HL
+        LD   (sk_left),A
+        LD   (sk_pp),HL
+        XOR  A
+        LD   (sk_k),A
+        LD   (sk_vp),A
+        LD   A,(sk_note)
+        INC  A
+        RET  Z                  ; a rest has nothing to look up
+        DEC  A
+        LD   L,A
+        ADD  A,A
+        ADD  A,L                ; three bytes a note
+        LD   L,A
+        LD   H,0
+        LD   DE,sk_notes
+        ADD  HL,DE
+        LD   A,(HL)             ; the frequency byte
+        LD   (sk_n),A
+        INC  HL
+        LD   A,(HL)             ; the octaves of f and 2f
+        LD   (sk_o0 + 1),A
+        INC  HL
+        LD   A,(HL)             ; and of 4f and the breath
+        LD   (sk_o1 + 1),A
+        RET
+
+;------------------------------------------------------------------
+; The frame's writes. The register bytes never change; the frame code
+; patches the values in between them. A note's first frame sends the
+; lot; the rest start at sk_f0.
+;------------------------------------------------------------------
+
+sk_buf:
+sk_o0:          DEFB 0x10,0     ; octaves of f and 2f
+sk_o1:          DEFB 0x11,0     ; and of 4f and the breath
+sk_f0:          DEFB 0x08,0     ; f
+sk_f1:          DEFB 0x09,0     ; 2f, the same byte an octave up
+sk_f2:          DEFB 0x0A,0     ; 4f, two octaves up
+sk_a0:          DEFB 0x00,0     ; and the levels
+sk_a1:          DEFB 0x01,0
+sk_a2:          DEFB 0x02,0
+sk_a3:          DEFB 0x03,0     ; the breath
+SK_PAIRS:       EQU ($ - sk_buf) / 2
+
+sk_quiet:       DEFB 0x00,0,0x01,0,0x02,0,0x03,0
+
+sk_pp:          DEFW 0          ; where the phrase has got to
+sk_nleft:       DEFB 0          ; notes of it still to come
+sk_note:        DEFB 0          ; which note is sounding
+sk_left:        DEFB 0          ; frames of it left
+sk_n:           DEFB 0          ; its frequency byte
+sk_k:           DEFB 0          ; frames since it started
+sk_vp:          DEFB 0          ; and where the vibrato has got to

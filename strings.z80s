@@ -1,0 +1,241 @@
+;------------------------------------------------------------------
+; strings.z80s - a string pad, out of one SAA1099, at 50 Hz
+;
+;   st_init     set the chip up, once
+;   st_play     start the progression
+;   st_frame    one 50 Hz frame of it
+;
+; Six channels, spent the way a string machine spends them:
+;
+;   ch0 ch2 ch4     the three notes of the chord
+;   ch1 ch3 ch5     the same three, ST_DET frequency units above
+;
+; Three units is about a hertz down here, so each pair beats once a
+; second, and that beating is the whole of what makes an ensemble sound
+; like more than one player. The CPU could draw a 1 Hz tremolo at 50
+; frames a second - but it would be one tremolo, in step across the
+; whole chord, and that is a Leslie, not a section. Detuned pairs are
+; three independent ones, for nothing.
+;
+; THE VIBRATO IS SHARED BUT NOT IN PHASE. One twelve-entry sine, laid
+; down twice so the index never has to wrap - twist.z80s's trick - and
+; read at +0, +4 and +8 for the three notes. They wander against each
+; other at no cost at all: same table, three offsets.
+;
+; CHORDS CHANGE LEGATO. The notes move and the level does not, so there
+; is one attack at the start and one release at the end, which is what
+; makes it a pad rather than four stabs. The amplitude registers are
+; only written when the level actually changes, so most frames are six
+; frequency writes and nothing else.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+st_init:
+        LD   HL,st_ini
+        LD   E,ST_INITS
+        CALL saa_send
+        XOR  A
+        LD   (st_left),A        ; nothing sounding
+        LD   (st_cleft),A       ; and nothing to play
+        RET
+
+;------------------------------------------------------------------
+; st_play - from the top, beginning with the next frame.
+;------------------------------------------------------------------
+
+st_play:
+        LD   HL,st_chords
+        LD   (st_cp),HL
+        LD   HL,ST_TOTAL
+        LD   (st_total),HL
+        LD   A,ST_CHORDS
+        LD   (st_cleft),A
+        XOR  A
+        LD   (st_left),A
+        LD   (st_k),A
+        LD   (st_vp),A
+        LD   A,0xFF
+        LD   (st_level),A       ; so the first frame writes the levels
+        RET
+
+;------------------------------------------------------------------
+; st_frame - one 50 Hz frame.
+;------------------------------------------------------------------
+
+st_frame:
+        LD   A,(st_left)
+        OR   A
+        CALL Z,st_fetch
+        LD   A,(st_left)
+        OR   A
+        RET  Z                  ; the progression is over
+
+;--- the octaves, on the first frame of a chord
+        LD   A,(st_new)
+        OR   A
+        JP   Z,st_freq
+        XOR  A
+        LD   (st_new),A
+        LD   HL,st_buf
+        LD   E,3
+        CALL saa_send
+
+;--- the six frequencies: three notes, each with its detuned twin
+st_freq:
+        LD   HL,st_vib
+        LD   A,(st_vp)
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE              ; the sine, where this frame is in it
+        LD   BC,ST_SPREAD
+        LD   DE,st_now
+
+        LD   A,(DE)             ; the first note
+        ADD  A,(HL)             ; wobbled
+        LD   (st_f0 + 1),A
+        ADD  A,ST_DET
+        LD   (st_f1 + 1),A      ; and its twin
+        INC  DE
+        INC  DE
+        ADD  HL,BC              ; a third of a cycle on
+
+        LD   A,(DE)             ; the second
+        ADD  A,(HL)
+        LD   (st_f2 + 1),A
+        ADD  A,ST_DET
+        LD   (st_f3 + 1),A
+        INC  DE
+        INC  DE
+        ADD  HL,BC
+
+        LD   A,(DE)             ; the third
+        ADD  A,(HL)
+        LD   (st_f4 + 1),A
+        ADD  A,ST_DET
+        LD   (st_f5 + 1),A
+
+        LD   HL,st_f0
+        LD   E,6
+        CALL saa_send
+
+;--- the level: release if the end is near, attack if the start was
+        LD   HL,(st_total)
+        LD   A,H
+        OR   A
+        JP   NZ,st_atk          ; more than 255 frames still to run
+        LD   A,L
+        CP   ST_RELLEN + 1
+        JP   NC,st_atk
+        LD   B,A
+        LD   A,ST_RELLEN
+        SUB  B
+        LD   HL,st_rel
+        JP   st_look
+st_atk:
+        LD   A,(st_k)
+        CP   ST_ATTLEN
+        JR   C,st_atk1
+        LD   A,ST_SUS           ; and the sustain in between
+        JP   st_have
+st_atk1:
+        LD   HL,st_att
+st_look:
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   A,(HL)
+st_have:
+        LD   HL,st_level
+        CP   (HL)
+        JP   Z,st_step          ; nothing to say
+        LD   (HL),A
+        CALL saa_dup
+        LD   (st_a0 + 1),A
+        LD   (st_a1 + 1),A
+        LD   (st_a2 + 1),A
+        LD   (st_a3 + 1),A
+        LD   (st_a4 + 1),A
+        LD   (st_a5 + 1),A
+        LD   HL,st_a0
+        LD   E,6
+        CALL saa_send
+
+st_step:
+        LD   HL,st_left
+        DEC  (HL)
+        LD   HL,(st_total)
+        DEC  HL
+        LD   (st_total),HL
+        LD   HL,st_k
+        INC  (HL)
+        JR   NZ,st_s1
+        DEC  (HL)               ; k saturates
+st_s1:
+        LD   HL,st_vp
+        INC  (HL)
+        LD   A,(HL)
+        CP   ST_VIBLEN
+        RET  C
+        LD   (HL),0
+        RET
+
+;------------------------------------------------------------------
+; st_fetch - the next chord: three notes, their octaves, its length.
+;------------------------------------------------------------------
+
+st_fetch:
+        LD   A,(st_cleft)
+        OR   A
+        RET  Z
+        DEC  A
+        LD   (st_cleft),A
+        LD   HL,(st_cp)
+        LD   DE,st_now
+        LD   BC,6
+        LDIR                    ; three (frequency byte, octave byte)
+        LD   A,(HL)             ; and how long it holds
+        INC  HL
+        LD   (st_left),A
+        LD   (st_cp),HL
+        LD   A,1
+        LD   (st_new),A         ; the octaves want sending
+        LD   A,(st_now + 1)
+        LD   (st_o0 + 1),A
+        LD   A,(st_now + 3)
+        LD   (st_o1 + 1),A
+        LD   A,(st_now + 5)
+        LD   (st_o2 + 1),A
+        RET
+
+;------------------------------------------------------------------
+; The frame's writes: the octaves on a chord change, the six
+; frequencies always, the six levels when they move.
+;------------------------------------------------------------------
+
+st_buf:
+st_o0:          DEFB 0x10,0     ; the first note's octave, in both nibbles
+st_o1:          DEFB 0x11,0
+st_o2:          DEFB 0x12,0
+st_f0:          DEFB 0x08,0     ; note one
+st_f1:          DEFB 0x09,0     ; and its twin
+st_f2:          DEFB 0x0A,0     ; note two
+st_f3:          DEFB 0x0B,0
+st_f4:          DEFB 0x0C,0     ; note three
+st_f5:          DEFB 0x0D,0
+st_a0:          DEFB 0x00,0
+st_a1:          DEFB 0x01,0
+st_a2:          DEFB 0x02,0
+st_a3:          DEFB 0x03,0
+st_a4:          DEFB 0x04,0
+st_a5:          DEFB 0x05,0
+
+st_now:         DEFS 6          ; the chord that is sounding
+st_cp:          DEFW 0          ; where the progression has got to
+st_cleft:       DEFB 0          ; chords still to come
+st_left:        DEFB 0          ; frames of this one left
+st_total:       DEFW 0          ; frames of the whole thing left
+st_k:           DEFB 0          ; frames since it started
+st_vp:          DEFB 0          ; where the vibrato is
+st_new:         DEFB 0          ; a chord just started
+st_level:       DEFB 0xFF       ; what the amplitude registers hold

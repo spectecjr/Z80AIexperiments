@@ -1,0 +1,51 @@
+;------------------------------------------------------------------
+; saa.z80s - the SAA1099's two ports, and the loop that feeds them
+;
+;   saa_send    HL over (register, value) pairs, E of them
+;   saa_dup     A = 0..15 -> the same level in both nibbles
+;
+; On a SAM the chip is register-select at 511 and data at 255, and both
+; have 255 in the low half of the address. So C holds 255 for the whole
+; run and B - which is what the Z80 puts on the top half of the address
+; bus for OUT (C),A - picks between them: 1 selects, 0 writes. A pair
+; of writes is then ten bytes of code with nothing reloaded.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+SAA_PORT:       EQU 255         ; C, the low half of both addresses
+SAA_ADDR:       EQU 1           ; B for port 511, the register select
+SAA_DATA:       EQU 0           ; B for port 255, the data
+
+saa_send:
+        LD   C,SAA_PORT         ; 7
+saa_s1:
+        LD   B,SAA_ADDR         ; 7
+        LD   A,(HL)             ; 7     which register
+        INC  HL                 ; 6
+        OUT  (C),A              ; 12    OUT (511),reg
+        LD   B,SAA_DATA         ; 7
+        LD   A,(HL)             ; 7     and what goes in it
+        INC  HL                 ; 6
+        OUT  (C),A              ; 12    OUT (255),val
+        DEC  E                  ; 4
+        JR   NZ,saa_s1          ; 12/7
+        RET
+
+;------------------------------------------------------------------
+; saa_dup - an amplitude byte. The low nibble is the left channel and
+; the high one the right, and everything here is centred, so both get
+; the same 0..15. BC is left alone because the callers keep levels in
+; it while they work through a frame.
+;------------------------------------------------------------------
+
+saa_dup:
+        PUSH BC
+        LD   B,A
+        RLCA
+        RLCA
+        RLCA
+        RLCA                    ; the top nibble was zero, so this is A<<4
+        OR   B
+        POP  BC
+        RET
