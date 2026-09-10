@@ -12,12 +12,16 @@ The depth stripes are still the palette's job, exactly as before.
 Below MINP, where a square is too narrow to draw honestly, the board
 gives way to a haze - which is what distance does to it anyway.
 """
+import os
+
 W, H, STRIDE = 256, 192, 128
 HZ = 96                         # the horizon, and the last sky row
 S = 256                         # a chequer square, world units
 FOCAL = 221
 CAMH = 380
-MINP = 8                        # narrowest square drawn, in pixels
+MINP = int(os.environ.get("HARRIER_MINP", 8))    # narrowest square
+                                # drawn, in pixels: 8 leaves haze above
+                                # the board, 1 takes it to the horizon
 HAZE = 3                        # the colour index the far field gets
 
 

@@ -45,6 +45,7 @@ about which of those it is.
 | `chequer3.z80s` | **1 px** | **1 px** | palette | 110,806 | 50 Hz |
 | **`chequer4.z80s`** | **1 px** | **1 px** | **pixels** | **114,656** | **50 Hz** |
 | `harrier.z80s` | 1 px | 1 px | palette | 221,451 | 25 Hz |
+| `chequer5` | **1 px** | **1 px** | **pixels** | **129,183** | 25 Hz, board to the horizon |
 
 `chequer4` is the one to use: it draws chequer3's screen — the GIFs come
 out byte for byte identical — with the depth alternation in the pixels
@@ -64,6 +65,17 @@ chooses a band's six values from a table. It needs 40 (value set, colour
 pair) combinations — 1,280 bytes against chequer4's 416, where the low
 block has 756 bytes spare — so it is a memory problem and a fifth routine,
 not an edit.
+
+**How far into the distance.** All of them stop the board at eight-pixel
+squares and let a haze meet the sky, because below that a square is too
+narrow to draw honestly. `chequer5` is chequer4's code with the viewport
+opened all the way — squares down to one pixel, 95 scanlines, no haze — and
+it lands at 129,183 T-states. That is a cliff rather than a slope:
+chequer4's worst frame leaves 1,414 T-states of a 50 Hz frame, and the
+cheapest step down the screen costs 2,350, so nothing in between fits
+either. At 25 Hz it is 54% of the frame where harrier was 92%. See
+`chequer5.md`, which also records what would have to come out of the
+dispatch — 13,000 T-states, a fifth of it — to draw 95 scanlines at 50 Hz.
 
 **The camera in the GIFs.** All five demos now share `stroll()` in
 `tests/mkgif.py`: a slide of two and a half squares either way taking

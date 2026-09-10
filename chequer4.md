@@ -104,6 +104,15 @@ last-byte store between `LD (HL),n` and `LD A,n`, and it no longer loads
 `BC` and `DE` with the two colours — which over 57 bands is around 2,800
 T-states, and the measured whole-frame difference is +3,863.
 
+## The same routine, all the way to the horizon
+
+`chequer5` is this file with a different viewport: the board drawn down to
+squares one pixel wide instead of stopping at eight, which is 95 scanlines
+rather than 84 and no haze at all. It needs a run bank of its own — the
+runs are per width — but not a line of new code. It costs 14,527 T-states,
+which puts it at 129,183 and on the wrong side of a 50 Hz frame; at 25 Hz
+it is 54% of the budget where harrier was 92%. See `chequer5.md`.
+
 ## What it does not fix
 
 **The distance fog is still the palette.** The board is drawn in two

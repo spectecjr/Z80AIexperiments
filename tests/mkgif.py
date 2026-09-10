@@ -455,12 +455,12 @@ def chequer4(outdir, seconds=8):
     the same on every frame of the demo. Compare demo/chequer3.gif,
     which is the same picture the other way round.
     """
+    from mkhrdata import fog as fogtab
     b = Bench("harness_chq4.asm", org=0)
     s = b.syms
     b.call_regs(s["chq4_init"])
-    fog = b.peek(s["chq4_fog"], 2 * 192)
-    haze = b.peek(s["chq4_hazec"], 192)
-    n = int(seconds * 50)
+    fog, haze = fogtab()        # display data: chequer4 never reads it, so
+    n = int(seconds * 50)       # it is not in the image at all
     frames, ts = [], []
     for t in range(n):
         camx, camz = stroll(t)
@@ -473,6 +473,39 @@ def chequer4(outdir, seconds=8):
     still = [[0] * 192] * n                     # the palette does not move
     idx, pal = copper(frames, still, fog, haze)
     p = "%s/chequer4.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, idx, pal, durs)
+    got, bad, secs = check_gif(p, idx, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
+def chequer5(outdir, seconds=8):
+    """chequer5 at its measured rate: 129,183 T-states a frame, 25 Hz.
+
+    chequer4's routine byte for byte, with the board drawn all the way to
+    the horizon instead of stopping at eight-pixel squares: eleven more
+    scanlines, squares down to a single pixel, and no haze. It costs 14,500
+    T-states, which is exactly the wrong side of a 50 Hz frame - but at
+    25 Hz it is half the budget where harrier's 25 Hz floor was all of it.
+    """
+    from mkhrdata import fog as fogtab
+    b = Bench("harness_chq5.asm", org=0)
+    s = b.syms
+    b.call_regs(s["chq4_init"])
+    fog, haze = fogtab()
+    n = int(seconds * 25)
+    frames, ts = [], []
+    for t in range(n):
+        camx, camz = stroll(t, 25)
+        b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["chq4_camz"], camz.to_bytes(2, "little"))
+        into = b.peek(s["chq4_back"], 1)[0]
+        tt, _ = b.call_regs(s["chq4_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    still = [[0] * 192] * n                     # the palette does not move
+    idx, pal = copper(frames, still, fog, haze)
+    p = "%s/chequer5.gif" % outdir
     durs = held(ts)
     size = write_gif(p, idx, pal, durs)
     got, bad, secs = check_gif(p, idx, pal, durs)
@@ -760,6 +793,7 @@ if __name__ == "__main__":
     harrier(d)
     chequer3(d)
     chequer4(d)
+    chequer5(d)
     twist(d)
     roto(d)
     vox(d)

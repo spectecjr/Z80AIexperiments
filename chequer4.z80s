@@ -65,10 +65,11 @@ chq4_f2:
         DJNZ chq4_f2
         DEC  D
         JR   NZ,chq4_f1
-        POP  HL                 ; then the haze, over the rows too far
-        LD   DE,(CHQ4_HZ + 1) * 128     ; away to draw a board on
-        ADD  HL,DE
-        LD   D,CHQ4_TOP - CHQ4_HZ - 1
+        POP  HL
+    IF CHQ4_TOP > CHQ4_HZ + 1           ; then the haze, over the rows too
+        LD   DE,(CHQ4_HZ + 1) * 128     ; far away to draw a board on - of
+        ADD  HL,DE                      ; which there are none at all once
+        LD   D,CHQ4_TOP - CHQ4_HZ - 1   ; the board reaches the horizon
 chq4_f3:
         LD   B,128
 chq4_f4:
@@ -77,6 +78,7 @@ chq4_f4:
         DJNZ chq4_f4
         DEC  D
         JR   NZ,chq4_f3
+    ENDIF
         RET
 
 ;------------------------------------------------------------------
@@ -113,7 +115,7 @@ chq4_msk8:
         LD   A,(chq4_camz+1)    ; depth does, so it goes in with it
         ADD  A,C
         LD   (chq4_z2+1),A
-        LD   HL,chq4_ztab + 2 * CHQ4_TOP
+        LD   HL,chq4_ztab       ; which starts at the top row
         LD   DE,chq4_msk + CHQ4_TOP
         LD   B,192 - CHQ4_TOP
 chq4_m1:
@@ -273,7 +275,8 @@ chq4_shift:
 chq4_j:
         JP   0                  ; patched: the run for this band
 chq4_ret:
-chq3_ret:                       ; the name the shared run bank knows
+chq3_ret:                       ; the names the run banks know: chequer3's
+chq5_ret:                       ; bank, or chequer5's own full-depth one
         EXX
         LD   A,L                ; the row above is 128 bytes back, and
         SUB  128                ; DE is spoken for
@@ -290,7 +293,7 @@ chq4_bend:
         LD   SP,HL              ; above it; put that back
         INC  SP
         EXX
-        LD   BC,CHQ4_HAZE * 0x101
+        LD   BC,CHQ4_ABOVE * 0x101
         DUP  CHQ4_SPILL
         PUSH BC
         EDUP
