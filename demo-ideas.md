@@ -251,6 +251,13 @@ say to attack instead is the span setup - about 300 of the 431 T-states a
 scanline, for a span that then fills ten bytes at 17.5 each. See
 `polyfast.md`.
 
+**The artwork arrived, and it is traced rather than guessed.**
+`entropylogo.png` went to vectors by boundary tracing and
+Douglas-Peucker, and scores 3.0% against its own pixels. Nine convex
+pieces rather than seven: `PRISM_SHAPE=entropy` builds it, 220,823
+T-states a frame precomputed - 27.2 Hz - and 550,669 live. See
+`entropylogo.md`.
+
 What follows is the original note.
 
 It'd be great if we could take the 3D Lit Cube renderer and see if we could use it to render the
