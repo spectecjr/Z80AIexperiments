@@ -46,6 +46,7 @@ about which of those it is.
 | **`chequer4.z80s`** | **1 px** | **1 px** | **pixels** | **114,656** | **50 Hz** |
 | `harrier.z80s` | 1 px | 1 px | palette | 221,451 | 25 Hz |
 | `chequer5` | **1 px** | **1 px** | **pixels** | **129,183** | 25 Hz, board to the horizon |
+| `chequer6` | **1 px** | **1 px** | **pixels** | **154,607** | 25 Hz, and a pilot in front of it |
 
 `chequer4` is the one to use: it draws chequer3's screen — the GIFs come
 out byte for byte identical — with the depth alternation in the pixels
@@ -76,6 +77,15 @@ cheapest step down the screen costs 2,350, so nothing in between fits
 either. At 25 Hz it is 54% of the frame where harrier was 92%. See
 `chequer5.md`, which also records what would have to come out of the
 dispatch — 13,000 T-states, a fifth of it — to draw 95 scanlines at 50 Hz.
+
+**A pilot in front of it.** `chequer6` puts a 32x96 person in a jetpack in
+the middle of the screen for 25,528 T-states a frame, which is 64% of a
+25 Hz frame all told. Three things make a sprite that size affordable: half
+of him is above the board and so is drawn once into both buffers rather
+than every frame; his silhouette is rounded out to whole bytes with his own
+black outline, so no byte he draws needs a read-modify-write; and two
+thirds of his rows repeat the one above, so 96 scanlines are 43 rows of
+run-length stream. See `chequer6.md`.
 
 **The camera in the GIFs.** All five demos now share `stroll()` in
 `tests/mkgif.py`: a slide of two and a half squares either way taking

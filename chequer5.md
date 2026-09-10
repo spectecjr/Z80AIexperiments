@@ -39,6 +39,9 @@ goes to 25 Hz. That is a cliff, not a slope.
 short — was 92%. If the demo is going to be 25 Hz anyway, this is the floor
 to use, and there is half a frame left for whatever goes on top of it.
 
+`chequer6` is this board with a pilot in a jetpack in front of it, for
+another 25,528 T-states. See `chequer6.md`.
+
 ## What it would take to draw 95 scanlines at 50 Hz
 
 The screen itself is 66,880 T-states of the 120,000 and cannot move: 5.5

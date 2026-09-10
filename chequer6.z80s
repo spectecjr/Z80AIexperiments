@@ -1,0 +1,151 @@
+;------------------------------------------------------------------
+; chequer6.z80s - the board, with a pilot standing in front of it
+;
+;   chq6_init    the board's sky and haze, and the pilot's top half
+;   chq6_frame   draw from (chq4_camx, chq4_camz), pilot and all, flip
+;
+; The board is chequer4's routine over chequer5's full-depth viewport,
+; unchanged. What is here is the pilot: 32x96 pixels of person in a
+; jetpack, back to us, in the middle of the screen and over the top of
+; everything.
+;
+; TWO HALVES, DRAWN AT DIFFERENT RATES. The pilot stands on rows 48 to
+; 143 and the board only redraws from row 97 down, so the top half is
+; drawn once into both buffers at init and never touched again, and
+; only the 47 rows the board draws over are redrawn a frame. That is
+; the whole reason it is affordable: 183 bytes of stream a frame rather
+; than 565.
+;
+; NO MASK. A sprite byte is two pixels, and a byte with only one of
+; them covered would need a read, a mask and a write - three times the
+; work. So the pilot's silhouette is rounded out to whole bytes with
+; its own black outline (tests/jetpack.py), and every byte it draws is
+; a whole byte. What is left is a run-length stream, one entry a row,
+; with the rows that repeat the one above collapsed - which is two
+; thirds of them.
+;
+; WHERE IT LIVES. The board's run bank has taken all but 250-odd bytes
+; either side of the screen, so this player sits in the gap under 0x100
+; that the harness leaves, and the stream sits below the buffers with
+; the rest of the board's tables. The stream can be cut in two with a
+; jump op if even that does not fit in one piece.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+chq6_init:
+        CALL chq4_init          ; the sky and the haze into both buffers
+        LD   A,(chq4_back)      ; then the pilot's top half into both,
+        CALL chq6_top           ; because nothing else ever draws there
+        LD   A,(chq4_front)
+        ; fall through
+
+chq6_top:
+        LD   HL,jet_sky
+        LD   DE,JET_Y * 128 + JET_X / 2
+        JR   chq6_draw
+
+;------------------------------------------------------------------
+; chq6_frame - one frame: the board, then the pilot over it
+;------------------------------------------------------------------
+
+chq6_frame:
+        CALL chq4_msk8
+        CALL chq4_floor
+        LD   A,(chq4_back)
+        LD   HL,jet_floor
+        LD   DE,JET_SPLIT * 128 + JET_X / 2
+        CALL chq6_draw
+        LD   A,(chq4_back)
+        LD   B,A
+        LD   A,(chq4_front)
+        LD   (chq4_back),A
+        LD   A,B
+        LD   (chq4_front),A
+        RET
+
+;------------------------------------------------------------------
+; chq6_draw - play a stream of rows into a buffer
+;
+;   A  = the buffer, high byte      HL = the stream
+;   DE = the first row's offset into it
+;
+; ops:  0x01..0x10  skip n bytes        0x40+n  fill n with what follows
+;       0x20+n      copy the n that follow      0x00  end of row
+; and where a row's repeat count would be, 0 ends the stream and 0xFF
+; says the stream goes on somewhere else.
+;------------------------------------------------------------------
+
+chq6_draw:
+        ADD  A,D                ; the buffer, plus the row inside it
+        LD   D,A
+        LD   (chq6_dst),DE
+
+chq6_row:
+        LD   A,(HL)
+        INC  HL
+        OR   A
+        RET  Z                  ; the end of the pilot
+        INC  A
+        JR   Z,chq6_jump
+        DEC  A
+        LD   (chq6_rep),A
+        LD   (chq6_ops),HL      ; where this row's ops start, for the
+chq6_again:                     ; rows that repeat it
+        LD   DE,(chq6_dst)
+
+chq6_op:
+        LD   A,(HL)
+        INC  HL
+        OR   A
+        JR   Z,chq6_eor
+        CP   0x40
+        JR   NC,chq6_fill
+        CP   0x20
+        JR   NC,chq6_copy
+        ADD  A,E                ; skip: the pilot is 16 bytes wide and
+        LD   E,A                ; never crosses a page
+        JR   chq6_op
+
+chq6_copy:
+        SUB  0x20
+        LD   C,A
+        LD   B,0
+        LDIR
+        JR   chq6_op
+
+chq6_fill:
+        SUB  0x40
+        LD   B,A
+        LD   A,(HL)
+        INC  HL
+chq6_f1:
+        LD   (DE),A
+        INC  DE
+        DJNZ chq6_f1
+        JR   chq6_op
+
+chq6_eor:
+        PUSH HL                 ; on down the screen a row
+        LD   HL,(chq6_dst)
+        LD   DE,128
+        ADD  HL,DE
+        LD   (chq6_dst),HL
+        POP  HL
+        LD   A,(chq6_rep)
+        DEC  A
+        LD   (chq6_rep),A
+        JR   Z,chq6_row
+        LD   HL,(chq6_ops)
+        JR   chq6_again
+
+chq6_jump:
+        LD   E,(HL)             ; the stream goes on somewhere else
+        INC  HL
+        LD   D,(HL)
+        EX   DE,HL
+        JR   chq6_row
+
+chq6_dst:       DEFS 2
+chq6_ops:       DEFS 2
+chq6_rep:       DEFS 1

@@ -117,7 +117,7 @@ def sam_rgb(v):
     return (r, g, b)
 
 
-def copper(frames, pars, fog, haze=None):
+def copper(frames, pars, fog, haze=None, fixed=None):
     """Flatten per-scanline palettes into one indexed image and palette.
 
     A routine that flips two palette entries a scanline shows more
@@ -144,6 +144,8 @@ def copper(frames, pars, fog, haze=None):
             g[y][f[y] == 2] = slot(sam_rgb(b))
             if haze is not None:
                 g[y][f[y] == 3] = slot(sam_rgb(haze[y]))
+            for idx, rgb in (fixed or {}).items():
+                g[y][f[y] == idx] = slot(rgb)
         out.append(g)
     if len(pal) > 256:
         raise SystemExit("copper: %d colours, more than a GIF holds"
@@ -512,6 +514,41 @@ def chequer5(outdir, seconds=8):
     report(p, size, n, durs, secs, got, bad)
 
 
+def chequer6(outdir, seconds=8):
+    """chequer6 at its measured rate: 154,607 T-states a frame, 25 Hz.
+
+    chequer5's board with a pilot in front of it - 32x96 pixels of
+    person in a jetpack, played back from a run-length stream. The
+    board's two colours are still the only thing the palette moves; the
+    pilot's eleven are fixed, which is what the copper below does.
+    """
+    import jetpack as J
+    from mkchqdata import sam
+    from mkhrdata import fog as fogtab
+    b = Bench("harness_chq6.asm", org=0)
+    s = b.syms
+    b.call_regs(s["chq6_init"])
+    fog, haze = fogtab()
+    fixed = {i: sam_rgb(sam(*rgb)) for i, rgb in J.PAL.items()}
+    n = int(seconds * 25)
+    frames, ts = [], []
+    for t in range(n):
+        camx, camz = stroll(t, 25)
+        b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["chq4_camz"], camz.to_bytes(2, "little"))
+        into = b.peek(s["chq4_back"], 1)[0]
+        tt, _ = b.call_regs(s["chq6_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    still = [[0] * 192] * n
+    idx, pal = copper(frames, still, fog, haze, fixed)
+    p = "%s/chequer6.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, idx, pal, durs)
+    got, bad, secs = check_gif(p, idx, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 def entropypre(outdir, seconds=14):
     """The traced Entropy logo, precomputed: 220,823 T-states, 27.2 Hz.
 
@@ -794,6 +831,7 @@ if __name__ == "__main__":
     chequer3(d)
     chequer4(d)
     chequer5(d)
+    chequer6(d)
     twist(d)
     roto(d)
     vox(d)

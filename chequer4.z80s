@@ -116,7 +116,7 @@ chq4_msk8:
         ADD  A,C
         LD   (chq4_z2+1),A
         LD   HL,chq4_ztab       ; which starts at the top row
-        LD   DE,chq4_msk + CHQ4_TOP
+        LD   DE,chq4_msk        ; which also starts at the top row
         LD   B,192 - CHQ4_TOP
 chq4_m1:
         LD   A,(HL)
@@ -167,7 +167,7 @@ chq4_floor:
         LD   H,A                ; the last byte of the last row, which
         LD   L,0                ; is where a row's stack pointer starts
         DEC  HL                 ; from and what the row loop stores into
-        LD   DE,chq4_msk + 191  ; and the mask that goes with it
+        LD   DE,chq4_msk + 191 - CHQ4_TOP       ; and the mask
         EXX
 
 chq4_b1:
@@ -312,4 +312,4 @@ chq4_camz:      DEFW 0
 chq4_sp:        DEFS 2
 chq4_cx:        DEFS 2
 chq4_acc:       DEFS 2
-chq4_msk:       DEFS 192
+chq4_msk:       DEFS 192 - CHQ4_TOP
