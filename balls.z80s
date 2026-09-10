@@ -1,0 +1,460 @@
+;------------------------------------------------------------------
+; balls.z80s - vector balls on a spinning cube
+;
+; Twenty balls at a cube's eight corners and twelve edge midpoints, so
+; every coordinate is -S, 0 or +S. That is the whole trick. A rotated
+; coordinate is m0*x + m1*y + m2*z, and if x, y and z can only be
+; those three values then the nine products (m[j]*S)>>7 are worked out
+; once a frame and a ball's position is three signed adds. Nine
+; multiplies a frame rather than nine a ball, no multiply tables, and
+; transform3d is not needed at all.
+;
+; The projection is transform3d's - 64/z out of a reciprocal table and
+; two 8x8 multiplies a ball. The balls are drawn back to front as rows
+; of whole bytes, so nothing needs a mask, and each one remembers
+; where it was in each buffer and blanks that, the way stars.z80s
+; does.
+;
+; Needs mul8x8_qs and democube (for the spin and its signed multiply).
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+BL_BUF0:        EQU 0x80
+BL_BUF1:        EQU 0x20
+
+;------------------------------------------------------------------
+; bl_init
+;------------------------------------------------------------------
+
+bl_init:
+        LD   A,BL_BUF0
+        LD   (bl_back),A
+        LD   A,BL_BUF1
+        LD   (bl_front),A
+        LD   HL,bl_da           ; how fast it turns
+        LD   DE,demo_dax
+        LD   BC,3
+        LDIR
+
+        LD   HL,bl_old0         ; nothing has been anywhere yet
+        LD   B,4 * BL_N
+        XOR  A
+bl_in1:
+        LD   (HL),A
+        INC  HL
+        DJNZ bl_in1
+
+        LD   H,BL_BUF0          ; and both buffers are black
+        CALL bl_wipe
+        LD   H,BL_BUF1
+bl_wipe:
+        LD   L,0
+        LD   B,96
+bl_wp1:
+        PUSH BC
+        LD   B,0
+        XOR  A
+bl_wp2:
+        LD   (HL),A
+        INC  HL
+        DJNZ bl_wp2
+        POP  BC
+        DJNZ bl_wp1
+        RET
+
+;------------------------------------------------------------------
+; bl_frame
+;------------------------------------------------------------------
+
+bl_frame:
+        CALL demo_spin          ; one matrix for all of them
+        CALL bl_ms              ; the nine (m*S) >> 7
+        CALL bl_pos             ; every ball's place and distance
+        CALL bl_sort            ; farthest first
+        CALL bl_erase           ; blank where they were in this buffer
+        CALL bl_draw
+        LD   A,(bl_back)
+        LD   B,A
+        LD   A,(bl_front)
+        LD   (bl_back),A
+        LD   A,B
+        LD   (bl_front),A
+        RET
+
+;------------------------------------------------------------------
+; bl_ms - (m[j] * S) >> 7, nine of them, signed
+;------------------------------------------------------------------
+
+; The nine go in transposed - ms[k][j] rather than ms[j][k] - so that
+; the three things one coordinate contributes are next to each other
+; and bl_pos can walk them with INC HL.
+
+bl_ms:
+        LD   HL,t3d_m
+        LD   IX,bl_tord
+        LD   B,9
+bl_ms1:
+        PUSH BC
+        PUSH HL
+        LD   B,(HL)
+        LD   C,BL_S
+        CALL demo_smul16        ; DE = m * S, signed sixteen bits
+        LD   A,E                ; >> 7 is the high byte doubled with the
+        RLA                     ; top bit of the low one
+        LD   A,D
+        RLA
+        LD   E,(IX+0)           ; and it goes where the transpose wants
+        LD   D,0
+        LD   HL,bl_msv
+        ADD  HL,DE
+        LD   (HL),A
+        INC  IX
+        POP  HL
+        INC  HL
+        POP  BC
+        DJNZ bl_ms1
+        RET
+
+bl_tord:        DEFB 0,3,6,1,4,7,2,5,8
+
+;------------------------------------------------------------------
+; bl_pos - screen x, screen y and z for every ball
+;------------------------------------------------------------------
+
+bl_pos:
+        LD   HL,bl_z
+        LD   (bl_zp),HL
+        LD   IX,bl_coord
+        LD   IY,bl_x
+        LD   A,BL_N
+        LD   (bl_i),A
+bl_ps1:
+        LD   HL,bl_msv          ; the three rotated coordinates at once,
+        LD   B,0                ; reading each of the ball's own three
+        LD   C,B                ; but once
+        LD   D,B
+        LD   A,(IX+0)
+        CALL bl_term
+        LD   A,(IX+1)
+        CALL bl_term
+        LD   A,(IX+2)
+        CALL bl_term
+        LD   A,B
+        LD   (bl_rx),A
+        LD   A,C
+        LD   (bl_ry),A
+
+        LD   A,D                ; z is the distance
+        ADD  A,BL_TZ
+        CP   BL_ZMIN            ; the reciprocal table stops there
+        JR   NC,bl_ps2
+        LD   A,BL_ZMIN
+bl_ps2:
+        LD   (IY+2),A           ; z, and again where the sort can reach
+        PUSH HL                 ; it without three bytes of arithmetic
+        LD   HL,(bl_zp)
+        LD   (HL),A
+        INC  HL
+        LD   (bl_zp),HL
+        POP  HL
+        LD   L,A
+        LD   H,bl_recip / 256
+        LD   C,(HL)             ; 64/z
+
+        LD   A,(bl_ry)
+        CALL bl_smul
+        NEG                     ; sy = 96 - oy
+        ADD  A,96
+        LD   (IY+1),A
+        LD   A,(bl_rx)
+        CALL bl_smul
+        ADD  A,128              ; sx = 128 + ox, and then the byte
+        SRL  A
+        LD   (IY+0),A
+
+        LD   BC,3
+        ADD  IX,BC
+        ADD  IY,BC
+        LD   A,(bl_i)
+        DEC  A
+        LD   (bl_i),A
+        JP   NZ,bl_ps1
+        RET
+
+bl_term:                        ; A = -1, 0 or 1; HL -> its three, which
+        OR   A                  ; it adds into B, C and D
+        JR   Z,bl_tm0
+        JP   M,bl_tm2
+        LD   A,B
+        ADD  A,(HL)
+        LD   B,A
+        INC  HL
+        LD   A,C
+        ADD  A,(HL)
+        LD   C,A
+        INC  HL
+        LD   A,D
+        ADD  A,(HL)
+        LD   D,A
+        INC  HL
+        RET
+bl_tm2:
+        LD   A,B
+        SUB  (HL)
+        LD   B,A
+        INC  HL
+        LD   A,C
+        SUB  (HL)
+        LD   C,A
+        INC  HL
+        LD   A,D
+        SUB  (HL)
+        LD   D,A
+        INC  HL
+        RET
+bl_tm0:
+        INC  HL
+        INC  HL
+        INC  HL
+        RET
+
+bl_smul:                        ; (A * C) >> 8, signed in A
+        OR   A
+        JP   M,bl_sm1
+        LD   B,A
+        CALL qsmul8
+        LD   A,D
+        RET
+bl_sm1:
+        NEG
+        LD   B,A
+        CALL qsmul8
+        LD   A,D
+        NEG
+        RET
+
+;------------------------------------------------------------------
+; bl_sort - the balls' indices, farthest first, by insertion
+;------------------------------------------------------------------
+
+bl_sort:
+        LD   HL,bl_ord          ; 0, 1, 2 ...
+        LD   B,BL_N
+        XOR  A
+bl_so1:
+        LD   (HL),A
+        INC  HL
+        INC  A
+        DJNZ bl_so1
+
+        LD   B,BL_N - 1
+        LD   C,1
+bl_so2:
+        PUSH BC
+        LD   A,C
+        LD   L,A
+        LD   H,0
+        LD   DE,bl_ord
+        ADD  HL,DE
+        LD   A,(HL)
+        LD   (bl_key),A         ; the one being placed
+        CALL bl_zof
+        LD   (bl_keyz),A
+bl_so3:
+        DEC  HL                 ; the one before it
+        LD   A,(HL)
+        CALL bl_zof
+        LD   B,A
+        LD   A,(bl_keyz)        ; farthest first, and stable on a tie so
+        CP   B                  ; that ties draw in the order they were
+        JR   C,bl_so4           ; laid out, as the model's sort does
+        JR   Z,bl_so4
+        LD   A,(HL)             ; otherwise shift it up
+        INC  HL
+        LD   (HL),A
+        DEC  HL
+        LD   DE,bl_ord
+        LD   A,L
+        CP   E
+        JR   NZ,bl_so3
+        LD   A,(bl_key)
+        LD   (HL),A
+        JR   bl_so5
+bl_so4:
+        INC  HL
+        LD   A,(bl_key)
+        LD   (HL),A
+bl_so5:
+        POP  BC
+        INC  C
+        DJNZ bl_so2
+        RET
+
+bl_zof:                         ; A = a ball -> A = its z
+        PUSH HL
+        LD   L,A
+        LD   H,bl_z / 256
+        LD   A,(HL)
+        POP  HL
+        RET
+
+;------------------------------------------------------------------
+; bl_erase, bl_draw
+;------------------------------------------------------------------
+
+bl_erase:
+        CALL bl_recs
+        LD   A,BL_N
+        LD   (bl_i),A
+bl_er1:
+        LD   A,(IX+0)
+        OR   (IX+1)
+        JR   Z,bl_er2
+        LD   L,(IX+0)
+        LD   H,(IX+1)
+        LD   C,0
+        CALL bl_blit
+        LD   (IX+0),0
+        LD   (IX+1),0
+bl_er2:
+        LD   BC,2
+        ADD  IX,BC
+        LD   A,(bl_i)
+        DEC  A
+        LD   (bl_i),A
+        JP   NZ,bl_er1
+        RET
+
+bl_draw:
+        LD   HL,bl_ord
+        LD   (bl_op),HL
+        LD   A,BL_N
+        LD   (bl_i),A
+bl_dr1:
+        LD   HL,(bl_op)
+        LD   A,(HL)
+        INC  HL
+        LD   (bl_op),HL
+        LD   (bl_b),A
+
+        LD   L,A                ; where it is, three bytes a ball
+        LD   H,0
+        LD   D,H
+        LD   E,L
+        ADD  HL,HL
+        ADD  HL,DE
+        LD   DE,bl_x
+        ADD  HL,DE
+        LD   A,(HL)             ; the byte column
+        LD   (bl_bx),A
+        INC  HL
+        LD   E,(HL)             ; the row
+        INC  HL
+        LD   A,(HL)             ; and z, for the shade
+        LD   L,A
+        LD   H,bl_shade / 256
+        LD   A,(HL)
+        LD   (bl_col),A
+
+        LD   A,E                ; off the bottom or the top?
+        CP   192 - BL_BH + 1
+        JR   NC,bl_dr2
+
+        AND  1                  ; the byte it starts at
+        RRCA
+        LD   L,A
+        LD   A,E
+        SRL  A
+        LD   D,A
+        LD   A,(bl_back)
+        ADD  A,D
+        LD   H,A
+        LD   A,(bl_bx)
+        ADD  A,L
+        LD   L,A
+
+        PUSH HL                 ; remember it, for the erase two frames on
+        CALL bl_recs
+        LD   A,(bl_b)
+        ADD  A,A
+        LD   E,A
+        LD   D,0
+        ADD  IX,DE
+        POP  HL
+        LD   (IX+0),L
+        LD   (IX+1),H
+
+        LD   A,(bl_col)
+        LD   C,A
+        CALL bl_blit
+bl_dr2:
+        LD   A,(bl_i)
+        DEC  A
+        LD   (bl_i),A
+        JP   NZ,bl_dr1
+        RET
+
+bl_recs:                        ; IX -> this buffer's set of records
+        LD   A,(bl_back)
+        CP   BL_BUF0
+        LD   IX,bl_old0
+        RET  Z
+        LD   IX,bl_old1
+        RET
+
+bl_blit:                        ; HL = the top left byte, C = the colour
+        LD   DE,bl_rows
+        LD   B,BL_BH
+bl_bl1:
+        PUSH HL
+        LD   A,(DE)             ; the row's offset
+        INC  DE
+        ADD  A,L
+        LD   L,A
+        LD   A,(DE)             ; and how many bytes - always even, so
+        INC  DE                 ; two a pass and the counter costs half
+        RRCA
+bl_bl2:
+        LD   (HL),C
+        INC  L
+        LD   (HL),C
+        INC  L
+        DEC  A
+        JR   NZ,bl_bl2
+        POP  HL
+        LD   A,128              ; the next line down
+        ADD  A,L
+        LD   L,A
+        JR   NC,bl_bl3
+        INC  H
+bl_bl3:
+        DJNZ bl_bl1
+        RET
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+bl_back:        DEFS 1
+bl_front:       DEFS 1
+bl_i:           DEFS 1
+bl_b:           DEFS 1
+bl_bx:          DEFS 1
+bl_col:         DEFS 1
+bl_rx:          DEFS 1
+bl_ry:          DEFS 1
+bl_key:         DEFS 1
+bl_keyz:        DEFS 1
+bl_op:          DEFS 2
+bl_zp:          DEFS 2
+bl_msv:         DEFS 9          ; (m * S) >> 7
+bl_x:           DEFS 3 * BL_N   ; byte column, row, z
+
+        ALIGN 256
+bl_z:           DEFS BL_N       ; just the z, for the sort
+bl_ord:         DEFS BL_N
+bl_old0:        DEFS 2 * BL_N   ; where each ball is in each buffer
+bl_old1:        DEFS 2 * BL_N
+
+BL_SIZE:        EQU $ - bl_init

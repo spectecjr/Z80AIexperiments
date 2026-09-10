@@ -487,6 +487,25 @@ def prismpre(outdir, seconds=14):
 STAR_PAL = [(32 * i, 32 * i, 30 * i) for i in range(8)] + [(0, 0, 0)] * 8
 
 
+def balls(outdir, seconds=8):
+    """Vector balls: 108,270 T-states a frame, 55.4 Hz, 20 of them."""
+    b = Bench("harness_balls.asm", org=0)
+    s = b.syms
+    b.call_regs(s["bl_init"])
+    n = int(seconds * 50)
+    frames, ts = [], []
+    for t in range(n):
+        into = b.peek(s["bl_back"], 1)[0]
+        tt, _ = b.call_regs(s["bl_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    p = "%s/balls.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, frames, STAR_PAL, durs)
+    got, bad, secs = check_gif(p, frames, STAR_PAL, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 def stars(outdir, seconds=8):
     """A 3D starfield: 197,813 T-states a frame, 30.3 Hz, 192 stars."""
     b = Bench("harness_stars.asm", org=0)
@@ -682,6 +701,7 @@ if __name__ == "__main__":
     cube(d)
     cubes(d)
     stars(d)
+    balls(d)
     prism(d)
     prismpre(d)
     entropypre(d)

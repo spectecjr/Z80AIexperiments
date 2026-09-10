@@ -330,6 +330,18 @@ T-states, and the doubling out to the screen is 5.5 a byte with `PUSH`.
 That is the whole argument for quarter resolution in one line, and it
 applies to water ripple and plasma equally.
 
+### 11. Vector balls  — **BUILT**
+
+`balls.z80s`, 108,270 T-states a frame, **55.4 Hz**, twenty balls - and
+the estimate below was about right for once. The trick that paid was not
+in the note: putting the balls on a cube's corners and edge midpoints
+makes every coordinate -S, 0 or +S, so the nine products (m*S)>>7 are
+worked out once a frame and a ball's position is three signed adds. Nine
+multiplies a frame rather than nine a ball, and transform3d is not needed
+at all. See `balls.md`.
+
+What follows is the original note.
+
 ### 11. Vector balls  — *estimated 120,000 T-states for 24 balls, 25 Hz*
 
 A sprite per ball, sorted back to front, scaled by z into two or three
