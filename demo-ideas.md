@@ -231,6 +231,15 @@ them unchanged. The sigma and the triangle are built from the description
 below rather than from the artwork; swapping the shape is a data change.
 See `prism.md`.
 
+**Precomputed, it runs at 21.1 Hz.** `prismpre.z80s`, 284,455 T-states a
+frame: the spin, the multiply tables, the 56 projected vertices, the 18
+normals' shading and the back-to-front sort are all functions of the frame
+number alone, so they go into a 144-byte-a-frame table and the frame becomes
+renderlit's span fill and nothing else. The same frames to the byte. The
+price is the loop: 9,216 bytes is 64 frames of free RAM, so the logo has to
+come back to where it started in 64 frames and turns about three times
+faster. See `prismpre.md`.
+
 What follows is the original note.
 
 It'd be great if we could take the 3D Lit Cube renderer and see if we could use it to render the

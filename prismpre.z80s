@@ -1,0 +1,202 @@
+;------------------------------------------------------------------
+; prismpre.z80s - prism.z80s with the whole frame precomputed
+;
+; prism.z80s spends 197,413 of its 518,273 T-states a frame on work
+; that depends on nothing but the frame number: the spin, the nine
+; multiply tables, the eight projected corners of each of seven
+; pieces, the shade and the visibility of each of 42 faces, and the
+; back-to-front order. Precompute all of it and the frame is the
+; rasteriser and a table walk - no multiply, no transform, no light,
+; no sort. transform3d and democube are not needed at all.
+;
+; What it costs is the length of the animation, not accuracy: the
+; frames are the same frames, to the byte. A frame's table is
+;
+;     112 bytes   seven pieces of eight (sx, sy)
+;      21 bytes   42 faces of a nibble - the ramp level, bit 3 set if
+;                 the face is turned away
+;       7 bytes   the pieces, farthest first
+;       4 bytes   the box to erase, in renderlit's record form
+;
+; and 144 bytes a frame into the free RAM either side of the screen
+; buffers is 64 frames. So the spin has to return to where it started
+; in 64 frames, which is one turn an axis here against prism's two,
+; three and one per 256.
+;
+; The records go in the low 8K, the points above the buffers.
+;
+; Needs renderlit, and a demo_screen for renderlit's own default.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+;------------------------------------------------------------------
+; pp_init - renderlit's, and back to the top of the loop
+;------------------------------------------------------------------
+
+pp_init:
+        CALL rndl_init
+        XOR  A
+        LD   (pp_f),A
+        RET
+
+;------------------------------------------------------------------
+; pp_frame - one frame, read rather than worked out
+;------------------------------------------------------------------
+
+pp_frame:
+        CALL rndl_erase         ; what this buffer held two frames ago
+
+        LD   A,(pp_f)           ; where this frame's tables are:
+        LD   L,A                ; the record at 32f, the points at 112f
+        LD   H,0
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL              ; 16f
+        LD   B,H
+        LD   C,L
+        ADD  HL,HL              ; 32f
+        LD   D,H
+        LD   E,L
+        PUSH DE
+        ADD  HL,HL              ; 64f
+        ADD  HL,DE              ; 96f
+        ADD  HL,BC              ; 112f
+        LD   DE,pp_pts
+        ADD  HL,DE
+        LD   (pp_pp),HL
+        POP  HL
+        LD   DE,pp_recs
+        ADD  HL,DE
+        LD   (pp_rp),HL
+
+        PUSH HL                 ; the box goes straight into the record
+        CALL rndl_dirty         ; renderlit erases from next time round
+        EX   DE,HL
+        POP  HL
+        LD   BC,PP_NP
+        ADD  HL,BC              ; past the order, at the four box bytes
+        LD   C,4
+        LDIR
+
+        LD   HL,(pp_rp)         ; the pieces, farthest first
+        LD   B,PP_NP
+pp_fr1:
+        LD   A,(HL)
+        INC  HL
+        PUSH HL
+        PUSH BC
+        CALL pp_one
+        POP  BC
+        POP  HL
+        DJNZ pp_fr1
+
+        LD   A,(pp_f)
+        INC  A
+        AND  PP_NF - 1
+        LD   (pp_f),A
+        JP   rndl_flip
+
+;------------------------------------------------------------------
+; pp_one - one piece: point renderlit at its corners, unpack its six
+;          face nibbles into renderlit's colour and visibility, draw
+;
+; Entry : A = the piece
+;------------------------------------------------------------------
+
+pp_one:
+        LD   (pp_pi),A
+        LD   L,A                ; sixteen bytes of point a piece
+        LD   H,0
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        LD   DE,(pp_pp)
+        ADD  HL,DE
+        LD   (rndl_pts),HL
+
+        LD   A,(pp_pi)          ; which ramp it uses
+        LD   L,A
+        LD   H,0
+        LD   DE,pp_base
+        ADD  HL,DE
+        LD   A,(HL)
+        LD   (pp_b),A
+
+        LD   A,(pp_pi)          ; three bytes of face nibble a piece
+        LD   L,A
+        LD   H,0
+        LD   D,H
+        LD   E,L
+        ADD  HL,HL
+        ADD  HL,DE              ; 3 * piece
+        LD   DE,(pp_rp)
+        ADD  HL,DE
+        LD   DE,PP_NP + 4       ; past the order and the box
+        ADD  HL,DE
+
+        LD   DE,rndl_vis
+        LD   IX,rndl_fcol
+        LD   B,3
+pp_on1:
+        LD   A,(HL)
+        PUSH AF
+        AND  0x0F
+        CALL pp_face
+        POP  AF
+        RRCA
+        RRCA
+        RRCA
+        RRCA
+        AND  0x0F
+        CALL pp_face
+        INC  HL
+        DJNZ pp_on1
+        JP   rndl_six
+
+;------------------------------------------------------------------
+; pp_face - one nibble into renderlit's two per-face bytes
+;
+; Entry : A = level, bit 3 set if the face is turned away
+;         DE -> its rndl_vis byte, IX -> its rndl_fcol byte
+; Exit  : both advanced. B and HL are the caller's loop, and stay put
+;------------------------------------------------------------------
+
+pp_face:
+        LD   C,A
+        AND  8
+        LD   A,0                ; turned away
+        JR   NZ,pp_fa1
+        DEC  A                  ; or 0xFF, which is what rndl_six wants
+pp_fa1:
+        LD   (DE),A
+        INC  DE
+        LD   A,C
+        AND  7                  ; the level, and the piece's ramp start
+        LD   C,A
+        LD   A,(pp_b)
+        ADD  A,C
+        AND  15
+        LD   C,A
+        RLCA
+        RLCA
+        RLCA
+        RLCA
+        OR   C                  ; the colour in both nibbles
+        LD   (IX+0),A
+        INC  IX
+        RET
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+pp_f:           DEFS 1      ; where in the loop we are
+pp_rp:          DEFS 2      ; this frame's record
+pp_pp:          DEFS 2      ; and its points
+pp_pi:          DEFS 1
+pp_b:           DEFS 1
+
+PP_SIZE:        EQU $ - pp_init

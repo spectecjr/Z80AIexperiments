@@ -432,6 +432,32 @@ PRISM_PAL = ([(32 * i, 32 * i, 30 * i) for i in range(8)]
              + [(36 * i, 6 * i, 6 * i) for i in range(8)])
 
 
+def prismpre(outdir, seconds=14):
+    """prismpre at its measured rate: 284,455 T-states a frame, 21.1 Hz.
+
+    The same logo as prism, frame for frame, with the spin, the
+    transform, the lighting and the sort read out of a 9,216-byte
+    table instead of worked out. What that buys is 220,000 T-states a
+    frame; what it costs is the loop - 64 frames, so one turn an axis
+    rather than prism's two, three and one per 256.
+    """
+    b = Bench("harness_prismpre.asm", org=0)
+    s = b.syms
+    b.call_regs(s["pp_init"])
+    n = int(seconds * 21.1)
+    frames, ts = [], []
+    for t in range(n):
+        into = b.peek(s["rndl_back"], 1)[0]
+        tt, _ = b.call_regs(s["pp_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    p = "%s/prismpre.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, frames, PRISM_PAL, durs)
+    got, bad, secs = check_gif(p, frames, PRISM_PAL, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 def prism(outdir, seconds=14):
     """prism at its measured rate: 518,273 T-states a frame, 11.6 Hz.
 
@@ -608,6 +634,7 @@ if __name__ == "__main__":
     cube(d)
     cubes(d)
     prism(d)
+    prismpre(d)
     room(d)
     portal(d)
     maze(d)
