@@ -1,0 +1,280 @@
+;------------------------------------------------------------------
+; crow.z80s - a crow cawing, out of one SAA1099, at 50 Hz
+;
+;   crow_init    silence the chip and set up the voice, once
+;   crow_call    caw: three of them, and no two calls alike
+;   crow_frame   one 50 Hz frame of whatever is going on
+;
+; No samples and no streaming: twelve register writes a frame and the
+; chip's own six tone generators and two noise generators do the rest.
+; A frame costs about a thousand T-states of the 120,000 there are.
+;
+; THE VOICE. A caw is a harsh, rough, falling "kaaa" of about a third
+; of a second. Six channels are spent like this:
+;
+;   ch0  f          the fundamental, 400 to 470 Hz across a call
+;   ch1  f - 40 Hz  detuned against it, so the pair beat about forty
+;                   times a second. That beat is the whole trick: it
+;                   is what makes a voice sound rough rather than
+;                   sung, and forty times a second is a rate a 50 Hz
+;                   routine cannot reach by writing amplitudes - it
+;                   would need the frame rate to be the modulation.
+;                   Two oscillators do it for nothing.
+;   ch2  2f         the second harmonic. An octave up is the SAME
+;                   frequency byte with the octave register one
+;                   higher, so it needs no arithmetic at all.
+;   ch4  2f - 47 Hz detuned against ch2: the harmonic is rough too,
+;                   which is what stops the caw sounding like a chord
+;   ch5  4f         a little brightness, four levels down
+;   ch3  noise      noise generator 1 in mode 3 - clocked from channel
+;                   3's own tone generator rather than a fixed rate,
+;                   so the rasp is pitched, and sweeps from 3.8 kHz at
+;                   the attack down to 2.4 kHz with the rest of it
+;
+; What the frame does is play a table: eighteen rows of (frequency,
+; noise clock, tone level, noise level), one row a frame, and around
+; that a call of three caws, each transposed up a little and dropped a
+; level or two by crow_seq, with a 0 to 3 unit jitter off stars.z80s's
+; LFSR so no two calls are quite the same.
+;
+; THE PORTS. The SAA1099 on a SAM is register-select at 511 and data at
+; 255, both with 255 in the low half of the address - so C holds 255
+; throughout and B, which is the top half, is 1 to select and 0 to
+; write. That makes a pair of writes ten bytes of code and no reloads.
+;
+; The frequency byte is 511 - n for f = 15625 * 2^octave / (511 - n) at
+; the SAM's 8 MHz, and the whole caw lives in octave 3 (245..488 Hz) so
+; the octave registers are written once, by crow_init, and never again.
+; Both detunes are downwards and every transpose is upwards, which is
+; what keeps every byte this writes inside 0..255 with no clamping -
+; tests/crow.py asserts it at both ends.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+CROW_ADDR:      EQU 1           ; B for port 511, the register select
+CROW_DATA:      EQU 0           ; B for port 255, the data
+CROW_PORT:      EQU 255         ; C, the low half of both
+
+;------------------------------------------------------------------
+; crow_init - the registers that never change, and an idle state.
+;------------------------------------------------------------------
+
+crow_init:
+        LD   HL,crow_ini
+        LD   E,CROW_INITS
+        CALL crow_send
+        LD   A,0xFF
+        LD   (crow_ix),A        ; nothing sounding
+        XOR  A
+        LD   (crow_gap),A
+        LD   A,CROW_CAWS
+        LD   (crow_k),A         ; and no caws left to start
+        LD   HL,CROW_SEED
+        LD   (crow_lfsr),HL
+        RET
+
+;------------------------------------------------------------------
+; crow_call - a call of CROW_CAWS caws, beginning with the next frame.
+;------------------------------------------------------------------
+
+crow_call:
+        XOR  A
+        LD   (crow_k),A
+        LD   (crow_gap),A
+
+crow_start:                     ; the next caw of the call, if any
+        LD   A,(crow_k)
+        CP   CROW_CAWS
+        RET  NC                 ; the call is over
+        INC  A
+        LD   (crow_k),A
+        DEC  A
+        ADD  A,A                ; two bytes an entry
+        LD   L,A
+        LD   H,0
+        LD   DE,crow_seq
+        ADD  HL,DE
+        LD   D,(HL)             ; how far up this caw is
+        INC  HL
+        LD   A,(HL)
+        LD   (crow_dr),A        ; and how much quieter
+        CALL crow_rnd
+        AND  3                  ; nothing repeats exactly
+        ADD  A,D
+        LD   (crow_tr),A
+        XOR  A
+        LD   (crow_ix),A        ; and it starts at the top of the table
+        RET
+
+;------------------------------------------------------------------
+; crow_frame - one 50 Hz frame. Silent frames cost 25 T-states.
+;------------------------------------------------------------------
+
+crow_frame:
+        LD   A,(crow_gap)
+        OR   A
+        JR   NZ,crow_rest
+        LD   A,(crow_ix)
+        CP   CROW_FRAMES
+        RET  NC                 ; 0xFF: nothing is sounding
+
+        LD   L,A                ; the row this frame plays
+        LD   H,0
+        ADD  HL,HL
+        ADD  HL,HL              ; four bytes a row
+        LD   DE,crow_env
+        ADD  HL,DE
+
+        LD   A,(crow_tr)
+        ADD  A,(HL)             ; the fundamental, transposed
+        INC  HL
+        LD   (crow_f0 + 1),A    ; ch0, f
+        LD   (crow_f2 + 1),A    ; ch2, 2f - the same byte, octave 4
+        LD   (crow_f5 + 1),A    ; ch5, 4f - the same byte, octave 5
+        LD   D,A
+        SUB  CROW_D1
+        LD   (crow_f1 + 1),A    ; ch1, just under f
+        LD   A,D
+        SUB  CROW_D2
+        LD   (crow_f4 + 1),A    ; ch4, just under 2f
+        LD   A,(HL)             ; what clocks the noise
+        INC  HL
+        LD   (crow_f3 + 1),A
+
+        LD   A,(crow_dr)
+        LD   E,A                ; this caw is E levels down
+        LD   A,(HL)             ; the tone level
+        INC  HL
+        SUB  E
+        JR   NC,crow_p1
+        XOR  A
+crow_p1:
+        LD   D,A
+        CALL crow_dup
+        LD   (crow_a0 + 1),A    ; f, f-40, 2f and 2f-47 all at this level
+        LD   (crow_a1 + 1),A
+        LD   (crow_a2 + 1),A
+        LD   (crow_a4 + 1),A
+        LD   A,D
+        SUB  CROW_H4
+        JR   NC,crow_p2
+        XOR  A
+crow_p2:
+        CALL crow_dup
+        LD   (crow_a5 + 1),A    ; 4f, quieter
+        LD   A,(HL)             ; the noise level
+        SUB  E
+        JR   NC,crow_p3
+        XOR  A
+crow_p3:
+        CALL crow_dup
+        LD   (crow_a3 + 1),A
+
+        LD   HL,crow_buf
+        LD   E,CROW_PAIRS
+        CALL crow_send
+
+        LD   HL,crow_ix
+        INC  (HL)
+        LD   A,(HL)
+        CP   CROW_FRAMES
+        RET  C                  ; more of this caw to come
+        LD   (HL),0xFF          ; it is done; wait, then the next one
+        LD   A,CROW_GAP
+        LD   (crow_gap),A
+        RET
+
+crow_rest:                      ; A = the gap, and it is not zero
+        DEC  A
+        LD   (crow_gap),A
+        RET  NZ
+        JP   crow_start         ; too far for a JR by now
+
+;------------------------------------------------------------------
+; crow_send - HL over (register, value) pairs, E of them.
+;
+; C is 255 for both ports; B is the top half of the address, so it
+; picks between the register select at 511 and the data at 255.
+;------------------------------------------------------------------
+
+crow_send:
+        LD   C,CROW_PORT        ; 7
+crow_s1:
+        LD   B,CROW_ADDR        ; 7     the select
+        LD   A,(HL)             ; 7
+        INC  HL                 ; 6
+        OUT  (C),A              ; 12    OUT (511),reg
+        LD   B,CROW_DATA        ; 7     the data
+        LD   A,(HL)             ; 7
+        INC  HL                 ; 6
+        OUT  (C),A              ; 12    OUT (255),val
+        DEC  E                  ; 4
+        JR   NZ,crow_s1         ; 12/7
+        RET
+
+;------------------------------------------------------------------
+; crow_dup - an amplitude byte. A is 0..15 and both nibbles want it,
+; the low one being the left channel and the high one the right.
+;------------------------------------------------------------------
+
+crow_dup:
+        LD   B,A
+        RLCA
+        RLCA
+        RLCA
+        RLCA                    ; the top nibble was zero, so this is A<<4
+        OR   B
+        RET
+
+;------------------------------------------------------------------
+; crow_rnd - stars.z80s's sixteen bit LFSR, taps at 0, 2, 3 and 5.
+; AND 0x2D leaves P/V set when an even number of the tapped bits
+; survived, so the feedback bit is the odd case.
+;------------------------------------------------------------------
+
+crow_rnd:
+        LD   HL,(crow_lfsr)
+        LD   B,8
+crow_r1:
+        LD   A,L
+        AND  0x2D
+        JP   PE,crow_r2
+        SCF
+        JR   crow_r3
+crow_r2:
+        OR   A
+crow_r3:
+        RR   H
+        RR   L
+        DJNZ crow_r1
+        LD   (crow_lfsr),HL
+        LD   A,L
+        RET
+
+;------------------------------------------------------------------
+; The frame's twelve writes. The register bytes never change; the
+; frame code patches the values in between them.
+;------------------------------------------------------------------
+
+crow_buf:
+crow_f0:        DEFB 0x08,0     ; ch0 frequency, f
+crow_f1:        DEFB 0x09,0     ; ch1, f - CROW_D1
+crow_f2:        DEFB 0x0A,0     ; ch2, the same byte an octave up
+crow_f3:        DEFB 0x0B,0     ; ch3, what clocks the noise
+crow_f4:        DEFB 0x0C,0     ; ch4, 2f - CROW_D2
+crow_f5:        DEFB 0x0D,0     ; ch5, two octaves up
+crow_a0:        DEFB 0x00,0     ; and the six amplitudes
+crow_a1:        DEFB 0x01,0
+crow_a2:        DEFB 0x02,0
+crow_a3:        DEFB 0x03,0
+crow_a4:        DEFB 0x04,0
+crow_a5:        DEFB 0x05,0
+CROW_PAIRS:     EQU ($ - crow_buf) / 2
+
+crow_ix:        DEFB 0xFF       ; the row of crow_env this frame plays
+crow_gap:       DEFB 0          ; frames of silence still to run
+crow_k:         DEFB 0          ; which caw of the call comes next
+crow_tr:        DEFB 0          ; how far up this caw is
+crow_dr:        DEFB 0          ; and how much quieter
+crow_lfsr:      DEFW 0

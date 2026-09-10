@@ -55,6 +55,19 @@ And moving memory about, measured on the eight-line scroll (`scroll8`):
 | `sc_scroll` — 24K screen up eight lines, all stack | 484,155 | 4.0 frames at 50 Hz |
 | `sc_scrolli` — the same, `LDI` for the move | **388,062** | 3.2 frames |
 
+## 1b. Sound
+
+| | T-states | |
+|---|---|---|
+| `crow_frame`, cawing (`crow`) | **1,654** | twelve SAA1099 registers, 1.4% of a 50 Hz frame |
+| `crow_frame`, silent | 55 | |
+| `crow_frame`, starting a caw | 784 | the LFSR that varies each call |
+| `crow_init` | 1,419 | sixteen registers, once |
+
+Verified the same way as everything else - every OUT, in order, against
+`tests/crow.py` - and then played through `tests/saa1099.py` to make
+`demo/crow.wav`. See `crow.md`.
+
 ## 2. The rasteriser (`renderlit`), before and after
 
 Measured by timing `rndl_six` on one quad of a known size.
