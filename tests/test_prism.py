@@ -12,6 +12,10 @@ import sys
 
 from bench import Bench
 import prism as P
+
+ENTROPY = P.LOGO == "entropy"
+HARNESS = ("harness_entropy.asm" if ENTROPY else "harness_prism.asm")
+LIVE = HARNESS
 import raster
 
 BUF = {0x80: 0x8000, 0x20: 0x2000}
@@ -62,7 +66,7 @@ def check_faces():
 
 
 def main():
-    b = Bench("harness_prism.asm", org=0)
+    b = Bench(HARNESS, org=0)
     s = b.syms
     recip = list(b.peek(s["t3d_recip"], 256))
     lite = [x - 256 if x > 127 else x for x in b.peek(s["rndl_lite"], 3)]

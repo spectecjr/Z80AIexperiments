@@ -432,6 +432,32 @@ PRISM_PAL = ([(32 * i, 32 * i, 30 * i) for i in range(8)]
              + [(36 * i, 6 * i, 6 * i) for i in range(8)])
 
 
+def entropypre(outdir, seconds=14):
+    """The traced Entropy logo, precomputed: 220,823 T-states, 27.2 Hz.
+
+    Nine convex pieces against the provisional shape's seven, because
+    the sigma's bar ends are cut back to points and its left edge is
+    notched. 184 bytes of table a frame rather than 144, which no
+    longer fits above the screen buffers - eleven frames of point live
+    down in the low 8K and a table of pointers says which is where.
+    """
+    b = Bench("harness_entropypre.asm", org=0)
+    s = b.syms
+    b.call_regs(s["pp_init"])
+    n = int(seconds * 27.2)
+    frames, ts = [], []
+    for t in range(n):
+        into = b.peek(s["rndl_back"], 1)[0]
+        tt, _ = b.call_regs(s["pp_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    p = "%s/entropypre.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, frames, PRISM_PAL, durs)
+    got, bad, secs = check_gif(p, frames, PRISM_PAL, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 def prismpre(outdir, seconds=14):
     """prismpre at its measured rate: 204,625 T-states a frame, 29.3 Hz.
 
@@ -635,6 +661,7 @@ if __name__ == "__main__":
     cubes(d)
     prism(d)
     prismpre(d)
+    entropypre(d)
     room(d)
     portal(d)
     maze(d)

@@ -36,8 +36,8 @@ import prism as P
 
 NFRAMES = 64                    # the loop, and what the free RAM allows
 DA = (4, 4, 4)                  # turns per loop, one an axis
-REC = 32                        # 7 order + 4 box + 21 colour
-PTS = 112                       # 7 pieces of 8 points
+REC = 4 * len(P.PIECES) + 4     # order, four box bytes, three colour
+PTS = 16 * len(P.PIECES)        # a piece bytes of point
 
 
 class Logo(P.Logo):

@@ -50,7 +50,10 @@ def main(path):
              % P.TZ,
              "PR_NPAIR:       EQU %d          ; pairs of pieces to order"
              % len(P.PAIRS),
-             "PR_MASK:        EQU %d         ; a bit a piece" % ((1 << len(P.PIECES)) - 1),
+             "PR_MASK:        EQU %d         ; a bit a piece"
+             % ((1 << len(P.PIECES)) - 1),
+             "PR_OVO:         EQU %d          ; pr_ov, from pr_fr"
+             % (2 * len(P.PIECES)),
              "\npr_da:          ; how fast the logo turns, an axis at a time",
              defb(P.SPIN),
              "PR_DA:          EQU pr_da",
@@ -67,8 +70,9 @@ def main(path):
                         "        DEFB %d, %d"
                         % (3 * f + 1, 3 * (faces[3 * f] & 0x7F) + 1, i, j)
                         for i, j, f in P.PAIRS),
-             "\npr_bit:         ; a bit a piece",
-             defb([1 << i for i in range(len(P.PIECES))]),
+             "\npr_bit:         ; a bit a piece, a word each",
+             "\n".join("        DEFW %d" % (1 << i)
+                        for i in range(len(P.PIECES))),
              "\npr_norm:        ; every normal any face has, 1.7 signed",
              defb([c for n in norms for c in n], 12),
              "\npr_face:        ; a normal and a plane offset, six a piece",
@@ -90,4 +94,5 @@ def main(path):
 
 if __name__ == "__main__":
     here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    main(os.path.join(here, "prismdata.z80s"))
+    name = "entropydata.z80s" if P.LOGO == "entropy" else "prismdata.z80s"
+    main(os.path.join(here, name))

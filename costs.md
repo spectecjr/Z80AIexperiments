@@ -14,10 +14,12 @@ useful part is usually the size of the step rather than the final figure.
 | | T-states a frame (min / mean / max) | Hz | |
 |---|---|---|---|
 | `chequer3` | 110,556 mean | **50** | exact width *and* phase, compiled runs |
-| `prismpre` | 121,115 / **204,625** / 255,391 | **29.3** | the logo, frame precomputed |
+| `prismpre` | 121,498 / **205,008** / 255,774 | **29.3** | the provisional logo, frame precomputed |
+| `entropypre` | 118,994 / **220,823** / 292,156 | **27.2** | the traced artwork, nine pieces |
 | `democube` + `renderlit` | 102,854 mean | 50 (86% of the budget) | one lit cube |
 | `cubes` | 371,142 / **419,478** / 472,588 | 14.3 | four lit cubes, gravity, wire room |
-| `prism` | 357,539 / **446,602** / 513,944 | 13.4 | the logo, worked out live |
+| `prism` | 366,000 / **461,171** / 519,000 | 13.0 | the provisional logo, worked out live |
+| `prism`, entropy | 434,299 / **550,669** / 631,969 | 10.9 | the traced artwork, live |
 | `portal` | 400,481 mean | 15 | sector walk, screen-x windows |
 
 ## 2. The rasteriser (`renderlit`), before and after
@@ -137,7 +139,42 @@ else happens at all.
 | `rndl_erase`, prismpre's box | 22,766 |
 | a scanline of renderlit, before it fills anything | ~373 |
 
-## 8. What is left, in order
+## 8. The two logos
+
+The provisional shape is seven convex pieces; the artwork traced from
+`entropylogo.png` is nine, because the sigma's bar ends are cut back to
+points and its left edge is notched. `PRISM_SHAPE=entropy` builds it.
+
+| | provisional | entropy |
+|---|---|---|
+| pieces | 7 | 9 |
+| faces | 42 | 54 |
+| buried faces, never drawn | 10 | 14 |
+| distinct normals | 18 | 21 |
+| ordering pairs, which grow as n² | 21 | 36 |
+| prismpre's table a frame | 144 bytes | 184 |
+| **prism** | 461,171 | **550,669** (+19%) |
+| **prismpre** | 205,008 | **220,823** (+8%) |
+
+Nine pieces cost prismpre only 8% because most of its frame is the fill,
+and the extra pieces are small. prism pays 19%, because `pr_proj` is per
+piece and `pr_order` is per pair.
+
+Two things had to change to carry nine pieces:
+
+- **`pr_order`'s sets are words now, not bytes.** A bit a piece in a byte
+  is eight pieces, and the ninth needs sixteen. That costs the seven-piece
+  shape 14,569 T-states a frame - prism went 446,602 → 461,171 - and costs
+  prismpre nothing, because its order is a table.
+- **The points no longer fit in one place.** 184 bytes a frame over 64
+  frames is 11,776, and above the screen buffers there are 7,680. So a
+  frame's points are found through a table of pointers: 53 frames of them
+  live high, eleven down in the low 8K beside the records. The
+  quarter-square multiply goes too - prismpre never multiplies, and
+  renderlit only names `qsmul8` from paths it never calls - which is 1,280
+  bytes back.
+
+## 9. What is left, in order
 
 1. **The span setup**, ~160 T-states a scanline of byte addresses and end
    masks against 17.5 a byte of filling. 298 spans a frame.

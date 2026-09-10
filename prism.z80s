@@ -64,7 +64,7 @@ pr_init:
 
         LD   HL,pr_pop          ; bits in a byte, for the ordering below
         LD   (HL),0
-        LD   B,PR_MASK
+        LD   B,255
         LD   C,1
 pr_ip1:
         LD   A,C
@@ -523,15 +523,10 @@ pr_pb5:
 
 pr_order:
         LD   HL,pr_fr
-        LD   DE,pr_ov
-        LD   B,PR_NP
+        LD   B,4 * PR_NP        ; two words a piece, both sets
 pr_or0:
         LD   (HL),0
         INC  HL
-        EX   DE,HL
-        LD   (HL),0
-        INC  HL
-        EX   DE,HL
         DJNZ pr_or0
 
         LD   IX,pr_pair         ; the table carries the two addresses a
@@ -566,7 +561,7 @@ pr_or2:
         JR   NC,pr_or4          ; their boxes touch at all
         LD   C,(IX+4)
         LD   B,(IX+5)
-        LD   HL,pr_ov - pr_fr
+        LD   HL,PR_OVO
         LD   (pr_seto),HL
         CALL pr_setb
         LD   C,(IX+5)
@@ -582,9 +577,9 @@ pr_or4:
         LD   (pr_n),A
         JP   NZ,pr_or1
 
-        LD   A,PR_MASK          ; then take them, farthest first
-        LD   (pr_left),A
-        LD   HL,pr_ord
+        LD   HL,PR_MASK         ; then take them, farthest first.
+        LD   (pr_left),HL       ; nine pieces is nine bits, so the sets
+        LD   HL,pr_ord          ; are words rather than bytes
         LD   (pr_op),HL
         LD   B,PR_NP
 pr_or5:
@@ -592,33 +587,41 @@ pr_or5:
         LD   A,255
         LD   (pr_bc),A
         LD   IX,pr_fr
-        LD   C,1                ; the bit for this piece
         XOR  A
         LD   (pr_x),A
 pr_or6:
-        LD   A,(pr_left)
-        AND  C
+        LD   A,(pr_x)
+        CALL pr_bit16           ; DE = this piece's bit
+        LD   HL,(pr_left)
+        LD   A,H
+        AND  D
+        LD   B,A
+        LD   A,L
+        AND  E
+        OR   B
         JR   Z,pr_or8           ; already drawn
+
         LD   A,(IX+0)           ; what it is in front of, that is left
-        AND  (IX + pr_ov - pr_fr)
-        LD   HL,pr_left
-        AND  (HL)
-        LD   L,A
-        LD   H,0
-        LD   DE,pr_pop
-        ADD  HL,DE
+        AND  (IX+PR_OVO)
+        AND  L
+        LD   C,A
+        LD   A,(IX+1)
+        AND  (IX+PR_OVO+1)
+        AND  H
+        LD   L,A                ; bits in the two halves, off the table
+        LD   H,pr_pop / 256
         LD   A,(HL)
+        LD   L,C
+        ADD  A,(HL)
         LD   HL,pr_bc
         CP   (HL)
         JR   NC,pr_or8
         LD   (HL),A
         LD   A,(pr_x)
         LD   (pr_best),A
-        LD   A,C
-        LD   (pr_bb),A
 pr_or8:
-        INC  IX
-        SLA  C
+        LD   BC,2
+        ADD  IX,BC
         LD   A,(pr_x)
         INC  A
         LD   (pr_x),A
@@ -630,32 +633,52 @@ pr_or8:
         LD   (HL),A
         INC  HL
         LD   (pr_op),HL
-        LD   A,(pr_bb)
+        CALL pr_bit16
+        LD   HL,(pr_left)       ; and out of what is left
+        LD   A,E
         CPL
-        LD   HL,pr_left
-        AND  (HL)
-        LD   (HL),A
+        AND  L
+        LD   L,A
+        LD   A,D
+        CPL
+        AND  H
+        LD   H,A
+        LD   (pr_left),HL
         POP  BC
         DJNZ pr_or5
         RET
 
-pr_bit8:                        ; B = 0..7 -> A = the bit
-        LD   L,B
+pr_bit16:                       ; A = a piece -> DE = its bit, BC kept
+        PUSH BC
+        LD   L,A
         LD   H,0
-        LD   DE,pr_bit
-        ADD  HL,DE
-        LD   A,(HL)
+        ADD  HL,HL
+        LD   BC,pr_bit
+        ADD  HL,BC
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        POP  BC
         RET
 
-pr_setb:                        ; C = a byte of pr_fr, B = a bit to set
-        CALL pr_bit8
+pr_setb:                        ; C = a word of pr_fr, B = a bit to set
+        LD   A,B
+        CALL pr_bit16
+        PUSH BC
         LD   L,C
         LD   H,0
-        LD   DE,pr_fr
-        ADD  HL,DE
-        LD   DE,(pr_seto)       ; or of pr_ov, when that is asked for
-        ADD  HL,DE
-        OR   (HL)
+        ADD  HL,HL
+        LD   BC,pr_fr
+        ADD  HL,BC
+        LD   BC,(pr_seto)       ; or of pr_ov, when that is asked for
+        ADD  HL,BC
+        POP  BC
+        LD   A,(HL)
+        OR   E
+        LD   (HL),A
+        INC  HL
+        LD   A,(HL)
+        OR   D
         LD   (HL),A
         RET
 
@@ -836,9 +859,9 @@ pr_box:
 ;------------------------------------------------------------------
 
 pr_bx:          DEFS 4 * PR_NP  ; each piece's box on the screen
-pr_fr:          DEFS PR_NP      ; bit j: piece i is in front of piece j
-pr_ov:          DEFS PR_NP      ; bit j: their screen boxes touch
-pr_left:        DEFS 1
+pr_fr:          DEFS 2 * PR_NP  ; bit j: piece i is in front of piece j
+pr_ov:          DEFS 2 * PR_NP  ; bit j: their screen boxes touch
+pr_left:        DEFS 2
 pr_x:           DEFS 1
 pr_best:        DEFS 1
 pr_bc:          DEFS 1
@@ -849,7 +872,9 @@ pr_b1:          DEFS 2
 pr_b2:          DEFS 2
 pr_n:           DEFS 1
 pr_seto:        DEFW 0          ; pr_setb writes pr_ov when this is the gap
-pr_pop:         DEFS 128        ; bits in a byte, built by pr_init
+pr_cb:          DEFS 2
+        ALIGN 256
+pr_pop:         DEFS 256        ; bits in a byte, built by pr_init
 pr_vp:          DEFS 2
 pr_vn:          DEFS 1
 pr_j:           DEFS 1

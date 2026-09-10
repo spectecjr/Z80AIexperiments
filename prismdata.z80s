@@ -5,6 +5,7 @@ PR_NN:          EQU 18          ; distinct face normals
 PR_TZ:          EQU 18816       ; how far away the logo sits
 PR_NPAIR:       EQU 21          ; pairs of pieces to order
 PR_MASK:        EQU 127         ; a bit a piece
+PR_OVO:         EQU 14          ; pr_ov, from pr_fr
 
 pr_da:          ; how fast the logo turns, an axis at a time
         DEFB 2,3,1
@@ -77,8 +78,14 @@ pr_pair:        ; every pair of pieces, and a face of the
         DEFW pr_face + 100, pr_nsh + 46
         DEFB 5, 6
 
-pr_bit:         ; a bit a piece
-        DEFB 1,2,4,8,16,32,64
+pr_bit:         ; a bit a piece, a word each
+        DEFW 1
+        DEFW 2
+        DEFW 4
+        DEFW 8
+        DEFW 16
+        DEFW 32
+        DEFW 64
 
 pr_norm:        ; every normal any face has, 1.7 signed
         DEFB 127,0,0,129,0,0,0,127,0,0,129,0

@@ -1,7 +1,8 @@
 # prismpre.z80s — design notes
 
-`prism.z80s` with the whole frame precomputed. **204,625 T-states a frame,
-29.3 Hz** — against prism's 446,602 and 13.4 Hz — and the frames are the
+`prism.z80s` with the whole frame precomputed. **205,008 T-states a frame,
+29.3 Hz** for the provisional logo, and **220,823, 27.2 Hz** for the traced
+artwork at nine pieces (`PRISM_SHAPE=entropy`) — against prism's 446,602 and 13.4 Hz — and the frames are the
 same frames: verified byte-for-byte both against `tests/prism.py`'s model
 and against `prism.z80s` itself, run side by side at the same turn rates,
 over two full times round the loop.

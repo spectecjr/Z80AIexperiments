@@ -72,26 +72,20 @@ pp_it1:
 pp_frame:
         CALL rndl_erase         ; what this buffer held two frames ago
 
-        LD   A,(pp_f)           ; where this frame's tables are:
-        LD   L,A                ; the record at 32f, the points at 112f
+        LD   A,(pp_f)           ; the points are wherever they fit, so
+        ADD  A,A                ; a table of pointers says where
+        LD   L,A
         LD   H,0
-        ADD  HL,HL
-        ADD  HL,HL
-        ADD  HL,HL
-        ADD  HL,HL              ; 16f
-        LD   B,H
-        LD   C,L
-        ADD  HL,HL              ; 32f
-        LD   D,H
-        LD   E,L
-        PUSH DE
-        ADD  HL,HL              ; 64f
-        ADD  HL,DE              ; 96f
-        ADD  HL,BC              ; 112f
-        LD   DE,pp_pts
+        LD   DE,pp_ptr
         ADD  HL,DE
-        LD   (pp_pp),HL
-        POP  HL
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        LD   (pp_pp),DE
+        LD   A,(pp_f)           ; the records are one block, so the
+                                ; stride is multiplied out
+        LD   C,PP_REC
+        CALL pp_mul
         LD   DE,pp_recs
         ADD  HL,DE
         LD   (pp_rp),HL
@@ -122,6 +116,25 @@ pp_fr1:
         AND  PP_NF - 1
         LD   (pp_f),A
         JP   rndl_flip
+
+;------------------------------------------------------------------
+; pp_mul - HL = A * C, eight bits by eight
+;------------------------------------------------------------------
+
+pp_mul:
+        LD   HL,0
+        LD   D,0
+        LD   E,C
+        LD   B,8
+pp_mu1:
+        SRL  A
+        JR   NC,pp_mu2
+        ADD  HL,DE
+pp_mu2:
+        SLA  E
+        RL   D
+        DJNZ pp_mu1
+        RET
 
 ;------------------------------------------------------------------
 ; pp_one - one piece: point renderlit at its corners, unpack its six

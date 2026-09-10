@@ -19,6 +19,11 @@ import sys
 
 from bench import Bench
 import prismpre as PP
+import prism as P
+
+ENTROPY = P.LOGO == "entropy"
+HARNESS = ("harness_entropypre.asm" if ENTROPY else "harness_prismpre.asm")
+LIVE = ("harness_entropy.asm" if ENTROPY else "harness_prism.asm")
 import raster
 
 BUF = {0x80: 0x8000, 0x20: 0x2000}
@@ -27,18 +32,20 @@ PAL = ([(32 * i, 32 * i, 30 * i) for i in range(8)]
 
 
 def main():
-    b = Bench("harness_prismpre.asm", org=0)
+    b = Bench(HARNESS, org=0)
     s = b.syms
-    r = Bench("harness_prism.asm", org=0)          # prism, for the same spin
+    r = Bench(LIVE, org=0)          # prism, for the same spin
     rs = r.syms
     recip = list(r.peek(rs["t3d_recip"], 256))
     lite = [x - 256 if x > 127 else x for x in r.peek(rs["rndl_lite"], 3)]
     recs, pts, want = PP.build(recip, lite)
     print("  tables    %d frames, %d bytes of record and %d of point"
           % (PP.NFRAMES, len(recs), len(pts)))
-    print("  RAM       records at %04X, points at %04X, %d bytes spare "
-          "below the stack" % (s["pp_recs"], s["pp_pts"],
-                               0xFE00 - (s["pp_pts"] + len(pts))))
+    hi = len(pts) - (s["pp_ptslo"] and 0)      # what went above the buffers
+    hi = 0xFE00 - s["pp_ptshi"]
+    print("  RAM       records at %04X, %d bytes of point above the buffers "
+          "and %d below" % (s["pp_recs"], min(hi, len(pts)),
+                            max(0, len(pts) - hi)))
 
     it, _ = b.call_regs(s["pp_init"])
     print("  pp_init   %d T-states once" % it)

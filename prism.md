@@ -1,9 +1,14 @@
 # prism.z80s — design notes
 
 A lit extruded logo, cut into convex quads and drawn with `renderlit.z80s`'s
-own rasteriser. **446,602 T-states a frame, 13.4 Hz**, verified byte-for-byte
+own rasteriser. **461,171 T-states a frame, 13.0 Hz**, verified byte-for-byte
 against `tests/prism.py` over 256 frames.
 
+> **Two shapes.** `PRISM_SHAPE=entropy` builds the logo traced from
+> `entropylogo.png` - nine convex pieces, 550,669 T-states a frame - and
+> everything below is unchanged by it. The default is the provisional
+> shape described next, which is seven pieces and cheaper.
+>
 > **The shape is provisional.** It is a serif sigma of 45° angles and a
 > triangle with a triangular hole, built from a description rather than from
 > the artwork. Nothing in the renderer depends on it: `PIECES` in

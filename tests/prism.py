@@ -86,8 +86,18 @@ def _place(q):
                        for x, y in q])
 
 
-PIECES = ([(_place(q), WHITE) for q in _sigma()]
-          + [(_place(q), RED) for q in _triangle()])
+# Which logo. The provisional one is the default and nothing that was
+# measured against it moves; PRISM_SHAPE=entropy swaps in the traced
+# artwork, which is nine pieces rather than seven.
+LOGO = os.environ.get("PRISM_SHAPE", "provisional")
+
+if LOGO == "entropy":
+    import entropylogo
+    SHIFT = 0                           # it is already centred
+    PIECES = [(_place(q), b) for q, b in entropylogo.SHAPE]
+else:
+    PIECES = ([(_place(q), WHITE) for q in _sigma()]
+              + [(_place(q), RED) for q in _triangle()])
 
 FACES = raster.FACES                    # renderlit's, unchanged
 
