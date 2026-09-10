@@ -222,7 +222,16 @@ What follows is the original note.
 
 Same as the existing room kind of implementation, but now it actually renders a more complex room.
 
-### 6. Lit 3D Convex Shapes
+### 6. Lit 3D Convex Shapes  — **BUILT, on a provisional shape**
+
+`prism.z80s`, 453,848 T-states a frame, 13.2 Hz. An extruded quad has
+exactly a cube's shape - eight vertices, six quad faces - so a logo cut into
+convex quads is a handful of cubes that are not cubes, and renderlit draws
+them unchanged. The sigma and the triangle are built from the description
+below rather than from the artwork; swapping the shape is a data change.
+See `prism.md`.
+
+What follows is the original note.
 
 It'd be great if we could take the 3D Lit Cube renderer and see if we could use it to render the
 Entropy demo group logo. This is a simplified serif-Sigma made out of 45 degree angles. with a triangle

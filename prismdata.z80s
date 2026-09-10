@@ -4,6 +4,10 @@ PR_NP:          EQU 7           ; convex pieces
 PR_NN:          EQU 18          ; distinct face normals
 PR_TZ:          EQU 18816       ; how far away the logo sits
 
+pr_da:          ; how fast the logo turns, an axis at a time
+        DEFB 2,3,1
+PR_DA:          EQU pr_da
+
 pr_vert:        ; eight vertices a piece, in renderlit's order
         DEFB 90,57,14,90,57,242,90,38,14,90,38,242
         DEFB 250,57,14,250,57,242,250,38,14,250,38,242
@@ -47,14 +51,20 @@ pr_face:        ; a normal and a plane offset, six a piece
         DEFB 1,128,233,0,64,19,16,64,13,17,192,13
         DEFB 4,128,3,5,128,3
 
-pr_xn:          EQU 9
-pr_xv:         ; the x values a vertex ever has
+pr_axes:        ; where each axis's values are, and how
+                ; many - a frame builds only these
+        DEFW pr_xv
+        DEFB 9
+        DEFW pr_yv
+        DEFB 9
+        DEFW pr_zv
+        DEFB 2
+
+pr_xv:         ; the x a vertex ever has
         DEFB 166,178,221,244,250,22,32,61,90
 
-pr_yn:          EQU 9
-pr_yv:         ; the y values a vertex ever has
+pr_yv:         ; the y a vertex ever has
         DEFB 198,208,217,229,0,26,38,48,57
 
-pr_zn:          EQU 2
-pr_zv:         ; the z values a vertex ever has
+pr_zv:         ; the z a vertex ever has
         DEFB 242,14

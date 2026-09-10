@@ -155,11 +155,14 @@ def depth(m, t, quad):
     return s16(t[2] + m[6] * cx + m[7] * cy)
 
 
+SPIN = [2, 3, 1]                        # turns per 256 frames, an axis each
+
+
 class Logo(Model):
     def __init__(self):
         Model.__init__(self)
         self.p = [0, 0, TZ]
-        self.da = [2, 3, 1]
+        self.da = list(SPIN)
 
     def frame(self, recip, lite, buf=None):
         self.spin()

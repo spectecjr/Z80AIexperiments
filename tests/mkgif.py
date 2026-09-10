@@ -428,6 +428,36 @@ def chequer3(outdir, seconds=8):
     report(p, size, n, durs, secs, got, bad)
 
 
+PRISM_PAL = ([(32 * i, 32 * i, 30 * i) for i in range(8)]
+             + [(36 * i, 6 * i, 6 * i) for i in range(8)])
+
+
+def prism(outdir, seconds=14):
+    """prism at its measured rate: 453,848 T-states a frame, 13.2 Hz.
+
+    A logo cut into seven convex quads and extruded, drawn with
+    renderlit's rasteriser and face table: an extruded quad has the
+    same eight vertices and six quad faces a cube has. The shape is
+    provisional - a description of the Entropy logo rather than the
+    artwork.
+    """
+    b = Bench("harness_prism.asm", org=0)
+    s = b.syms
+    b.call_regs(s["pr_init"])
+    n = int(seconds * 13.2)
+    frames, ts = [], []
+    for t in range(n):
+        into = b.peek(s["rndl_back"], 1)[0]
+        tt, _ = b.call_regs(s["pr_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    p = "%s/prism.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, frames, PRISM_PAL, durs)
+    got, bad, secs = check_gif(p, frames, PRISM_PAL, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 CUBES_PAL = ([(36 * i, 13 * i, 9 * i) for i in range(8)]
              + [(9 * i, 15 * i, 36 * i) for i in range(8)])
 
@@ -577,6 +607,7 @@ if __name__ == "__main__":
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
     cube(d)
     cubes(d)
+    prism(d)
     room(d)
     portal(d)
     maze(d)

@@ -45,6 +45,9 @@ def main(path):
              % len(norms),
              "PR_TZ:          EQU %d       ; how far away the logo sits"
              % P.TZ,
+             "\npr_da:          ; how fast the logo turns, an axis at a time",
+             defb(P.SPIN),
+             "PR_DA:          EQU pr_da",
              "\npr_vert:        ; eight vertices a piece, in renderlit's order",
              defb(verts, 12),
              "\npr_base:        ; and which ramp each piece wears",
@@ -55,9 +58,13 @@ def main(path):
              defb([c for n in norms for c in n], 12),
              "\npr_face:        ; a normal and a plane offset, six a piece",
              defb(faces, 12)]
+    parts.append("\npr_axes:        ; where each axis's values are, and how")
+    parts.append("                ; many - a frame builds only these")
     for a, name in enumerate("xyz"):
-        parts.append("\npr_%sn:          EQU %d" % (name, len(vals[a])))
-        parts.append("pr_%sv:         ; the %s values a vertex ever has"
+        parts.append("        DEFW pr_%sv\n        DEFB %d"
+                     % (name, len(vals[a])))
+    for a, name in enumerate("xyz"):
+        parts.append("\npr_%sv:         ; the %s a vertex ever has"
                      % (name, name))
         parts.append(defb(vals[a], 12))
     open(path, "w").write("\n".join(parts) + "\n")
