@@ -457,3 +457,58 @@ Every routine in this repo was built the same way and it is worth keeping:
    the finished headers are all measurements for that reason.
 4. Record only measured numbers in the file headers, and mark estimates as
    estimates everywhere else.
+
+---
+
+## 15. Zarch / Virus polygonal landscape — **COSTED, not built**
+
+The question was how hard a Zarch-style rolling polygon floor would be. The
+part nobody can guess at is what a flat-shaded span costs, so that part is
+now measured: `spanfill.z80s`, **63.0 T-states a span and 5.51 a byte**,
+verified bit for bit at six different span counts.
+
+**The fill is not the problem.** 128 scanlines of full-width floor is
+101,888 T-states — 42% of a 25 Hz frame — and `PUSH` means there is nothing
+underneath that number.
+
+**The span count is the problem.** A span in a real floor is not 63
+T-states but about 127: 63 to draw, 39 to step the edge that produced it
+(`renderlit`'s measured figure), and ~25 to turn two edge positions into an
+entry byte (an estimate). Which gives, for 128 scanlines:
+
+| grid, cells across | drawing | with edges and list building | of a 25 Hz frame |
+|---|---|---|---|
+| 4 | 134,144 | 166,912 | 70% |
+| 6 | 150,272 | 199,424 | 83% |
+| 8 | 166,400 | 231,936 | 97% |
+| 10 | 182,528 | 264,448 | 110% |
+
+**So the budget is about eight cells across, and that is the whole answer.**
+
+**A flat rolling grid — no hills — looks like a 25 Hz routine.** Six to eight
+cells across, 128 scanlines, and the geometry is nearly free: on a flat
+plane every grid line is straight on screen, so only the *ends* of them need
+projecting — about 36 vertices at ~300 T-states, not 144. Call it 200,000
+T-states all in. It is a chequer floor with roll and a colour a cell, and
+most of the machinery for it is already in `chequer3`.
+
+**Zarch proper — a heightfield with hills — is a `vox`-class routine, 13-17
+Hz** (estimated). Three things change and all of them cost: every vertex
+needs projecting rather than every line end (144 × ~300 = 43,000 T-states);
+a bumpy cell is its own quad with its own two edges, so the edge count a
+scanline roughly doubles; and there is overdraw, because quads no longer
+tile the screen exactly. `vox.z80s` draws a heightmap at 19.2 Hz and `cubes`
+draws four lit cubes at 14.3, which is the neighbourhood.
+
+**What would decide it, if it gets built:**
+
+- **A distance cutoff, not a uniform grid.** Zarch drew a grid whose far
+  cells are a pixel across and still cost a span each. `harrier`'s haze is
+  the answer: stop the mesh where a cell stops being worth 127 T-states and
+  meet the sky with a graded band.
+- **Pixel-exact boundaries or not.** Whole-`PUSH` spans put every polygon
+  edge on a two-pixel grid, which on a rolling floor will shimmer. A mixed
+  boundary byte is chequer3's trick and costs about 20 T-states a span
+  (estimated) — worth it, and it is what takes 8 cells across down to 7.
+- **Back to front, and no clipping.** Rows of the mesh drawn far first
+  order themselves, which is the one part of this that is free.

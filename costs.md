@@ -25,6 +25,17 @@ useful part is usually the size of the step rather than the final figure.
 | `prism`, entropy | 434,299 / **550,669** / 631,969 | 10.9 | the traced artwork, live |
 | `portal` | 400,481 mean | 15 | sector walk, screen-x windows |
 
+## 1a. The floors, measured
+
+| | T-states | |
+|---|---|---|
+| a flat-shaded span (`spanfill`) | **63.0** | plus 5.51 a byte, which is `PUSH`'s floor |
+| a scanline of it | 92 | 128 rows of full-width floor is 101,888 |
+| an edge stepped a scanline (`renderlit`) | 39 | what produces a span |
+
+Which is what `demo-ideas.md` §15 costs a Zarch-style polygon landscape
+against: about eight cells across a 128-scanline floor at 25 Hz.
+
 ## 2. The rasteriser (`renderlit`), before and after
 
 Measured by timing `rndl_six` on one quad of a known size.

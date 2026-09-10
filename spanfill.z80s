@@ -1,0 +1,90 @@
+;------------------------------------------------------------------
+; spanfill.z80s - a scanline of flat-shaded spans, at the fill floor
+;
+;   spn_frame    fill SPN_ROWS scanlines from a list of spans
+;
+; This is the inner loop any polygonal floor needs - Zarch's landscape,
+; a lit heightfield, anything that comes out of a rasteriser as "from
+; here to here in this colour". It is here to be measured: what a span
+; costs is what decides whether a polygon floor is a 25 Hz routine or a
+; 12 Hz one, and the answer was not obvious enough to guess at.
+;
+; A span is PUSHes, which is 5.5 T-states a byte and the floor for
+; anything that writes memory. The two things that make the dispatch
+; cheap:
+;
+;   THE ENTRY. A run of 64 PUSH BC is 64 bytes, one a PUSH, so the
+;   address to jump to for n of them is one byte of arithmetic - and
+;   the list holds it already worked out, so it is LD L,A and JP (HL).
+;
+;   THE COLOUR. A MODE 4 byte is two pixels, so a flat colour is the
+;   same byte twice: LD B,A / LD C,A and the pair is ready to push.
+;
+; What it does not do is the odd pixel at a span's end. A PUSH is two
+; pixels, so a boundary lands on a pixel only if the byte it lands in
+; carries one pixel of each colour, which is chequer3's trick and costs
+; a read of the list and a store a boundary on top of what is here.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+spn_frame:
+        DI
+        LD   (spn_sp),SP
+        LD   A,(spn_buf)        ; one past the first row's last byte,
+        ADD  A,(SPN_TOP + 1) / 2        ; because a PUSH writes below SP
+        LD   DE,spn_list
+        EXX
+        LD   H,A
+        LD   L,((SPN_TOP + 1) & 1) * 128
+        LD   B,SPN_ROWS
+        EXX
+        LD   H,spn_chain / 256  ; the run of PUSHes, page aligned
+        EXX
+        JR   spn_next
+
+;------------------------------------------------------------------
+; The span loop. The list is a scanline at a time, rightmost span
+; first, two bytes a span - where in the run to enter, and the colour -
+; and a zero where the scanline ends.
+;------------------------------------------------------------------
+
+spn_span:
+        LD   A,(DE)             ; where in the run this span enters
+        INC  DE
+        OR   A
+        JR   Z,spn_eol
+        LD   L,A
+        LD   A,(DE)             ; the colour, both pixels of it
+        INC  DE
+        LD   B,A
+        LD   C,A
+        JP   (HL)
+
+spn_eol:
+        EXX
+        DJNZ spn_next
+        LD   SP,(spn_sp)
+        EI
+        RET
+
+spn_next:
+        LD   SP,HL              ; this row's right hand end
+        LD   A,L                ; and on down the screen
+        ADD  A,128
+        LD   L,A
+        JR   NC,spn_n2
+        INC  H
+spn_n2:
+        EXX
+        JP   spn_span
+
+        ALIGN 256
+spn_chain:
+        DUP  64
+        PUSH BC
+        EDUP
+        JP   spn_span
+
+spn_buf:        DEFB 0x80
+spn_sp:         DEFS 2
