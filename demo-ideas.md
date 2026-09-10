@@ -6,6 +6,9 @@ repo has actually measured rather than against intuition. Items 1 to 4 and
 not marked as an estimate was measured on the emulator and is quoted in one
 of the `.md` notes beside the routine it came from.
 
+`tricks.md` explains the techniques behind these numbers — read it before
+costing anything new.
+
 ## The cost model to judge against
 
 A 6 MHz Z80 has **120,000 T-states between 50 Hz frames**, 240,000 at 25 Hz.

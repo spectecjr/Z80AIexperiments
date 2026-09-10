@@ -7,6 +7,9 @@ T-states are raw: real SAM screen contention is on top. A 6 MHz SAM has
 Where a routine was changed, the before and after are both kept, because the
 useful part is usually the size of the step rather than the final figure.
 
+`tricks.md` is the other half of this file: the techniques these numbers
+came out of, what each one costs, and where it does not pay.
+
 ---
 
 ## 1. The demos
