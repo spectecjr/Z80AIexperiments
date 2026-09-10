@@ -75,6 +75,21 @@ against the routine's model - and then played through
 `tests/saa1099.py` to make the wavs in `demo/`. See `crow.md`,
 `shaku.md`, `strings.md` and `ensemble.md`.
 
+A whole arrangement driven from a register log costs less than any of
+them, because most frames change nothing. Over 9,898 frames of a 197 s
+recording reduced to six channels by `chiparr.py`, at the measured **74
+T-states** a (register, value) pair from `saa.z80s`:
+
+| | pairs a frame | T-states |
+|---|---|---|
+| mean | 1.77 | 131 — 0.11% of a 120,000 T-state frame |
+| median | 1 | 74 |
+| 99th percentile | 13 | 962 |
+| worst frame | 31 | 2,294 — 1.9% |
+
+See `chiparr.md`; `arrange.md` is the other way of doing it, an order of
+magnitude above this because it rewrites every channel every frame.
+
 ## 2. The rasteriser (`renderlit`), before and after
 
 Measured by timing `rndl_six` on one quad of a known size.
@@ -166,6 +181,10 @@ else happens at all.
 | **A whole-screen copy through the stack** (`scroll8`) | 476,645 T-states for the 23,552 bytes an eight-line scroll moves, against 380,552 by unrolled `LDI` | `POP`/`PUSH` moves a byte in 11.5 T-states against `LDI`'s 16 and still loses: eight bytes is all the register there is, and the two `LD SP`s round them are 58 more. `LDI` also never touches `SP`, so it needs no `DI` at all. The clear underneath goes the other way — 7,510 against 13,567 — because there the source is a register |
 | **Split prismpre's erase box** — one for the sigma, one for the triangle | blanks 94% of the bytes one box does; a box a piece blanks 115% | the pieces' boxes overlap too much |
 | **Drop the lighting from prism** (flat faces, visibility kept) | 446,602 → **410,789**, 14.6 Hz | `pr_light` 73,704 → 37,891; the other half *is* the visibility test. prism's non-drawing work is 213,320 even with no lighting at all — 89% of the whole 25 Hz budget — so no lighting setting reaches 25 Hz |
+| **Autocorrelation for the bass line** (`transcribe.py`), global argmax | read a 197 s recording's bass as F1 for nearly its whole length, through a progression that moves | a periodic signal correlates as well at 2T as at T, so the peak is an octave out as often as not |
+| **The same, taking the shortest lag within 85% of the best** | read a 73.4 Hz saw as D3 (+1200 cents) and the recording an octave above its real line | it takes the half-period peak instead; no tie-break on lag length fixes both directions. Replaced by a 16,384-sample harmonic sum plus an odd-harmonic octave test, which reads the saw at 73.4 Hz exactly — see `chiparr.md` |
+| **Band energy to classify a drum hit** | every one of a cue's 16 metal hits came out "hat" | a sustained hi-hat contributes to the high band whether or not it is part of this hit, and a band three octaves wide sums more bins than one an octave wide. It is the per-bin *rise* at the onset that is the hit |
+| **Chord quality decided per window** | a D minor cue's first two bars came out D major, and the arpeggio played F# against them | those bars contain no third at all. Each root now takes the quality the whole piece's evidence gives it, weighted by duration |
 | **Divide to get a DDA step** rather than a reciprocal table | `pf_div` 850 T-states against 342 for two quarter-square multiplies | the table (384 bytes) won, but not by enough to save the design |
 
 ## 6. Sizes, and what the shape costs

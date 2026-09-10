@@ -195,10 +195,19 @@ def tracks(frames, clock=CLOCK):
     last = snaps[-1] if snaps else None
     chip = {}
     if last:
-        chip["tone on"] = " ".join("ch%d" % c for c in range(6)
-                                   if last["ch"][c]["tone"]) or "nothing"
-        chip["noise on"] = " ".join("ch%d" % c for c in range(6)
-                                    if last["ch"][c]["noise"]) or "nothing"
+        # over the whole log, not in the last frame: a piece that ends in
+        # silence has every mixer bit clear there, which says nothing at all
+        def ever(key):
+            got = []
+            for c in range(6):
+                k = sum(1 for s in snaps if s["ch"][c][key]
+                        and s["enabled"] and max(s["ch"][c]["amp"]))
+                if k:
+                    got.append("ch%d (%d frames)" % (c, k))
+            return " ".join(got) or "nothing"
+
+        chip["tone on"] = ever("tone")
+        chip["noise on"] = ever("noise")
         for g in (0, 1):
             used = any(s["ch"][c]["noise"] for s in snaps
                        for c in range(g * 3, g * 3 + 3))
