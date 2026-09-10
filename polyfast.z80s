@@ -1,0 +1,641 @@
+;------------------------------------------------------------------
+; polyfast.z80s - a convex quad rasteriser built around the scanline
+;
+; Measured on renderlit's own rasteriser: a face costs 3,040 T-states
+; plus 426 a scanline before a single pixel is filled, and the fill
+; itself is 17.5 T-states a byte. A 40 by 32 quad is 28,592 T-states,
+; of which 11,760 is filling and the rest is getting there. So the
+; scanline is what to attack, and renderlit spends it like this:
+;
+;   two edge walks   160 T   39 a scanline each, and 27 more for
+;                            every pixel of sideways travel - which
+;                            averages 55 a scanline on a logo, and
+;                            almost half of all edges are shallower
+;                            than 45 degrees
+;   xl / xr fetch     55 T   the two scanline arrays, read back
+;                            through EXX and a PUSH/POP pair
+;   span setup       ~120 T  byte addresses and the two end masks
+;   loop overhead     ~90 T  the empty-span test, the line step, the
+;                            call and the DJNZ
+;
+; This does the same job without the arrays. Each side of the quad is
+; a chain of edges walked as an 8.8 fixed point DDA in a register
+; pair, so a scanline is one ADD HL,BC a side - eleven T-states, and
+; the same eleven whatever the slope. The steps are constants for as
+; long as both chains stay on the same edge, so they are patched into
+; the loop as immediates and the quad is drawn in one to three
+; segments.
+;
+; It is not renderlit's rasteriser bit for bit: a DDA truncates where
+; Bresenham rounds, so an edge can sit a pixel over from where
+; renderlit puts it. tests/polyfast.py models this one exactly.
+;
+; MEASURED, IT DOES NOT PAY on faces the size a logo or a cube has.
+; The scanline did get cheaper - 760 T-states against renderlit's 798,
+; and flat in the slope where renderlit's climbs 27 a pixel of
+; sideways travel - but a DDA needs a step per edge where Bresenham
+; needs none, and that is 6,638 T-states a face against 3,040. The two
+; cross at 95 scanlines a face; prism's average 23. See polyfast.md
+; for the numbers and what would have to change.
+;
+; Entry is the same as rndl_quad's: IX -> four vertex indices, with
+; (rndl_pts), (rndl_face) and rndl_fcol set. pf_six replaces
+; rndl_six, so anything that draws through renderlit can use it.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+;------------------------------------------------------------------
+; pf_init - the reciprocals a step is built from
+;
+; A step is dx * 256 / dy, and dividing costs 850 T-states where a
+; quarter-square multiply costs 131. So the frame keeps a table of
+; 65536 / dy for every height a face can have, and an edge is two
+; multiplies instead of a division: 342 T-states rather than 850.
+;
+; It costs a truncation - floor(dx * floor(65536/dy) / 256) rather
+; than floor(dx * 256 / dy) - which is under a 256th of a pixel a
+; scanline, so under a pixel over the tallest edge there can be.
+;------------------------------------------------------------------
+
+pf_init:
+        LD   HL,pf_recip + 2    ; dy = 0 is never asked for
+        LD   (pf_wp),HL
+        LD   C,1
+pf_in1:
+        LD   HL,0
+        DEC  HL                 ; 65535, which is 65536/dy to the byte
+        CALL pf_div             ; for every height a face can have
+        LD   DE,(pf_wp)
+        EX   DE,HL
+        LD   (HL),E
+        INC  HL
+        LD   (HL),D
+        INC  HL
+        LD   (pf_wp),HL
+        INC  C
+        LD   A,C
+        CP   192
+        JR   NZ,pf_in1
+        RET
+
+;------------------------------------------------------------------
+; pf_six - renderlit's six face dispatch, through pf_quad
+;------------------------------------------------------------------
+
+pf_six:
+        LD   IX,rndl_faces
+        LD   B,6
+        XOR  A
+        LD   (rndl_face),A
+pf_sx1:
+        PUSH BC
+        LD   A,(rndl_face)
+        LD   E,A
+        LD   D,0
+        LD   HL,rndl_vis
+        ADD  HL,DE
+        LD   A,(HL)
+        OR   A
+        CALL NZ,pf_quad
+        LD   BC,4
+        ADD  IX,BC
+        LD   A,(rndl_face)
+        INC  A
+        LD   (rndl_face),A
+        POP  BC
+        DJNZ pf_sx1
+        RET
+
+;------------------------------------------------------------------
+; pf_quad - one convex quad, wound so its descending edges are on the
+;           right, which is what renderlit's face table gives
+;------------------------------------------------------------------
+
+pf_quad:
+        LD   A,(rndl_face)      ; the colour rndl_light worked out
+        LD   E,A
+        LD   D,0
+        LD   HL,rndl_fcol
+        ADD  HL,DE
+        LD   A,(HL)
+        LD   (pf_col),A
+
+        LD   HL,(rndl_pts)      ; gather the four corners
+        LD   B,4
+        LD   C,0
+pf_gath:
+        PUSH HL
+        LD   E,(IX+0)
+        LD   D,0
+        ADD  HL,DE
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        LD   HL,pf_qx           ; qx and qy sit four bytes apart
+        LD   A,L
+        ADD  A,C
+        LD   L,A
+        LD   (HL),E
+        SET  2,L
+        LD   (HL),D
+        POP  HL
+        INC  IX
+        INC  C
+        DJNZ pf_gath
+        LD   DE,-4
+        ADD  IX,DE
+
+        LD   HL,pf_qy           ; top and bottom
+        LD   B,(HL)
+        LD   C,B
+        LD   E,3
+pf_mnmx:
+        INC  L
+        LD   A,(HL)
+        CP   B
+        JR   NC,pf_mm1
+        LD   B,A
+pf_mm1:
+        CP   C
+        JR   C,pf_mm2
+        LD   C,A
+pf_mm2:
+        DEC  E
+        JR   NZ,pf_mnmx
+        LD   A,B
+        LD   (pf_ytop),A
+        LD   A,C
+        SUB  B
+        RET  Z                  ; no height, nothing to draw
+        LD   (pf_todo),A
+
+;------------------------------------------------------------------
+; the two chains: edges that go down the screen are the right hand
+; side, in the order the winding gives them, and those that go up are
+; the left hand side, turned round and taken in reverse - which for a
+; convex quad puts both chains in top to bottom order.
+;------------------------------------------------------------------
+
+        LD   HL,pf_redge
+        LD   (pf_wp),HL
+        LD   C,0
+        LD   B,4
+pf_rb1:
+        PUSH BC
+        LD   A,C
+        CALL pf_pt              ; D = x[k], E = y[k]
+        PUSH DE
+        LD   A,C
+        INC  A
+        AND  3
+        CALL pf_pt              ; D = x[k+1], E = y[k+1]
+        POP  BC                 ; B = x[k], C = y[k]
+        LD   A,E
+        CP   C
+        JR   C,pf_rb2
+        JR   Z,pf_rb2
+        CALL pf_app             ; downwards: the right chain
+pf_rb2:
+        POP  BC
+        INC  C
+        DJNZ pf_rb1
+
+        LD   HL,pf_ledge
+        LD   (pf_wp),HL
+        LD   C,3
+        LD   B,4
+pf_lb1:
+        PUSH BC
+        LD   A,C
+        CALL pf_pt
+        PUSH DE
+        LD   A,C
+        INC  A
+        AND  3
+        CALL pf_pt              ; D = x[k+1], E = y[k+1]
+        POP  HL                 ; H = x[k], L = y[k]
+        LD   A,E
+        CP   L
+        JR   NC,pf_lb2          ; upwards only
+        LD   B,D                ; turned round: (k+1) is the top
+        LD   C,E
+        LD   D,H
+        LD   E,L
+        CALL pf_app
+pf_lb2:
+        POP  BC
+        DEC  C
+        DJNZ pf_lb1
+
+        LD   HL,pf_redge        ; both chains start at their first edge
+        LD   (pf_rp),HL
+        LD   HL,pf_ledge
+        LD   (pf_lp),HL
+        XOR  A
+        LD   (pf_lrem),A
+        LD   (pf_rrem),A
+
+        LD   A,(pf_ytop)        ; where that lands on the screen
+        LD   E,A
+        AND  1
+        RRCA
+        LD   L,A                ; 0 or 128
+        LD   A,E
+        SRL  A
+        LD   D,A
+        LD   A,(rndl_back)
+        ADD  A,D
+        LD   H,A
+        LD   (pf_line),HL
+
+;------------------------------------------------------------------
+; a segment at a time: as many scanlines as both chains can manage
+; without changing edge, with the two steps patched into the loop
+;------------------------------------------------------------------
+
+pf_seg:
+        LD   A,(pf_lrem)
+        OR   A
+        CALL Z,pf_nextl
+        LD   A,(pf_rrem)
+        OR   A
+        CALL Z,pf_nextr
+
+        LD   A,(pf_lrem)        ; n = min(lrem, rrem, todo)
+        LD   HL,pf_rrem
+        CP   (HL)
+        JR   C,pf_sg1
+        LD   A,(HL)
+pf_sg1:
+        LD   HL,pf_todo
+        CP   (HL)
+        JR   C,pf_sg2
+        LD   A,(HL)
+pf_sg2:
+        LD   B,A                ; B = the segment's scanlines
+        LD   HL,pf_lrem         ; take it off all three counts
+        SUB  (HL)
+        NEG
+        LD   (HL),A
+        LD   A,B
+        LD   HL,pf_rrem
+        SUB  (HL)
+        NEG
+        LD   (HL),A
+        LD   A,B
+        LD   HL,pf_todo
+        SUB  (HL)
+        NEG
+        LD   (HL),A
+
+        LD   HL,(pf_lstep)      ; the two steps, into the loop itself,
+        LD   A,L                ; as a fraction and an integer each
+        LD   (pf_pl1 + 1),A
+        LD   A,H
+        LD   (pf_pl2 + 1),A
+        LD   HL,(pf_rstep)
+        LD   A,L
+        LD   (pf_pr1 + 1),A
+        LD   A,H
+        LD   (pf_pr2 + 1),A
+        LD   A,(pf_col)
+        LD   (pf_pc + 1),A
+
+        LD   A,B                ; the scanline count, out of the way
+        EXX
+        LD   B,A
+        EXX
+        LD   HL,(pf_lacc)       ; x in B and C, the fractions in D and E
+        LD   B,H
+        LD   D,L
+        LD   HL,(pf_racc)
+        LD   C,H
+        LD   E,L
+        LD   HL,(pf_line)
+
+pf_run:
+        LD   A,D                ; the left chain: sixteen bits of add,
+pf_pl1:
+        ADD  A,0                ; patched, split into its two halves
+        LD   D,A
+        LD   A,B
+pf_pl2:
+        ADC  A,0                ; patched
+        LD   B,A
+        LD   A,E                ; and the right
+pf_pr1:
+        ADD  A,0                ; patched
+        LD   E,A
+        LD   A,C
+pf_pr2:
+        ADC  A,0                ; patched
+        LD   C,A
+
+        LD   A,C
+        CP   B
+        JR   C,pf_nofill        ; crossed: an empty span
+        PUSH BC                 ; the two x's and the two fractions,
+        PUSH DE                 ; which the span is about to trample
+        LD   E,B
+        LD   D,C
+pf_pc:
+        LD   C,0                ; patched: the face's colour
+        CALL pf_span
+        POP  DE
+        POP  BC
+pf_nofill:
+        LD   A,128              ; the next line down
+        ADD  A,L
+        LD   L,A
+        JR   NC,pf_nc
+        INC  H
+pf_nc:
+        EXX
+        DEC  B
+        EXX
+        JP   NZ,pf_run
+
+        LD   (pf_line),HL       ; put the state back
+        LD   H,B
+        LD   L,D
+        LD   (pf_lacc),HL
+        LD   H,C
+        LD   L,E
+        LD   (pf_racc),HL
+        LD   A,(pf_todo)
+        OR   A
+        JP   NZ,pf_seg
+        RET
+
+;------------------------------------------------------------------
+; pf_nextl, pf_nextr - the next edge of a chain, set up to walk
+;------------------------------------------------------------------
+
+pf_nextl:
+        LD   HL,(pf_lp)
+        CALL pf_edge
+        LD   (pf_lp),HL
+        LD   A,C
+        LD   (pf_lrem),A
+        LD   (pf_lacc),DE
+        LD   HL,(pf_step)
+        LD   (pf_lstep),HL
+        RET
+
+pf_nextr:
+        LD   HL,(pf_rp)
+        CALL pf_edge
+        LD   (pf_rp),HL
+        LD   A,C
+        LD   (pf_rrem),A
+        LD   (pf_racc),DE
+        LD   HL,(pf_step)
+        LD   (pf_rstep),HL
+        RET
+
+;------------------------------------------------------------------
+; pf_edge - one edge record into a starting accumulator and a step
+;
+; Entry : HL -> x0, y0, x1, y1
+; Exit  : HL advanced, C = scanlines, DE = the accumulator to start
+;         from, (pf_step) = the step. The accumulator starts half a
+;         pixel in and one step back, so the first add of the loop
+;         lands on x0 and a half.
+;------------------------------------------------------------------
+
+pf_edge:
+        LD   B,(HL)             ; x0
+        INC  HL
+        LD   C,(HL)             ; y0
+        INC  HL
+        LD   D,(HL)             ; x1
+        INC  HL
+        LD   E,(HL)             ; y1
+        INC  HL
+        PUSH HL
+
+        LD   A,B
+        LD   (pf_x0),A
+        LD   A,E
+        SUB  C
+        LD   (pf_dy),A          ; dy, always positive
+        LD   C,A
+        LD   A,D
+        SUB  B                  ; dx
+        LD   E,0
+        JR   NC,pf_ed1
+        NEG
+        LD   E,1                ; and which way it goes
+pf_ed1:
+        LD   (pf_dx),A
+        LD   A,E
+        LD   (pf_neg),A
+
+        LD   L,C                ; two bytes of reciprocal a height
+        LD   H,0
+        ADD  HL,HL
+        LD   DE,pf_recip
+        ADD  HL,DE
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)             ; DE = 65536 / dy
+
+        LD   A,(pf_dx)          ; step = (|dx| * that) >> 8, which is
+        LD   B,A                ; two quarter-square multiplies
+        LD   C,E
+        PUSH DE
+        CALL qsmul8             ; DE = |dx| * the low byte
+        LD   A,D
+        LD   (pf_hi),A
+        POP  DE
+        LD   A,(pf_dx)
+        LD   B,A
+        LD   C,D
+        CALL qsmul8             ; DE = |dx| * the high byte
+        LD   A,(pf_hi)
+        LD   L,A
+        LD   H,0
+        ADD  HL,DE
+
+        LD   A,(pf_neg)
+        OR   A
+        JR   Z,pf_ed2
+        LD   A,H                ; leftwards, so two's complement
+        CPL
+        LD   H,A
+        LD   A,L
+        CPL
+        LD   L,A
+        INC  HL
+pf_ed2:
+        LD   (pf_step),HL
+        LD   A,(pf_x0)          ; x0 and a half, one step back, so the
+        LD   D,A                ; loop's first add lands on x0 and a half
+        LD   E,PF_HALF
+        EX   DE,HL
+        OR   A
+        SBC  HL,DE
+        EX   DE,HL
+        LD   A,(pf_dy)
+        LD   C,A
+        POP  HL
+        RET
+
+;------------------------------------------------------------------
+; pf_div - HL / C, unsigned, sixteen bits of quotient
+;------------------------------------------------------------------
+
+pf_div:
+        XOR  A
+        LD   B,16
+pf_dv1:
+        ADD  HL,HL
+        RLA
+        JR   C,pf_dv2
+        CP   C
+        JR   C,pf_dv3
+pf_dv2:
+        SUB  C
+        INC  L
+pf_dv3:
+        DJNZ pf_dv1
+        RET
+
+;------------------------------------------------------------------
+; helpers for the chain building
+;------------------------------------------------------------------
+
+pf_pt:                          ; A = a corner -> D = x, E = y
+        LD   HL,pf_qx
+        ADD  A,L
+        LD   L,A
+        LD   D,(HL)
+        SET  2,L
+        LD   E,(HL)
+        RET
+
+pf_app:                         ; B, C, D, E -> the edge list
+        LD   HL,(pf_wp)
+        LD   (HL),B
+        INC  HL
+        LD   (HL),C
+        INC  HL
+        LD   (HL),D
+        INC  HL
+        LD   (HL),E
+        INC  HL
+        LD   (pf_wp),HL
+        RET
+
+;------------------------------------------------------------------
+; pf_span - renderlit's span, unchanged: it is already tight
+;
+; Entry : E = xl, D = xr, C = colour in both nibbles, HL = the line
+;------------------------------------------------------------------
+
+pf_span:
+        PUSH HL
+        LD   A,E
+        SRL  A
+        LD   B,A
+        ADD  A,L
+        LD   L,A
+        LD   A,D
+        SRL  A
+        SUB  B
+        LD   B,A
+        LD   A,E
+        RRA
+        SBC  A,A
+        AND  0xF0
+        LD   E,A
+        LD   A,B
+        OR   A
+        JR   NZ,pf_spm
+
+        LD   A,D
+        RRA
+        SBC  A,A
+        CPL
+        AND  0x0F
+        OR   E
+        LD   E,A
+        JR   pf_spe
+
+pf_spm:
+        LD   A,(HL)
+        XOR  C
+        AND  E
+        XOR  C
+        LD   (HL),A
+        INC  L
+        DEC  B
+        JR   Z,pf_spr
+        SRL  B
+        JR   NC,pf_spv
+        LD   (HL),C
+        INC  L
+pf_spv:
+        LD   A,B
+        OR   A
+        JR   Z,pf_spr
+pf_spf:
+        LD   (HL),C
+        INC  L
+        LD   (HL),C
+        INC  L
+        DJNZ pf_spf
+
+pf_spr:
+        LD   A,D
+        RRA
+        SBC  A,A
+        CPL
+        AND  0x0F
+        LD   E,A
+pf_spe:
+        LD   A,(HL)
+        XOR  C
+        AND  E
+        XOR  C
+        LD   (HL),A
+        POP  HL
+        RET
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+PF_HALF:        EQU 0x80        ; a chain starts half a pixel in
+
+        ALIGN 8
+pf_qx:          DEFS 4
+pf_qy:          DEFS 4
+
+pf_redge:       DEFS 16         ; up to four edges a chain
+pf_ledge:       DEFS 16
+pf_wp:          DEFS 2
+pf_lp:          DEFS 2
+pf_rp:          DEFS 2
+pf_lrem:        DEFS 1
+pf_rrem:        DEFS 1
+pf_lacc:        DEFS 2
+pf_racc:        DEFS 2
+pf_lstep:       DEFS 2
+pf_rstep:       DEFS 2
+pf_step:        DEFS 2
+pf_line:        DEFS 2
+pf_ytop:        DEFS 1
+pf_todo:        DEFS 1
+pf_col:         DEFS 1
+pf_x0:          DEFS 1
+pf_dy:          DEFS 1
+pf_dx:          DEFS 1
+pf_neg:         DEFS 1
+pf_hi:          DEFS 1
+
+        ALIGN 2
+pf_recip:       DEFS 2 * 192    ; 65536 / dy, built by pf_init
+
+PF_SIZE:        EQU $ - pf_six

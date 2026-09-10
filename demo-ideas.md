@@ -240,6 +240,17 @@ price is the loop: 9,216 bytes is 64 frames of free RAM, so the logo has to
 come back to where it started in 64 frames and turns about three times
 faster. See `prismpre.md`.
 
+**A faster rasteriser was tried and measured down.** `polyfast.z80s` walks
+each side of a quad as an 8.8 DDA in a register pair instead of Bresenham
+into two scanline arrays, which makes a scanline cost the same whatever the
+slope - 760 T-states against renderlit's 798, and flat where renderlit
+climbs 27 a pixel of sideways travel. But a DDA needs a step per edge where
+Bresenham needs none: 6,638 T-states a face against 3,040. The two cross at
+95 scanlines a face and a logo's average 23, so it loses. What the numbers
+say to attack instead is the span setup - about 300 of the 431 T-states a
+scanline, for a span that then fills ten bytes at 17.5 each. See
+`polyfast.md`.
+
 What follows is the original note.
 
 It'd be great if we could take the 3D Lit Cube renderer and see if we could use it to render the
