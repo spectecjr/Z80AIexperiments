@@ -32,14 +32,20 @@ FOCAL = 64                              # what t3d_recip is built for
 N = 4                                   # cubes
 S = 34                                  # a cube's half size
 R = 59                                  # and its bounding sphere, ceil(S*3^.5)
-BX, BY, ZN, ZF = 187, 140, 100, 254     # the room, in world units
+BX, BY, ZN, ZF = 186, 140, 100, 254     # the room, in world units
 
 # The far wall is where it is because of sixteen bits, not because of
 # taste: t3d adds up to R*128 of rotated corner onto the centre, and
 # the sum has to stay inside a signed word. That is 195 units of z at
 # this size, and the room's other three dimensions follow from the
 # viewport its front face has to fill.
-G = 6                                   # gravity, velocity units a frame
+G = 320                                 # gravity, velocity units a frame
+
+# A velocity unit is 1/2048 of a world unit a frame, so 8,000 is about
+# four units a frame and crosses the room in a second or two. Slower
+# than that and the cubes drift rather than bounce: at democube's own
+# 700 they cover a tenth of the room in a twelve second demo and never
+# reach a wall at all.
 
 XLIM, YLIM = (BX - R) * 128, (BY - R) * 128
 ZMIN, ZMAX = (ZN + R) * 128, (ZF - R) * 128
@@ -174,13 +180,13 @@ def collide(a, b):
 def cubes_start():
     """Where the cubes begin: position, velocity, angles, spin rates."""
     return [
-        ((-90 * 128, 60 * 128, 165 * 128), (620, 0, 300), (0, 0, 0),
+        ((-90 * 128, 60 * 128, 165 * 128), (7400, 0, 2600), (0, 0, 0),
          (3, 5, 2)),
-        ((90 * 128, 40 * 128, 190 * 128), (-500, 200, -260),
+        ((90 * 128, 40 * 128, 190 * 128), (-6100, 2400, -2200),
          (40, 90, 7), (-4, 3, 5)),
-        ((0, -30 * 128, 176 * 128), (430, 700, 420), (128, 20, 200),
+        ((0, -30 * 128, 176 * 128), (5200, 8300, 3400), (128, 20, 200),
          (5, -2, 4)),
-        ((40 * 128, 70 * 128, 186 * 128), (-350, -150, -500),
+        ((40 * 128, 70 * 128, 186 * 128), (-4300, -1800, -4100),
          (200, 160, 60), (2, 6, -3)),
     ][:N]
 
@@ -232,9 +238,9 @@ def main():
             worst = max(worst, c.p[2] - ZMAX, ZMIN - c.p[2])
             for i in range(3):
                 hits = max(hits, abs(c.v[i]))
-    print("  %d frames: furthest past a wall %d, fastest %d of 6000"
+    print("  %d frames: furthest past a wall %d, fastest %d of 30000"
           % (n, max(0, worst), hits))
-    ok = worst <= 0 and hits < 6000
+    ok = worst <= 0 and hits < 30000
     print("%s" % ("PASSED: the cubes stay in the room and keep bouncing"
                   if ok else "FAILED"))
     return 0 if ok else 1

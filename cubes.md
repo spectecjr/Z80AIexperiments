@@ -15,11 +15,26 @@ costs rather than about drawing.
     wall:  p to the wall, and v = -v if it was heading out
     cube:  swap the two v's along the axis they overlap least in
 
+A velocity unit is 1/2048 of a world unit a frame, and **the speeds have to
+be chosen against the room, not copied from `democube`**: at its 700 a cube
+covers a tenth of this room in a twelve-second demo and never reaches a
+wall at all. 8,000 — about four units a frame — crosses it in a second or
+two, which is what bouncing looks like.
+
 Swapping is what two equal masses do in a head-on hit, and the axis of
 least overlap is the one they met on. All of it is elastic, so the demo
 runs for ever without either dying down or running away — `tests/cubes.py
 --long` checks that over a million frames: no cube ever leaves the room and
 no speed ever exceeds 2,300 of the 6,000 the fixed point allows.
+
+**A wall test cannot use the sign flag alone.** A cube at one wall is
+`2 * XLIM` from the other, and at these limits that is 32,768 — one past
+what a signed word holds — so `p - limit` overflows and the sign says the
+opposite of the truth. The cube gets clamped to the wall it is furthest
+from and shoots across the room. `cb_cmp` reads the overflow flag as well,
+which is what a signed comparison actually needs; the room is also a unit
+narrower than the viewport can take, so the same subtraction inside the
+cube-against-cube test cannot overflow either.
 
 **The wall holds the position as well as turning the velocity round.** That
 is not decoration: a cube squeezed between a wall and another cube gets an
@@ -110,6 +125,8 @@ with the nibble standing still. 55 T-states a pixel, and the same picture.
   run out. `tests/cubes.py` holds all of it; `mkcubesdata.py` emits it.
 - Edges are stored with their major axis increasing. `cb_line` assumes it.
 - The cubes must stay off the border, or the erase will eat it.
+- `2 * XLIM` must stay inside a signed word, which is what caps the room at
+  186 units of half width. The pair test subtracts two positions directly.
 - `DEMO_HALF` and the model's `S` must agree.
 
     python3 tests/mkcubesdata.py    # regenerate the room and the cubes

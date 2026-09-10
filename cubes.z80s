@@ -274,9 +274,8 @@ cb_axis:
         LD   D,(HL)             ; DE = the high wall
         LD   H,B
         LD   L,C
-        OR   A
-        SBC  HL,DE
-        JP   M,cb_axlo
+        CALL cb_cmp
+        JR   C,cb_axlo
         CALL cb_axset           ; p = hi
         BIT  7,D                ; and turn it round if it was heading out
         RET  NZ
@@ -290,9 +289,8 @@ cb_axlo:
         LD   D,(HL)             ; DE = the low wall
         LD   H,B
         LD   L,C
-        OR   A
-        SBC  HL,DE
-        RET  P
+        CALL cb_cmp
+        RET  NC
         CALL cb_axset           ; p = lo
         BIT  7,D
         RET  Z
@@ -307,6 +305,23 @@ cb_axneg:                       ; DE = v, (cb_bp) -> p
         LD   (HL),E
         INC  HL
         LD   (HL),D
+        RET
+
+cb_cmp:                         ; carry if HL < DE, both of them signed
+        OR   A                  ; and the difference allowed to overflow,
+        SBC  HL,DE              ; which at these limits it does: a cube
+        JP   PE,cb_cmp1         ; at one wall against the other one is
+        BIT  7,H                ; 32,768 apart, and the sign flag on its
+        JR   Z,cb_cmp0          ; own would say the opposite of the truth
+        SCF
+        RET
+cb_cmp0:
+        OR   A
+        RET
+cb_cmp1:
+        BIT  7,H
+        JR   NZ,cb_cmp0
+        SCF
         RET
 
 cb_axset:                       ; p = DE, then DE = v
