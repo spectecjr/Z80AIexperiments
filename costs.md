@@ -68,6 +68,7 @@ And moving memory about, measured on the eight-line scroll (`scroll8`):
 | `st_frame`, holding a chord (`strings`) | **1,097** | six channels: a triad and a detuned copy of it |
 | `st_frame`, at its busiest | 2,463 | a chord change |
 | `en_frame` (`ensemble`) | **3,360** | both of them at once, three oscillators each |
+| `sm_frame` (`storm`) | **3,153** | distant thunder and rain, two noise generators, no tones at all |
 
 All verified the same way as everything else - every OUT, in order,
 against the routine's model - and then played through

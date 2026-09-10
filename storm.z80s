@@ -1,0 +1,232 @@
+;------------------------------------------------------------------
+; storm.z80s - distant thunder, and then rain, at 50 Hz
+;
+;   sm_init     set the chip up, once
+;   sm_play     start the storm
+;   sm_frame    one 50 Hz frame of it
+;
+; Two noise generators and nothing else: there is not a tone enabled
+; anywhere in this routine, and no samples anywhere near it.
+;
+; WHY A NOISE GENERATOR CAN BE A RUMBLE. In mode 3 the LFSR is clocked
+; by a tone generator instead of one of the three fixed rates, and a
+; tone generator goes down to 31 Hz. Clock the noise at a few hundred
+; shifts a second and what comes out is not hiss at all - it is a
+; random square wave with all of its energy below half the clock. At
+; 220 Hz that is a rumble; measured on the wav, 81% of the thunder is
+; under 250 Hz. Sweeping the clock from 220 Hz down to 78 Hz over seven
+; seconds is thunder rolling away and losing its top end to the air,
+; which is what distance actually does to it.
+;
+; The same generator at 5 kHz is rain. Nothing else about it changes,
+; which is why the thunder's three channels can become the rain's hiss
+; once the rumble has died: one write to a frequency register.
+;
+; WHY THREE CHANNELS A LAYER. An amplitude register is four bits, and
+; sixteen steps is not enough to fade a seven-second rumble without
+; hearing it step. All three channels of a group carry the SAME noise
+; generator, so their outputs are identical and simply add - three
+; channels at level 5 is exactly level 15 - and the levels in between
+; give 46 steps rather than 16. sm_spread holds the three bytes for
+; each of them, so a level is a lookup and not a division.
+;
+;   ch0 ch1 ch2   noise generator 0, clocked by channel 0's tone
+;   ch3 ch4 ch5   noise generator 1, clocked by channel 3's tone
+;
+; THE SCORES. Each layer is a list of segments - frames, octave, where
+; the clock and the level start, and an 8.8 step for each a frame - so
+; a seven-second sweep is two adds a frame and eight bytes of table.
+; The generator writes the scores in Hz and splits any segment that
+; would cross an octave boundary, because a frequency byte only spans
+; one octave: a sweep through 122 Hz ends at byte 0 of octave 2 and
+; picks up at byte 255 of octave 1.
+;
+; A frame is ten register writes and 2,187 T-states, 1.8% of a frame.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+; the layer state block, thirteen bytes and a pointer to its writes
+SM_SP:          EQU 0           ; where its score has got to
+SM_SEGS:        EQU 2           ; segments left in it
+SM_LEFT:        EQU 3           ; frames left in this segment
+SM_NACC:        EQU 4           ; the clock, 8.8
+SM_NSTEP:       EQU 6
+SM_VACC:        EQU 8           ; the level, 8.8
+SM_VSTEP:       EQU 10
+SM_OCT:         EQU 12          ; the octave, in the nibble its register wants
+SM_BUF:         EQU 13          ; its five (register, value) pairs
+
+sm_init:
+        LD   HL,sm_ini
+        LD   E,SM_INITS
+        CALL saa_send
+        XOR  A
+        LD   (sm_a + SM_LEFT),A         ; both layers idle
+        LD   (sm_a + SM_SEGS),A
+        LD   (sm_b + SM_LEFT),A
+        LD   (sm_b + SM_SEGS),A
+        RET
+
+sm_play:
+        LD   HL,sm_th
+        LD   (sm_a + SM_SP),HL
+        LD   A,SM_THSEGS
+        LD   (sm_a + SM_SEGS),A
+        LD   HL,sm_rn
+        LD   (sm_b + SM_SP),HL
+        LD   A,SM_RNSEGS
+        LD   (sm_b + SM_SEGS),A
+        XOR  A
+        LD   (sm_a + SM_LEFT),A
+        LD   (sm_b + SM_LEFT),A
+        RET
+
+;------------------------------------------------------------------
+; sm_frame - the thunder's layer, then the rain's.
+;------------------------------------------------------------------
+
+sm_frame:
+        LD   IX,sm_a
+        CALL sm_layer
+        LD   IX,sm_b
+
+;------------------------------------------------------------------
+; sm_layer - one layer: interpolate, look the level up, and send.
+;------------------------------------------------------------------
+
+sm_layer:
+        LD   A,(IX + SM_LEFT)
+        OR   A
+        CALL Z,sm_next          ; this segment is done: take the next
+        LD   A,(IX + SM_LEFT)
+        OR   A
+        RET  Z                  ; and the score is over
+
+        LD   L,(IX + SM_BUF)
+        LD   H,(IX + SM_BUF + 1)
+        INC  HL                 ; past the register byte
+        LD   A,(IX + SM_OCT)
+        LD   (HL),A             ; the octave, already in its nibble
+        INC  HL
+        INC  HL
+        LD   A,(IX + SM_NACC + 1)
+        LD   (HL),A             ; the clock: the whole half of the accumulator
+        INC  HL
+
+        LD   A,(IX + SM_VACC + 1)       ; the level, the same way
+        OR   A
+        JP   M,sm_zero                  ; a step can take it under nothing
+        CP   SM_MAXLVL + 1
+        JR   C,sm_have
+        LD   A,SM_MAXLVL                ; or over everything
+        JR   sm_have
+sm_zero:
+        XOR  A
+sm_have:
+        LD   E,A
+        ADD  A,A
+        ADD  A,E                ; three bytes a level
+        LD   E,A
+        LD   D,0
+        PUSH HL                 ; where the amplitudes go
+        LD   HL,sm_spread
+        ADD  HL,DE              ; and where their three bytes are
+        POP  DE
+        INC  DE                 ; DE -> the first one's value byte
+        LD   A,(HL)             ; three of them, every other byte
+        LD   (DE),A
+        INC  HL
+        INC  DE
+        INC  DE
+        LD   A,(HL)
+        LD   (DE),A
+        INC  HL
+        INC  DE
+        INC  DE
+        LD   A,(HL)
+        LD   (DE),A
+
+        LD   L,(IX + SM_NACC)   ; and on to the next frame
+        LD   H,(IX + SM_NACC + 1)
+        LD   E,(IX + SM_NSTEP)
+        LD   D,(IX + SM_NSTEP + 1)
+        ADD  HL,DE
+        LD   (IX + SM_NACC),L
+        LD   (IX + SM_NACC + 1),H
+        LD   L,(IX + SM_VACC)
+        LD   H,(IX + SM_VACC + 1)
+        LD   E,(IX + SM_VSTEP)
+        LD   D,(IX + SM_VSTEP + 1)
+        ADD  HL,DE
+        LD   (IX + SM_VACC),L
+        LD   (IX + SM_VACC + 1),H
+        DEC  (IX + SM_LEFT)
+
+        LD   L,(IX + SM_BUF)
+        LD   H,(IX + SM_BUF + 1)
+        LD   E,5
+        JP   saa_send
+
+;------------------------------------------------------------------
+; sm_next - the next segment of this layer's score.
+;------------------------------------------------------------------
+
+sm_next:
+        LD   A,(IX + SM_SEGS)
+        OR   A
+        RET  Z
+        DEC  A
+        LD   (IX + SM_SEGS),A
+        LD   L,(IX + SM_SP)
+        LD   H,(IX + SM_SP + 1)
+        LD   A,(HL)
+        INC  HL
+        LD   (IX + SM_LEFT),A           ; frames
+        LD   A,(HL)
+        INC  HL
+        LD   (IX + SM_OCT),A            ; octave
+        LD   A,(HL)
+        INC  HL
+        LD   (IX + SM_NACC + 1),A       ; the clock starts here,
+        LD   (IX + SM_NACC),0           ; with no fraction
+        LD   A,(HL)
+        INC  HL
+        LD   (IX + SM_VACC + 1),A       ; and so does the level
+        LD   (IX + SM_VACC),0
+        LD   A,(HL)
+        INC  HL
+        LD   (IX + SM_NSTEP),A
+        LD   A,(HL)
+        INC  HL
+        LD   (IX + SM_NSTEP + 1),A
+        LD   A,(HL)
+        INC  HL
+        LD   (IX + SM_VSTEP),A
+        LD   A,(HL)
+        INC  HL
+        LD   (IX + SM_VSTEP + 1),A
+        LD   (IX + SM_SP),L
+        LD   (IX + SM_SP + 1),H
+        RET
+
+;------------------------------------------------------------------
+; The two layers: state, then the five writes each makes.
+;------------------------------------------------------------------
+
+sm_a:           DEFS 13         ; the thunder, and later the rain's hiss
+                DEFW sm_bufa
+sm_b:           DEFS 13         ; the rain
+                DEFW sm_bufb
+
+sm_bufa:        DEFB 0x10,0     ; channel 0's octave, the low nibble
+                DEFB 0x08,0     ; and its tone generator: the noise's clock
+                DEFB 0x00,0     ; the level, spread over three channels
+                DEFB 0x01,0
+                DEFB 0x02,0
+
+sm_bufb:        DEFB 0x11,0     ; channel 3's octave, the high nibble
+                DEFB 0x0B,0
+                DEFB 0x03,0
+                DEFB 0x04,0
+                DEFB 0x05,0
