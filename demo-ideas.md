@@ -36,27 +36,53 @@ about which of those it is.
 
 ---
 
-## 1. Space Harrier checkerboard floor  — **BUILT, three ways**
+## 1. Space Harrier checkerboard floor  — **BUILT, four ways**
 
-| | phase | width | T-states | |
-|---|---|---|---|---|
-| `chequer.z80s` | 4 px | 4 px | 92,404 | 50 Hz |
-| `chequer2.z80s` | **1 px** | 4 px | 104,301 | 50 Hz |
-| `chequer3.z80s` | **1 px** | **1 px** | 110,556 | 50 Hz |
-| `harrier.z80s` | 1 px | 1 px | 221,420 | 25 Hz |
+| | phase | width | stripes | T-states | |
+|---|---|---|---|---|---|
+| `chequer.z80s` | 4 px | 4 px | palette | 92,404 | 50 Hz |
+| `chequer2.z80s` | **1 px** | 4 px | palette | 104,301 | 50 Hz |
+| `chequer3.z80s` | **1 px** | **1 px** | palette | 110,556 | 50 Hz |
+| **`chequer4.z80s`** | **1 px** | **1 px** | **pixels** | **114,419** | **50 Hz** |
+| `harrier.z80s` | 1 px | 1 px | palette | 221,420 | 25 Hz |
 
-`chequer3` is the one to use: it draws harrier's screen, bit for bit, in
-half the time, and still fits a 50 Hz frame. It costs 12K of compiled run,
-which is the only reason to reach for one of the others. See `chequer.md`,
-`chequer2.md`, `chequer3.md` and `harrier.md`. What follows is the original
-note.
+`chequer4` is the one to use: it draws chequer3's screen — the GIFs come
+out byte for byte identical — with the depth alternation in the pixels
+rather than in a palette that has to be reprogrammed every frame, for 80
+T-states a scanline. It shares chequer3's run bank unchanged, so the 12K is
+not paid twice. See `chequer.md`, `chequer2.md`, `chequer3.md`,
+`chequer4.md` and `harrier.md`.
+
+**What the palette still does, and what it would take to stop.** The
+distance fog is a per-scanline palette gradient in all five. Moving that
+into the pixels too would leave the demo with no palette work at all, and
+the numbers are friendlier than they look: the fog is only **6 distinct
+colour pairs** over the 84 board rows (the SAM's palette quantises it),
+the whole picture uses **14 of the 16 MODE 4 indices**, and a band drawing
+its own two colours costs *nothing* at run time because chequer4 already
+chooses a band's six values from a table. It needs 40 (value set, colour
+pair) combinations — 1,280 bytes against chequer4's 416, where the low
+block has 756 bytes spare — so it is a memory problem and a fifth routine,
+not an edit.
+
+**The camera in the GIFs.** All five demos now share `stroll()` in
+`tests/mkgif.py`: a slide of two and a half squares either way taking
+eight seconds, and a walk forwards of five squares a second. At the
+bottom of the screen the board slides sideways at most **3 pixels a
+frame, where it used to be 12** — the old swing was five and a half
+squares in 3.8 seconds, which read as a lurch rather than a camera, and
+did not divide into the length of the GIF either.
+
+What follows is the original note.
 
 An infinite checkerboard plane, fixed camera height, scrolling horizontally
 and vertically. Fixed Y-height for now; a moving camera height is a later
 change and only affects the tables.
 
 **The trick that makes it cheap: the depth alternation is the palette, not
-the pixels.** With the camera height fixed, each scanline is one fixed
+the pixels.** (`chequer4.z80s` took it back out again — see above. It is
+the same thing as a whole square of horizontal phase, and a phase is what
+the pixels are already doing.) With the camera height fixed, each scanline is one fixed
 depth, so the checker's row parity is constant along a scanline. Draw the
 whole floor in two logical colour indices and flip what those two indices
 *mean* per scanline, and the depth stripes cost a couple of `OUT`s at a

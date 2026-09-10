@@ -25,6 +25,26 @@ TICK = 20               # one display frame on a 50 Hz SAM, in ms
 TFRAME = 6000000 // 50  # and in T-states of a 6 MHz Z80
 
 
+SWING = 640             # how far the camera slides either way, world units
+SWING_SECS = 8.0        # and how long a whole swing takes
+WALK = 26               # forward, world units a 50th of a second
+
+
+def stroll(t, hz=50):
+    """Where the camera is on frame t of the chequered floor demos.
+
+    A square is 256 world units, so this is a slide of two and a half
+    squares either way taking eight seconds, and a walk forwards of
+    five squares a second. At the bottom of the screen, where a square
+    is 64 pixels across, the board slides sideways at most 3 pixels a
+    frame; it was 12, which reads as a lurch rather than a camera.
+    """
+    import math
+    camx = int(SWING * math.sin(2 * math.pi * t / (SWING_SECS * hz)))
+    camz = int(t * WALK * 50 / hz) & 0xFFFF
+    return camx, camz
+
+
 def held(ts):
     """How long a frame is actually on screen, waiting for the flyback.
 
@@ -287,7 +307,7 @@ def maze(outdir, seconds=12, harness="harness_wolf.asm", name="maze"):
     report(p, size, n, durs, secs, got, bad)
 
 
-def chequer(outdir, seconds=6):
+def chequer(outdir, seconds=8):
     """chequer at its measured rate: 92,404 T-states a frame, 50 Hz.
 
     Forward all the way and weaving sideways. The palette flips the
@@ -295,7 +315,6 @@ def chequer(outdir, seconds=6):
     so what is drawn is two colour indices and nothing else - see
     chequer.md.
     """
-    import math
     b = Bench("harness_chq.asm", org=0)
     s = b.syms
     b.call_regs(s["chq_init"])
@@ -303,8 +322,7 @@ def chequer(outdir, seconds=6):
     n = seconds * 50
     frames, pars, ts = [], [], []
     for t in range(n):
-        camx = int(1400 * math.sin(2 * math.pi * t / 190))
-        camz = (t * 26) & 0xFFFF
+        camx, camz = stroll(t)
         b.poke(s["chq_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq_camz"], camz.to_bytes(2, "little"))
         into = b.peek(s["chq_back"], 1)[0]
@@ -363,13 +381,12 @@ def twist(outdir, seconds=6):
     report(p, size, n, durs, secs, got, bad)
 
 
-def harrier(outdir, seconds=6):
+def harrier(outdir, seconds=8):
     """harrier at its measured rate: 221,420 T-states a frame, 25 Hz.
 
     The same floor as chequer, with every boundary on its exact pixel
     instead of a four pixel grid. Compare demo/chequer.gif.
     """
-    import math
     b = Bench("harness_hr.asm", org=0)
     s = b.syms
     b.call_regs(s["hr_init"])
@@ -378,8 +395,7 @@ def harrier(outdir, seconds=6):
     n = int(seconds * 25)
     frames, pars, ts = [], [], []
     for t in range(n):
-        camx = int(1400 * math.sin(2 * math.pi * t / 95))
-        camz = (t * 52) & 0xFFFF
+        camx, camz = stroll(t, 25)
         b.poke(s["hr_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["hr_camz"], camz.to_bytes(2, "little"))
         into = b.peek(s["hr_back"], 1)[0]
@@ -402,7 +418,6 @@ def chequer3(outdir, seconds=8):
     compiled runs instead of a dispatch a square, in half the time.
     Compare demo/harrier.gif, which is the same board at 25 Hz.
     """
-    import math
     b = Bench("harness_chq3.asm", org=0)
     s = b.syms
     b.call_regs(s["chq3_init"])
@@ -411,8 +426,7 @@ def chequer3(outdir, seconds=8):
     n = int(seconds * 50)
     frames, pars, ts = [], [], []
     for t in range(n):
-        camx = int(1400 * math.sin(2 * math.pi * t / 190))
-        camz = (t * 26) & 0xFFFF
+        camx, camz = stroll(t)
         b.poke(s["chq3_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq3_camz"], camz.to_bytes(2, "little"))
         into = b.peek(s["chq3_back"], 1)[0]
@@ -430,6 +444,39 @@ def chequer3(outdir, seconds=8):
 
 PRISM_PAL = ([(32 * i, 32 * i, 30 * i) for i in range(8)]
              + [(36 * i, 6 * i, 6 * i) for i in range(8)])
+
+
+def chequer4(outdir, seconds=8):
+    """chequer4 at its measured rate: 114,419 T-states a frame, 50 Hz.
+
+    chequer3's board with the depth stripes drawn in the pixels rather
+    than flipped in the palette, which is why nothing here rebuilds a
+    parity table: the palette below is one fixed gradient a scanline,
+    the same on every frame of the demo. Compare demo/chequer3.gif,
+    which is the same picture the other way round.
+    """
+    b = Bench("harness_chq4.asm", org=0)
+    s = b.syms
+    b.call_regs(s["chq4_init"])
+    fog = b.peek(s["chq4_fog"], 2 * 192)
+    haze = b.peek(s["chq4_hazec"], 192)
+    n = int(seconds * 50)
+    frames, ts = [], []
+    for t in range(n):
+        camx, camz = stroll(t)
+        b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["chq4_camz"], camz.to_bytes(2, "little"))
+        into = b.peek(s["chq4_back"], 1)[0]
+        tt, _ = b.call_regs(s["chq4_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    still = [[0] * 192] * n                     # the palette does not move
+    idx, pal = copper(frames, still, fog, haze)
+    p = "%s/chequer4.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, idx, pal, durs)
+    got, bad, secs = check_gif(p, idx, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
 
 
 def entropypre(outdir, seconds=14):
@@ -671,7 +718,6 @@ def chequer2(outdir, seconds=8):
     board slides sideways smoothly instead of in four-pixel steps.
     Compare demo/chequer.gif.
     """
-    import math
     b = Bench("harness_chq2.asm", org=0)
     s = b.syms
     b.call_regs(s["chq2_init"])
@@ -679,8 +725,7 @@ def chequer2(outdir, seconds=8):
     n = seconds * 50
     frames, pars, ts = [], [], []
     for t in range(n):
-        camx = int(1400 * math.sin(2 * math.pi * t / 190))
-        camz = (t * 26) & 0xFFFF
+        camx, camz = stroll(t)
         b.poke(s["chq2_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq2_camz"], camz.to_bytes(2, "little"))
         into = b.peek(s["chq2_back"], 1)[0]
@@ -714,6 +759,7 @@ if __name__ == "__main__":
     chequer2(d)
     harrier(d)
     chequer3(d)
+    chequer4(d)
     twist(d)
     roto(d)
     vox(d)

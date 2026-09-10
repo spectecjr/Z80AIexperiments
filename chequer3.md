@@ -9,6 +9,11 @@ The test does not check it against a model of its own: it checks it against
 `tests/harrier.py`, over 56 camera positions, pixels and parities. Same
 bytes, twice the rate.
 
+**`chequer4.z80s` is this routine with the depth stripes moved out of the
+palette and into the pixels**, for 80 T-states a scanline and no per-frame
+palette table at all. It shares this file's run bank byte for byte. Read
+`chequer4.md` after this one; what is below still describes both.
+
 | | phase | width | T-states | |
 |---|---|---|---|---|
 | `chequer` | 4 px | 4 px | 92,404 | 50 Hz, 1.3K of run |

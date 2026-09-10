@@ -1,0 +1,308 @@
+;------------------------------------------------------------------
+; chequer4.z80s - the Space Harrier floor with its stripes in the pixels
+;
+;   chq4_init    fill both buffers and the haze, once
+;   chq4_frame   draw from (chq4_camx, chq4_camz) and flip
+;
+; chequer3.z80s draws this board out of compiled runs at 110,556
+; T-states and leaves the alternation into the distance to the palette:
+; the whole floor is two colour indices, and a copper swaps what those
+; two mean on every scanline where the depth crosses a square. That is
+; cheap in pixels and expensive everywhere else on a SAM. The swap moves
+; with camz, so it is a table the CPU rebuilds every frame; the palette
+; is a port, so applying it is a line interrupt or a polling loop; and
+; the fill cannot allow either, because it runs with interrupts off and
+; the stack pointing at the screen.
+;
+; The alternation is a phase, though. Adding one whole square to the
+; horizontal phase exchanges the two colours on that scanline, which is
+; exactly what the palette swap did - so the board can carry its own
+; stripes and the palette can sit still from frame to frame.
+;
+; The runs do not change to do it. THIS FILE SHARES CHEQUER3'S RUN BANK,
+; byte for byte, entry tables and all: a run is a string of PUSHes, and
+; what a PUSH pushes is a register. What changes is the six values the
+; row loop POPs into those registers - every set has a complement
+; sixteen bytes above it - and picking between them costs one AND and
+; one ADD a scanline, off a mask byte that is 0x00 or 0x33.
+;
+; That byte does two jobs: bit 4 of it is the offset to the complement,
+; and the whole of it turns the row's last byte round. It costs 65
+; T-states a scanline over chequer3, and gives back the parity table and
+; the copper.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+CHQ4_BUF0:      EQU 0x80
+CHQ4_BUF1:      EQU 0x20
+CHQ4_C1:        EQU 0x1111      ; the two colour indices, both nibbles
+CHQ4_C2:        EQU 0x2222
+
+;------------------------------------------------------------------
+; chq4_init - sky, haze, and the rows the frame draws over
+;------------------------------------------------------------------
+
+chq4_init:
+        LD   A,CHQ4_BUF0
+        LD   (chq4_back),A
+        LD   A,CHQ4_BUF1
+        LD   (chq4_front),A
+        LD   H,CHQ4_BUF0
+        CALL chq4_fill
+        LD   H,CHQ4_BUF1
+        ; fall through
+
+chq4_fill:
+        LD   L,0
+        PUSH HL
+        LD   D,0x60
+chq4_f1:
+        LD   B,0
+chq4_f2:
+        LD   (HL),CHQ4_C1 & 255
+        INC  HL
+        DJNZ chq4_f2
+        DEC  D
+        JR   NZ,chq4_f1
+        POP  HL                 ; then the haze, over the rows too far
+        LD   DE,(CHQ4_HZ + 1) * 128     ; away to draw a board on
+        ADD  HL,DE
+        LD   D,CHQ4_TOP - CHQ4_HZ - 1
+chq4_f3:
+        LD   B,128
+chq4_f4:
+        LD   (HL),CHQ4_HAZE
+        INC  HL
+        DJNZ chq4_f4
+        DEC  D
+        JR   NZ,chq4_f3
+        RET
+
+;------------------------------------------------------------------
+; chq4_frame - one frame
+;------------------------------------------------------------------
+
+chq4_frame:
+        CALL chq4_msk8
+        CALL chq4_floor
+        LD   A,(chq4_back)
+        LD   B,A
+        LD   A,(chq4_front)
+        LD   (chq4_back),A
+        LD   A,B
+        LD   (chq4_front),A
+        RET
+
+;------------------------------------------------------------------
+; chq4_msk8 - which way round each scanline's two colours go
+;
+; The depth at a scanline is ztab[y] + camz, and a square is 256 of
+; those, so bit 8 of the sum is the parity of the row of squares this
+; scanline is looking at. Where it is set the scanline wants its two
+; colours exchanged, which is XOR 0x33 - and bit 4 of that same byte is
+; where the complement of a value set lives.
+;------------------------------------------------------------------
+
+chq4_msk8:
+        LD   A,(chq4_camz)
+        LD   (chq4_z1+1),A
+        LD   A,(chq4_camz+1)
+        LD   (chq4_z2+1),A
+        LD   HL,chq4_ztab + 2 * CHQ4_TOP
+        LD   DE,chq4_msk + CHQ4_TOP
+        LD   B,192 - CHQ4_TOP
+chq4_m1:
+        LD   A,(HL)
+        INC  HL
+chq4_z1:
+        ADD  A,0
+        LD   A,(HL)
+        INC  HL
+chq4_z2:
+        ADC  A,0
+        RRA                     ; the parity of the depth, into carry
+        SBC  A,A                ; and out again as 0x00 or 0xFF
+        AND  CHQ4_SWAP
+        LD   (DE),A
+        INC  DE
+        DJNZ chq4_m1
+        RET
+
+;------------------------------------------------------------------
+; chq4_floor - the board, bottom row upwards, a band of rows a width
+;
+; The camera's offset scaled to a square is camx * p / 256, and the
+; bands come widest first with p one smaller each time, so the whole
+; of it is one subtraction of camx a band. What that offset says is
+; which run to enter (the odd pixel of it), whether the stack pointer
+; shifts (the next pixel), and where in the run to enter (the rest).
+;------------------------------------------------------------------
+
+chq4_floor:
+        DI
+        LD   (chq4_sp),SP
+        LD   A,(chq4_camx)      ; the camera inside one square, times
+        LD   L,A                ; the widest square and one more, so
+        LD   H,0                ; that the first band's subtraction
+        LD   (chq4_cx),HL       ; leaves it times the widest
+        LD   B,H
+        LD   C,A
+        DUP  6
+        ADD  HL,HL
+        EDUP
+        ADD  HL,BC
+        LD   (chq4_acc),HL
+        LD   HL,chq4_band
+        LD   (chq4_bp+1),HL
+        LD   A,(chq4_back)
+        ADD  A,0x60
+        EXX
+        LD   H,A                ; the last byte of the last row, which
+        LD   L,0                ; is where a row's stack pointer starts
+        DEC  HL                 ; from and what the row loop stores into
+        LD   DE,chq4_msk + 191  ; and the mask that goes with it
+        EXX
+
+chq4_b1:
+        LD   HL,(chq4_acc)      ; the phase for this band, in pixels:
+        LD   BC,(chq4_cx)       ; one camx less than the band below
+        OR   A
+        SBC  HL,BC
+        LD   (chq4_acc),HL
+        LD   A,H
+        EX   AF,AF'             ; parked; HL is wanted for the table
+chq4_bp:
+        LD   HL,chq4_band       ; patched: this band's entry
+        LD   A,(HL)             ; the rows it covers
+        OR   A
+        JP   Z,chq4_bend
+        EXX
+        LD   B,A                ; the count lives with the row pointer
+        EXX
+        INC  HL
+        EX   AF,AF'
+        SRL  A                  ; the odd pixel of phase picks the run
+        JR   NC,chq4_b2
+        INC  HL
+        INC  HL
+chq4_b2:
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)             ; DE = the record for this run
+        INC  HL
+        JR   C,chq4_b3
+        INC  HL
+        INC  HL
+chq4_b3:
+        LD   (chq4_bp+1),HL     ; and on to the next band
+
+        SRL  A                  ; the next pixel of phase is a whole
+        LD   C,A                ; byte, which the stack pointer shifts
+        SBC  A,A                ; for the price of an INC SP
+        CPL
+        AND  0x33
+        LD   (chq4_shift),A
+
+        EX   DE,HL              ; HL = the record: entries, then values
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)             ; DE = where each PUSH of phase enters
+        INC  HL
+        LD   A,C                ; three bytes an entry
+        ADD  A,A
+        ADD  A,C
+        ADD  A,E
+        LD   E,A
+        JR   NC,chq4_b4
+        INC  D
+chq4_b4:
+        LD   A,(DE)             ; the run, entered where the phase says
+        LD   (chq4_j+1),A
+        INC  DE
+        LD   A,(DE)
+        LD   (chq4_j+2),A
+        INC  DE
+        LD   A,(DE)             ; and the row's last byte to go with it,
+        LD   (chq4_ed+1),A      ; which the mask turns round
+        LD   A,(HL)             ; where this run's values live, and
+        LD   (chq4_bl+1),A      ; sixteen bytes on, their complement
+        INC  HL
+        LD   A,(HL)
+        LD   (chq4_bh+1),A
+        EXX                     ; the row loop turns round in the other
+                                ; set: the row pointer, the mask pointer
+                                ; and the count are all in it
+
+;------------------------------------------------------------------
+; The row loop. Nothing between POP AF and the run may touch the
+; flags - F is a colour - so the row's last byte goes in first, where
+; the run overwrites it again if the run reaches that far.
+;------------------------------------------------------------------
+
+chq4_row:
+        LD   A,(DE)             ; this row's mask
+chq4_ed:
+        XOR  0                  ; patched: the row's last byte, unswapped
+        LD   (HL),A
+        LD   A,(DE)
+        DEC  DE
+        AND  0x10               ; the mask again, as the offset to the
+chq4_bl:
+        ADD  A,0                ; complement of this run's values
+        EXX
+        LD   L,A
+chq4_bh:
+        LD   H,0                ; patched: which values, and which way
+        LD   SP,HL              ; round
+        POP  BC
+        POP  DE
+        POP  HL
+        POP  IX
+        POP  IY
+        POP  AF
+        EXX
+        LD   SP,HL              ; the runs fill rightwards to leftwards
+chq4_shift:
+        INC  SP                 ; patched: NOP, when the run is shifted
+        EXX
+chq4_j:
+        JP   0                  ; patched: the run for this band
+chq4_ret:
+chq3_ret:                       ; the name the shared run bank knows
+        EXX
+        LD   A,L                ; the row above is 128 bytes back, and
+        SUB  128                ; DE is spoken for
+        LD   L,A
+        JR   NC,chq4_r2
+        DEC  H
+chq4_r2:
+        DJNZ chq4_row
+        EXX                     ; the band code wants the main set back
+        JP   chq4_b1
+
+chq4_bend:
+        EXX                     ; the top run spilled into the haze row
+        LD   SP,HL              ; above it; put that back
+        INC  SP
+        EXX
+        LD   BC,CHQ4_HAZE * 0x101
+        DUP  CHQ4_SPILL
+        PUSH BC
+        EDUP
+        LD   SP,(chq4_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+chq4_back:      DEFB CHQ4_BUF0
+chq4_front:     DEFB CHQ4_BUF1
+chq4_camx:      DEFW 0
+chq4_camz:      DEFW 0
+chq4_sp:        DEFS 2
+chq4_cx:        DEFS 2
+chq4_acc:       DEFS 2
+chq4_msk:       DEFS 192
