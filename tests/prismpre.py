@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 """A model of prismpre.z80s - prism.z80s with the frame precomputed.
 
-prism.z80s spends 197,413 of its 518,273 T-states on work that depends
+prism.z80s spends 216,000 of its 536,000 T-states on work that depends
 only on the frame number: the spin, the nine multiply tables, the
 eight projected corners of each of seven pieces, the shade and the
-visibility of each of the 42 faces, and the back-to-front order. All
+visibility of each of the 42 faces, and the separating-plane sort that
+puts the pieces back to front. All
 of it can be worked out once and read out of a table at run time,
 which leaves the rasteriser and nothing else.
 
@@ -55,8 +56,6 @@ def build(recip, lite):
     recs, pts, bufs = bytearray(), bytearray(), []
     for f in range(NFRAMES):
         lo.spin()
-        order = sorted(range(len(P.PIECES)),
-                       key=lambda i: -P.depth(lo.m, lo.p, P.PIECES[i][0]))
         pp, nib = {}, {}
         bx0, bx1, by0, by1 = 255, 0, 255, 0
         for i, (quad, base) in enumerate(P.PIECES):
@@ -67,6 +66,7 @@ def build(recip, lite):
             # a piece whose ramp starts at zero gives the level itself
             vis, lev = P.light(lo.m, lo.p, lite, (quad, 0))
             nib[i] = [lev[k] | (0 if vis[k] else 8) for k in range(6)]
+        order = P.order(lo.m, lo.p, P.boxes([pp[i] for i in range(len(pp))]))
 
         rec = bytearray(order)
         rec += bytes([by0, (by1 + 1) & 0xFF, bx0 >> 1, bx1 >> 1])

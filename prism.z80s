@@ -61,6 +61,29 @@ pr_init:
         LD   (t3d_ty),HL
         LD   HL,PR_TZ
         LD   (t3d_tz),HL
+
+        LD   HL,pr_pop          ; bits in a byte, for the ordering below
+        LD   (HL),0
+        LD   B,PR_MASK
+        LD   C,1
+pr_ip1:
+        LD   A,C
+        SRL  A
+        LD   L,A
+        LD   H,0
+        LD   DE,pr_pop
+        ADD  HL,DE
+        LD   A,(HL)
+        BIT  0,C
+        JR   Z,pr_ip2
+        INC  A
+pr_ip2:
+        LD   L,C
+        LD   H,0
+        ADD  HL,DE
+        LD   (HL),A
+        INC  C
+        DJNZ pr_ip1
         RET
 
 ;------------------------------------------------------------------
@@ -72,6 +95,7 @@ pr_frame:
         CALL demo_spin          ; one matrix for all of it
         CALL pr_tables          ; the multiply table entries it will read
         CALL pr_light           ; a shade and an N.T for each normal
+        CALL pr_proj            ; every corner, and each piece's box
         CALL pr_order           ; the pieces, farthest first
         CALL pr_draw
         CALL pr_box
@@ -320,114 +344,363 @@ pr_sm1:
         RET
 
 ;------------------------------------------------------------------
-; pr_order - the pieces farthest first
+; pr_proj - every piece's eight corners, and its box on the screen
+;
+; The order below needs to know which pieces overlap, so all seven are
+; projected before any is drawn. The frame's own box comes out of the
+; seven, which is 28 comparisons rather than 56.
 ;------------------------------------------------------------------
 
-pr_order:
-        LD   HL,pr_dep          ; every piece's depth once, not once per
-        LD   (pr_dp),HL         ; comparison: the sort asks six times
-        LD   B,PR_NP            ; what a piece's z is, and finding it is
-        XOR  A                  ; two multiplies
-pr_od1:
+pr_proj:
+        XOR  A
+        LD   (pr_pi),A
+pr_pj1:
+        LD   A,(pr_pi)          ; twenty four bytes of vertex a piece
+        LD   L,A
+        LD   H,0
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        LD   D,H
+        LD   E,L
+        ADD  HL,HL
+        ADD  HL,DE
+        LD   DE,pr_vert
+        ADD  HL,DE
+        PUSH HL
+        LD   A,(pr_pi)
+        CALL pr_pp              ; and sixteen of point
+        POP  HL
+        LD   B,8
+        CALL t3d_run
+
+        LD   A,(pr_pi)
+        CALL pr_pp
+        EX   DE,HL              ; HL -> the points
+        LD   A,(pr_pi)
+        ADD  A,A
+        ADD  A,A
+        LD   E,A
+        LD   D,0
+        PUSH HL
+        LD   HL,pr_bx
+        ADD  HL,DE
+        EX   DE,HL              ; DE -> its box
+        POP  HL
+        CALL pr_pbox
+
+        LD   A,(pr_pi)
+        INC  A
+        LD   (pr_pi),A
+        CP   PR_NP
+        JP   C,pr_pj1
+
+        LD   A,255              ; and the frame's box out of the seven
+        LD   (rndl_bxmin),A
+        LD   (rndl_bymin),A
+        XOR  A
+        LD   (rndl_bxmax),A
+        LD   (rndl_bymax),A
+        LD   HL,pr_bx
+        LD   B,PR_NP
+pr_pj2:
         PUSH BC
-        PUSH AF
-        CALL pr_zget
-        POP  AF
-        PUSH AF
-        LD   DE,(pr_dp)
+        LD   A,(HL)             ; xmin
+        LD   C,A
+        LD   A,(rndl_bxmin)
+        CP   C
+        JR   C,pr_pj3
+        LD   A,C
+        LD   (rndl_bxmin),A
+pr_pj3:
+        INC  HL
+        LD   A,(HL)             ; xmax
+        LD   C,A
+        LD   A,(rndl_bxmax)
+        CP   C
+        JR   NC,pr_pj4
+        LD   A,C
+        LD   (rndl_bxmax),A
+pr_pj4:
+        INC  HL
+        LD   A,(HL)             ; ymin
+        LD   C,A
+        LD   A,(rndl_bymin)
+        CP   C
+        JR   C,pr_pj5
+        LD   A,C
+        LD   (rndl_bymin),A
+pr_pj5:
+        INC  HL
+        LD   A,(HL)             ; ymax
+        LD   C,A
+        LD   A,(rndl_bymax)
+        CP   C
+        JR   NC,pr_pj6
+        LD   A,C
+        LD   (rndl_bymax),A
+pr_pj6:
+        INC  HL
+        POP  BC
+        DJNZ pr_pj2
+        RET
+
+pr_pp:                          ; A = a piece -> DE = its sixteen points
+        ADD  A,A
+        ADD  A,A
+        ADD  A,A
+        ADD  A,A
+        LD   E,A
+        LD   D,0
+        LD   HL,pr_pts
+        ADD  HL,DE
         EX   DE,HL
-        LD   (HL),E
+        RET
+
+pr_pbox:                        ; HL -> eight points, DE -> a four byte box
+        PUSH DE
+        LD   B,255              ; xmin
+        LD   C,0                ; xmax
+        LD   D,255              ; ymin
+        LD   E,0                ; ymax
+        LD   A,8
+        LD   (pr_n),A
+pr_pb1:
+        LD   A,(HL)
+        CP   B
+        JR   NC,pr_pb2
+        LD   B,A
+pr_pb2:
+        CP   C
+        JR   C,pr_pb3
+        LD   C,A
+pr_pb3:
+        INC  HL
+        LD   A,(HL)
+        CP   D
+        JR   NC,pr_pb4
+        LD   D,A
+pr_pb4:
+        CP   E
+        JR   C,pr_pb5
+        LD   E,A
+pr_pb5:
+        INC  HL
+        LD   A,(pr_n)
+        DEC  A
+        LD   (pr_n),A
+        JR   NZ,pr_pb1
+        POP  HL
+        LD   (HL),B
+        INC  HL
+        LD   (HL),C
         INC  HL
         LD   (HL),D
         INC  HL
-        LD   (pr_dp),HL
-        POP  AF
-        INC  A
-        POP  BC
-        DJNZ pr_od1
+        LD   (HL),E
+        RET
 
-        LD   HL,pr_ord
+;------------------------------------------------------------------
+; pr_order - the pieces farthest first, by separating planes
+;
+; The pieces are disjoint convex prisms of the same z extent, so for
+; every pair one of the four side faces of one has the other wholly on
+; its outward side - the separating axis theorem - and that plane
+; settles the pair exactly: whichever of them is on the eye's side of
+; it is the nearer, which is the sign of N.T + off that culls faces,
+; and pr_light has already worked out every N.T.
+;
+; A centroid depth settles nothing, and got 344 pairs the wrong way
+; round in 178 of the 256 frames.
+;
+; Only pieces that overlap on screen constrain each other, so what is
+; left is a topological sort over the overlapping pairs. Taken with
+; boxes rather than shapes the relation can still have a cycle - 36
+; frames in 256 - and then the piece in front of the fewest others
+; goes first, which leaves one pair the wrong way round rather than a
+; cascade of them.
+;------------------------------------------------------------------
+
+pr_order:
+        LD   HL,pr_fr
+        LD   DE,pr_ov
         LD   B,PR_NP
-        XOR  A
-pr_or1:
-        LD   (HL),A
+pr_or0:
+        LD   (HL),0
         INC  HL
-        INC  A
-        DJNZ pr_or1
-        LD   B,PR_NP - 1
-pr_or2:
-        PUSH BC
-        LD   HL,pr_ord
-        LD   B,PR_NP - 1
-pr_or3:
-        PUSH BC
-        PUSH HL
-        LD   A,(HL)
-        INC  HL
-        LD   C,(HL)
-        CALL pr_zcmp
-        POP  HL
-        JP   P,pr_or4
-        LD   A,(HL)
-        INC  HL
-        LD   C,(HL)
-        LD   (HL),A
-        DEC  HL
-        LD   (HL),C
-pr_or4:
-        INC  HL
-        POP  BC
-        DJNZ pr_or3
-        POP  BC
-        DJNZ pr_or2
-        RET
-
-pr_zcmp:                        ; the sign of z(A) - z(C), off the table
-        CALL pr_dget
-        PUSH HL
-        LD   A,C
-        CALL pr_dget
-        POP  DE
         EX   DE,HL
-        OR   A
-        SBC  HL,DE
-        RET
+        LD   (HL),0
+        INC  HL
+        EX   DE,HL
+        DJNZ pr_or0
 
-pr_dget:                        ; A = a piece -> HL = the depth found for it
-        ADD  A,A
-        LD   L,A
-        LD   H,0
-        LD   DE,pr_dep
-        ADD  HL,DE
+        LD   IX,pr_pair         ; the table carries the two addresses a
+        LD   A,PR_NPAIR         ; pair needs, so there is no arithmetic
+        LD   (pr_n),A           ; here at all
+pr_or1:
+        LD   L,(IX+0)
+        LD   H,(IX+1)           ; -> 64 times the plane's offset
         LD   E,(HL)
         INC  HL
         LD   D,(HL)
-        EX   DE,HL
-        RET
+        LD   L,(IX+2)
+        LD   H,(IX+3)           ; -> the normal's N.T, from pr_light
+        LD   C,(HL)
+        INC  HL
+        LD   B,(HL)
+        LD   H,B
+        LD   L,C
+        ADD  HL,DE              ; N.T + off
+        LD   A,H
+        RLA                     ; carry: the eye is outside the plane
+        LD   C,(IX+4)           ; the plane's piece
+        LD   B,(IX+5)           ; the one outside it
+        JR   NC,pr_or2
+        LD   A,B                ; outside, so the outer one is in front
+        LD   B,C
+        LD   C,A
+pr_or2:
+        CALL pr_setb            ; pr_fr[C] gets bit B
 
-pr_zget:                        ; A = a piece -> HL = the view z of its
-        ADD  A,A                ; centre, which is tz + m6*cx + m7*cy
+        CALL pr_hit             ; and while the pair is in hand, whether
+        JR   NC,pr_or4          ; their boxes touch at all
+        LD   C,(IX+4)
+        LD   B,(IX+5)
+        LD   HL,pr_ov - pr_fr
+        LD   (pr_seto),HL
+        CALL pr_setb
+        LD   C,(IX+5)
+        LD   B,(IX+4)
+        CALL pr_setb            ; overlap runs both ways
+        LD   HL,0
+        LD   (pr_seto),HL
+pr_or4:
+        LD   DE,6
+        ADD  IX,DE
+        LD   A,(pr_n)
+        DEC  A
+        LD   (pr_n),A
+        JP   NZ,pr_or1
+
+        LD   A,PR_MASK          ; then take them, farthest first
+        LD   (pr_left),A
+        LD   HL,pr_ord
+        LD   (pr_op),HL
+        LD   B,PR_NP
+pr_or5:
+        PUSH BC
+        LD   A,255
+        LD   (pr_bc),A
+        LD   IX,pr_fr
+        LD   C,1                ; the bit for this piece
+        XOR  A
+        LD   (pr_x),A
+pr_or6:
+        LD   A,(pr_left)
+        AND  C
+        JR   Z,pr_or8           ; already drawn
+        LD   A,(IX+0)           ; what it is in front of, that is left
+        AND  (IX + pr_ov - pr_fr)
+        LD   HL,pr_left
+        AND  (HL)
         LD   L,A
         LD   H,0
-        LD   DE,pr_cen
+        LD   DE,pr_pop
         ADD  HL,DE
-        LD   C,(HL)             ; cx
-        INC  HL
         LD   A,(HL)
-        LD   (pr_zy),A          ; cy
-        LD   A,(t3d_m+6)
-        LD   B,A
-        CALL pr_smul
-        LD   (pr_zp),DE
-        LD   A,(pr_zy)
-        LD   C,A
-        LD   A,(t3d_m+7)
-        LD   B,A
-        CALL pr_smul
-        LD   HL,(pr_zp)
+        LD   HL,pr_bc
+        CP   (HL)
+        JR   NC,pr_or8
+        LD   (HL),A
+        LD   A,(pr_x)
+        LD   (pr_best),A
+        LD   A,C
+        LD   (pr_bb),A
+pr_or8:
+        INC  IX
+        SLA  C
+        LD   A,(pr_x)
+        INC  A
+        LD   (pr_x),A
+        CP   PR_NP
+        JP   C,pr_or6
+
+        LD   A,(pr_best)        ; that one goes next
+        LD   HL,(pr_op)
+        LD   (HL),A
+        INC  HL
+        LD   (pr_op),HL
+        LD   A,(pr_bb)
+        CPL
+        LD   HL,pr_left
+        AND  (HL)
+        LD   (HL),A
+        POP  BC
+        DJNZ pr_or5
+        RET
+
+pr_bit8:                        ; B = 0..7 -> A = the bit
+        LD   L,B
+        LD   H,0
+        LD   DE,pr_bit
         ADD  HL,DE
-        LD   DE,(t3d_tz)
+        LD   A,(HL)
+        RET
+
+pr_setb:                        ; C = a byte of pr_fr, B = a bit to set
+        CALL pr_bit8
+        LD   L,C
+        LD   H,0
+        LD   DE,pr_fr
         ADD  HL,DE
+        LD   DE,(pr_seto)       ; or of pr_ov, when that is asked for
+        ADD  HL,DE
+        OR   (HL)
+        LD   (HL),A
+        RET
+
+pr_hit:                         ; C, B = two pieces -> carry if their
+        LD   A,C                ; screen boxes touch
+        ADD  A,A
+        ADD  A,A
+        LD   E,A
+        LD   D,0
+        LD   IY,pr_bx
+        ADD  IY,DE
+        LD   A,B
+        ADD  A,A
+        ADD  A,A
+        LD   E,A
+        LD   D,0
+        PUSH IX
+        LD   IX,pr_bx
+        ADD  IX,DE
+        LD   A,(IY+0)           ; one's xmin past the other's xmax?
+        CP   (IX+1)
+        JR   Z,pr_ht1
+        JR   NC,pr_ht3
+pr_ht1:
+        LD   A,(IX+0)
+        CP   (IY+1)
+        JR   Z,pr_ht2
+        JR   NC,pr_ht3
+pr_ht2:
+        LD   A,(IY+2)           ; then the same in y
+        CP   (IX+3)
+        JR   Z,pr_ht5
+        JR   NC,pr_ht3
+pr_ht5:
+        LD   A,(IX+2)
+        CP   (IY+3)
+        JR   Z,pr_ht6
+        JR   NC,pr_ht3
+pr_ht6:
+        POP  IX
+        SCF
+        RET
+pr_ht3:
+        POP  IX
+        OR   A
         RET
 
 ;------------------------------------------------------------------
@@ -435,14 +708,6 @@ pr_zget:                        ; A = a piece -> HL = the view z of its
 ;------------------------------------------------------------------
 
 pr_draw:
-        LD   A,255              ; the bounding box starts empty
-        LD   (rndl_bxmin),A
-        LD   (rndl_bymin),A
-        XOR  A
-        LD   (rndl_bxmax),A
-        LD   (rndl_bymax),A
-        LD   HL,pr_pts
-        LD   (rndl_pts),HL
         LD   B,PR_NP
         LD   C,0
 pr_dr1:
@@ -472,21 +737,9 @@ pr_on1:
         INC  HL
         DJNZ pr_on1
 
-        LD   A,(pr_pi)          ; twenty four bytes of vertex a piece
-        LD   L,A
-        LD   H,0
-        ADD  HL,HL
-        ADD  HL,HL
-        ADD  HL,HL
-        LD   D,H
-        LD   E,L
-        ADD  HL,HL
-        ADD  HL,DE
-        LD   DE,pr_vert
-        ADD  HL,DE
-        LD   DE,pr_pts
-        LD   B,8
-        CALL t3d_run
+        LD   A,(pr_pi)          ; pr_proj put its corners here already
+        CALL pr_pp
+        LD   (rndl_pts),DE
 
         LD   A,(pr_pi)          ; and eighteen bytes of face
         LD   L,A
@@ -543,41 +796,7 @@ pr_on2:
         CP   6
         JP   C,pr_on2
 
-        CALL rndl_six           ; and renderlit draws them
-
-        LD   HL,pr_pts          ; the eight points widen the frame's box
-        LD   B,8
-pr_on3:
-        LD   C,(HL)
-        LD   A,(rndl_bxmin)
-        CP   C
-        JR   C,pr_on4
-        LD   A,C
-        LD   (rndl_bxmin),A
-pr_on4:
-        LD   A,(rndl_bxmax)
-        CP   C
-        JR   NC,pr_on5
-        LD   A,C
-        LD   (rndl_bxmax),A
-pr_on5:
-        INC  HL
-        LD   C,(HL)
-        LD   A,(rndl_bymin)
-        CP   C
-        JR   C,pr_on6
-        LD   A,C
-        LD   (rndl_bymin),A
-pr_on6:
-        LD   A,(rndl_bymax)
-        CP   C
-        JR   NC,pr_on7
-        LD   A,C
-        LD   (rndl_bymax),A
-pr_on7:
-        INC  HL
-        DJNZ pr_on3
-        RET
+        JP   rndl_six           ; and renderlit draws them
 
 ;------------------------------------------------------------------
 ; pr_box - one box for the whole logo, into this buffer's record
@@ -591,6 +810,21 @@ pr_box:
 ; Workspace
 ;------------------------------------------------------------------
 
+pr_bx:          DEFS 4 * PR_NP  ; each piece's box on the screen
+pr_fr:          DEFS PR_NP      ; bit j: piece i is in front of piece j
+pr_ov:          DEFS PR_NP      ; bit j: their screen boxes touch
+pr_left:        DEFS 1
+pr_x:           DEFS 1
+pr_best:        DEFS 1
+pr_bc:          DEFS 1
+pr_bb:          DEFS 1
+pr_op:          DEFS 2
+pr_pp2:         DEFS 2
+pr_b1:          DEFS 2
+pr_b2:          DEFS 2
+pr_n:           DEFS 1
+pr_seto:        DEFW 0          ; pr_setb writes pr_ov when this is the gap
+pr_pop:         DEFS 128        ; bits in a byte, built by pr_init
 pr_vp:          DEFS 2
 pr_vn:          DEFS 1
 pr_j:           DEFS 1
@@ -615,5 +849,5 @@ pr_off:         DEFS 2
 pr_fsh:         DEFS 1
 pr_ord:         DEFS PR_NP
 pr_dep:         DEFS 2 * PR_NP
-pr_pts:         DEFS 16
+pr_pts:         DEFS 16 * PR_NP
 pr_nsh:         DEFS 3 * PR_NN

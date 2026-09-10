@@ -1,7 +1,7 @@
 # prism.z80s — design notes
 
 A lit extruded logo, cut into convex quads and drawn with `renderlit.z80s`'s
-own rasteriser. **518,273 T-states a frame, 11.6 Hz**, verified byte-for-byte
+own rasteriser. **536,420 T-states a frame, 11.2 Hz**, verified byte-for-byte
 against `tests/prism.py` over 256 frames.
 
 > **The shape is provisional.** It is a serif sigma of 45° angles and a
@@ -65,14 +65,20 @@ vertices are signed bytes, which caps a coordinate at 127 independently.
 
 | | T-states | |
 |---|---|---|
-| `pr_draw` | 367,029 | 71% — seven pieces of transform, faces and fill |
+| `pr_draw` | 286,864 | 53% — faces and fill, seven pieces |
+| `pr_proj` | 83,969 | 16% — 56 corners projected, and seven screen boxes |
 | `pr_light` | 73,704 | 14% — two transposed products, then 18 normals |
+| `pr_order` | 33,161 | 6% — 21 separating planes, then a topological sort |
 | `pr_tables` | 27,649 | 5% |
-| `rndl_erase` | 24,022 | 5% — one box for the whole logo |
-| `pr_order` | 18,835 | 4% |
+| `rndl_erase` | 24,022 | 4% — one box for the whole logo |
 | `demo_spin` | 6,628 | 1% |
 | `pr_box`, `rndl_flip` | 273 | — |
-| **`pr_frame`** | **min 381,665, mean 518,273, max 606,432** | 11.6 Hz |
+| **`pr_frame`** | **min 398,226, mean 536,420, max 626,412** | 11.2 Hz |
+
+**Ordering the pieces properly cost 3.5% of the frame.** The centroid
+sort was 18,835 T-states and wrong; the separating planes are 33,161 and
+right (below). Projecting before ordering rather than during drawing moved
+80,000 T-states out of `pr_draw` into `pr_proj` and cost nothing.
 
 **A sign cost 13% of the frame — in the other direction.** The side faces
 were culled and drawn the wrong way round for a while (below), so most of
@@ -117,6 +123,49 @@ must point the same way as the declared normal, and all four vertices must
 lie on the plane the visibility test uses. With the inward normal it
 reports 28 of 42 wrong.
 
+## Blocks, not faces
+
+The logo is drawn as seven convex prisms, one after another, so the only
+thing that can put a face behind another is the order the prisms go in.
+That is a painter's algorithm over blocks, and it has two failure modes.
+
+**The first was the sort key.** A piece was placed by the view z of its
+quad's centre. A centroid says nothing about which of two pieces is in
+front where they actually overlap: measured against the geometry, it drew
+**344 pairs the wrong way round in 178 of the 256 frames** — and the
+sigma's arms and the triangle's mitred corners are exactly the pieces it
+got wrong, so an interior wall would sit on top of an exterior one for a
+dozen frames at a time.
+
+**The fix is exact for this shape.** The pieces are disjoint convex prisms
+of the same z extent, so for every pair the separating axis theorem
+promises that one of the eight side faces has the other piece wholly on
+its outward side. That plane settles the pair with no error at all:
+whichever piece is on the eye's side of it is the nearer one — and "is the
+eye outside this plane" is `N·T + off < 0`, the same test that culls faces,
+whose `N·T` `pr_light` has already worked out. So the 21 pairs cost two
+16-bit loads and an add each, and `pr_pair` carries the two addresses so
+there is no arithmetic at all.
+
+**The second failure mode is the one blocks cannot escape.** Pairwise
+answers only give an order if the relation is acyclic, and it is only
+acyclic if pieces that do not overlap on screen are left unconstrained —
+so the sort is a topological one over the pairs whose screen boxes touch.
+Boxes are not shapes, and in **36 of 256 frames** they leave a cycle where
+the shapes would not. Then the piece in front of the fewest others goes
+first, which leaves one pair the wrong way round instead of a cascade:
+
+| | pairs drawn the wrong way round |
+|---|---|
+| centroid depth | 344, in 178 of 256 frames |
+| **separating planes** | **36, in 36 of 256 frames** |
+
+Nothing short of splitting the pieces — or ordering faces rather than
+blocks — removes the last 36. Every one of them is a cycle among screen
+boxes, so testing the projected octagons instead would too; that is eight
+2D separating-axis tests a pair and 21 pairs, which is not worth 36 frames
+of one pair each.
+
 ## If you pick this up
 
 1. **`pr_light` is 15% for 18 normals**, which is 2,000 T-states each and
@@ -131,6 +180,11 @@ reports 28 of 42 wrong.
 
 ## Invariants
 
+- Every pair of pieces must have a separating side face, and
+  `tests/prism.py`'s `pairs()` raises if one does not. A piece that is not
+  convex, or two that interpenetrate, breaks that and the order with it.
+- `pr_pair` holds *addresses* into `pr_face` and `pr_nsh`, so it must be
+  regenerated whenever either table's shape changes.
 - Quads must be convex and wound clockwise with y up; `_clockwise` in the
   model enforces it, and renderlit's face table assumes it.
 - **A face's normal must agree with the winding of the same face's four

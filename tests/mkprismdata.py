@@ -24,12 +24,11 @@ def defb(v, per=12):
 
 
 def main(path):
-    norms, faces, verts, cen, base = [], [], [], [], []
+    norms, faces, verts, base = [], [], [], []
     for quad, b in P.PIECES:
         base.append(b)
         for x, y, z in P.verts(quad):
             verts += [x, y, z]
-        cen += [sum(p[0] for p in quad) // 4, sum(p[1] for p in quad) // 4]
         for n, off in P.normals(quad):
             if n not in norms:
                 norms.append(n)
@@ -45,6 +44,9 @@ def main(path):
              % len(norms),
              "PR_TZ:          EQU %d       ; how far away the logo sits"
              % P.TZ,
+             "PR_NPAIR:       EQU %d          ; pairs of pieces to order"
+             % len(P.PAIRS),
+             "PR_MASK:        EQU %d         ; a bit a piece" % ((1 << len(P.PIECES)) - 1),
              "\npr_da:          ; how fast the logo turns, an axis at a time",
              defb(P.SPIN),
              "PR_DA:          EQU pr_da",
@@ -52,8 +54,17 @@ def main(path):
              defb(verts, 12),
              "\npr_base:        ; and which ramp each piece wears",
              defb(base),
-             "\npr_cen:         ; its centre, which is what orders it",
-             defb(cen),
+             "\npr_pair:        ; every pair of pieces, and a face of the",
+             "                ; first whose plane has the second wholly",
+             "                ; outside it - which settles their order.",
+             "                ; Where its offset is, where pr_light will",
+             "                ; leave that normal's N.T, then the two",
+             "\n".join("        DEFW pr_face + %d, pr_nsh + %d\n"
+                        "        DEFB %d, %d"
+                        % (3 * f + 1, 3 * faces[3 * f] + 1, i, j)
+                        for i, j, f in P.PAIRS),
+             "\npr_bit:         ; a bit a piece",
+             defb([1 << i for i in range(len(P.PIECES))]),
              "\npr_norm:        ; every normal any face has, 1.7 signed",
              defb([c for n in norms for c in n], 12),
              "\npr_face:        ; a normal and a plane offset, six a piece",

@@ -156,10 +156,95 @@ def light(m, t, lite, piece):
 
 
 def depth(m, t, quad):
-    """The view z of a piece's centre, which is what orders them."""
+    """The view z of a piece's centre. Not what orders them - see below."""
     cx = sum(p[0] for p in quad) // 4
     cy = sum(p[1] for p in quad) // 4
     return s16(t[2] + m[6] * cx + m[7] * cy)
+
+
+def pairs():
+    """For every pair of pieces, a face plane of the first that has the
+    second wholly on its outward side.
+
+    The pieces are disjoint convex prisms of the same z extent, so the
+    separating axis theorem promises one of the four side faces is a
+    separating plane, and a separating plane settles the order exactly:
+    whichever piece is on the eye's side of it is the nearer one, and
+    that is the same N.T + off test the faces are culled with. A
+    centroid depth settles nothing - it was wrong on 72 pairs in 44 of
+    prismpre's 64 frames, and 344 in 178 of prism's 256.
+    """
+    out = []
+    for i in range(len(PIECES)):
+        for j in range(i + 1, len(PIECES)):
+            for e in range(4):
+                n, off = normals(PIECES[i][0])[e]
+                if all(n[0] * x + n[1] * y >= off * 128
+                       for x, y in PIECES[j][0]):
+                    out.append((i, j, 6 * i + e))
+                    break
+            else:
+                raise AssertionError("no plane separates %d and %d" % (i, j))
+    return out
+
+
+PAIRS = pairs()
+
+
+def overlap(a, b):
+    """Do two screen boxes (xmin, xmax, ymin, ymax) touch?"""
+    return not (a[1] < b[0] or b[1] < a[0] or a[3] < b[2] or b[3] < a[2])
+
+
+def order(m, t, box):
+    """The pieces farthest first.
+
+    Only pieces that overlap on screen constrain each other, so the
+    sort is a topological one over those pairs. The relation can have
+    a cycle once the boxes are taken for the shapes - three frames in
+    prismpre's 64 - and then the piece in front of the fewest others
+    goes first, which leaves exactly one pair the wrong way round
+    instead of a cascade.
+    """
+    w = [v >> 8 for v in t]
+    cv = [sum(s8(m[k * 3 + a] & 0xFF) * w[k] for k in range(3))
+          for a in range(3)]
+    n_ = len(PIECES)
+    fr = [0] * n_                       # bit j: piece i is in front of j
+    for i, j, fi in PAIRS:
+        n, off = normals(PIECES[i][0])[fi % 6]
+        v = sum((n[a] * cv[a]) >> 7 for a in range(3)) + 64 * off
+        if v < 0:
+            fr[j] |= 1 << i             # the eye is outward, so j is nearer
+        else:
+            fr[i] |= 1 << j
+    ov = [0] * n_
+    for i in range(n_):
+        for j in range(n_):
+            if i != j and overlap(box[i], box[j]):
+                ov[i] |= 1 << j
+    out, left = [], (1 << n_) - 1
+    while left:
+        best, count = None, 99
+        for x in range(n_):
+            if not (left >> x) & 1:
+                continue
+            c = bin(fr[x] & ov[x] & left).count("1")
+            if c < count:
+                best, count = x, c
+        out.append(best)
+        left &= ~(1 << best)
+    return out
+
+
+def boxes(pts):
+    """Each piece's screen box, from its eight projected corners."""
+    out = []
+    for p in pts:
+        xs = [q[0] for q in p]
+        ys = [q[1] for q in p]
+        out.append((min(xs), max(xs), min(ys), max(ys)))
+    return out
 
 
 SPIN = [2, 3, 1]                        # turns per 256 frames, an axis each
@@ -176,18 +261,17 @@ class Logo(Model):
         self.a = [(self.a[i] + 0) & 0xFF for i in range(3)]
         if buf is None:
             buf = bytearray(STRIDE * H)
-        order = sorted(range(len(PIECES)),
-                       key=lambda i: -depth(self.m, self.p, PIECES[i][0]))
+        pts = [t3d(verts(q), self.m, self.p, recip) for q, _ in PIECES]
+        ord_ = order(self.m, self.p, boxes(pts))
         drawn = []
-        for i in order:
+        for i in ord_:
             quad, base = PIECES[i]
-            pts = t3d(verts(quad), self.m, self.p, recip)
             vis, col = light(self.m, self.p, lite, PIECES[i])
             for f, idx in enumerate(FACES):
                 if vis[f]:
-                    raster.fill_quad(buf, [pts[k] for k in idx], col[f])
+                    raster.fill_quad(buf, [pts[i][k] for k in idx], col[f])
                     drawn.append((i, f))
-        return buf, order, drawn
+        return buf, ord_, drawn
 
 
 def main():

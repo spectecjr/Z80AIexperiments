@@ -3,6 +3,8 @@
 PR_NP:          EQU 7           ; convex pieces
 PR_NN:          EQU 18          ; distinct face normals
 PR_TZ:          EQU 18816       ; how far away the logo sits
+PR_NPAIR:       EQU 21          ; pairs of pieces to order
+PR_MASK:        EQU 127         ; a bit a piece
 
 pr_da:          ; how fast the logo turns, an axis at a time
         DEFB 2,3,1
@@ -27,9 +29,56 @@ pr_vert:        ; eight vertices a piece, in renderlit's order
 pr_base:        ; and which ramp each piece wears
         DEFB 0,0,0,0,8,8,8
 
-pr_cen:         ; its centre, which is what orders it
-        DEFB 42,47,42,207,27,19,27,236,202,18,202,237
-        DEFB 172,255
+pr_pair:        ; every pair of pieces, and a face of the
+                ; first whose plane has the second wholly
+                ; outside it - which settles their order.
+                ; Where its offset is, where pr_light will
+                ; leave that normal's N.T, then the two
+        DEFW pr_face + 10, pr_nsh + 10
+        DEFB 0, 1
+        DEFW pr_face + 10, pr_nsh + 10
+        DEFB 0, 2
+        DEFW pr_face + 10, pr_nsh + 10
+        DEFB 0, 3
+        DEFW pr_face + 4, pr_nsh + 4
+        DEFB 0, 4
+        DEFW pr_face + 4, pr_nsh + 4
+        DEFB 0, 5
+        DEFW pr_face + 4, pr_nsh + 4
+        DEFB 0, 6
+        DEFW pr_face + 25, pr_nsh + 7
+        DEFB 1, 2
+        DEFW pr_face + 25, pr_nsh + 7
+        DEFB 1, 3
+        DEFW pr_face + 22, pr_nsh + 4
+        DEFB 1, 4
+        DEFW pr_face + 22, pr_nsh + 4
+        DEFB 1, 5
+        DEFW pr_face + 22, pr_nsh + 4
+        DEFB 1, 6
+        DEFW pr_face + 46, pr_nsh + 10
+        DEFB 2, 3
+        DEFW pr_face + 40, pr_nsh + 22
+        DEFB 2, 4
+        DEFW pr_face + 40, pr_nsh + 22
+        DEFB 2, 5
+        DEFW pr_face + 40, pr_nsh + 22
+        DEFB 2, 6
+        DEFW pr_face + 58, pr_nsh + 28
+        DEFB 3, 4
+        DEFW pr_face + 58, pr_nsh + 28
+        DEFB 3, 5
+        DEFW pr_face + 58, pr_nsh + 28
+        DEFB 3, 6
+        DEFW pr_face + 82, pr_nsh + 10
+        DEFB 4, 5
+        DEFW pr_face + 79, pr_nsh + 37
+        DEFB 4, 6
+        DEFW pr_face + 100, pr_nsh + 46
+        DEFB 5, 6
+
+pr_bit:         ; a bit a piece
+        DEFB 1,2,4,8,16,32,64
 
 pr_norm:        ; every normal any face has, 1.7 signed
         DEFB 127,0,0,129,0,0,0,127,0,0,129,0
