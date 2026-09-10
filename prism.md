@@ -1,7 +1,7 @@
 # prism.z80s — design notes
 
 A lit extruded logo, cut into convex quads and drawn with `renderlit.z80s`'s
-own rasteriser. **453,848 T-states a frame, 13.2 Hz**, verified byte-for-byte
+own rasteriser. **518,273 T-states a frame, 11.6 Hz**, verified byte-for-byte
 against `tests/prism.py` over 256 frames.
 
 > **The shape is provisional.** It is a serif sigma of 45° angles and a
@@ -65,18 +65,57 @@ vertices are signed bytes, which caps a coordinate at 127 independently.
 
 | | T-states | |
 |---|---|---|
-| `pr_draw` | 307,115 | 62% — seven pieces of transform, faces and fill |
-| `pr_light` | 73,704 | 15% — two transposed products, then 18 normals |
-| `pr_tables` | 27,569 | 6% |
-| `pr_order` | 4,900 | 1% |
-| `rndl_erase` | 24,233 | 5% — one box for the whole logo |
-| `demo_spin` | 6,566 | 1% |
-| **`pr_frame`** | **min 320,652, mean 453,848, max 543,135** | 13.2 Hz |
+| `pr_draw` | 367,029 | 71% — seven pieces of transform, faces and fill |
+| `pr_light` | 73,704 | 14% — two transposed products, then 18 normals |
+| `pr_tables` | 27,649 | 5% |
+| `rndl_erase` | 24,022 | 5% — one box for the whole logo |
+| `pr_order` | 18,835 | 4% |
+| `demo_spin` | 6,628 | 1% |
+| `pr_box`, `rndl_flip` | 273 | — |
+| **`pr_frame`** | **min 381,665, mean 518,273, max 606,432** | 11.6 Hz |
+
+**A sign cost 13% of the frame — in the other direction.** The side faces
+were culled and drawn the wrong way round for a while (below), so most of
+what the rasteriser was asked to fill it filled with nothing. Getting them
+right put 64,000 T-states a frame back on the bill: 453,848 was the cost of
+a logo missing three sides in four.
 
 **Sorting cost 50,000 T-states before it was measured.** The bubble sort
 asked `pr_zget` for a piece's depth on every comparison — 72 transforms
 where seven would do. Depths into a table first, then sort the table: 11% of
 the frame back.
+
+## The sign that hid the sides
+
+The first version drew the front face of every piece and almost nothing
+else. From some angles a side would appear; from others there would be two
+or three stray pixels along an edge where a whole face should have been.
+
+The edge normal was inward. For a quad wound clockwise with y up the
+outward normal of the edge `p0 → p1` is `(-dy, dx)`; `(dy, -dx)` is the
+inward one, and it was `(dy, -dx)`. That inverts the visibility test, so a
+side was kept exactly when it should have been culled — and **a face kept
+wrongly is wound backwards on screen**. renderlit walks descending edges
+into one scanline array and ascending edges into the other, so a backwards
+face puts the right chain in the left array: every span comes out with its
+left end past its right end and fills nothing. The face did not look wrong.
+It was not there. The stray pixels were the two or three rows near the ends
+where the crossed chains happen to be in order again.
+
+Measured over 256 frames of the model, with the inward normal 3,872 of the
+5,238 faces the test kept were wound backwards and 1,263 of them drew
+nothing at all. With the outward normal, 106 of 4,580 — and **no
+correctly-wound face fills short**: every one of those 106 is a face within
+a few units of edge on, whose projection is a sliver a fraction of a pixel
+wide that integer rounding tips one way or the other. The worst of them
+paints 16 pixels.
+
+`check_faces` in `tests/test_prism.py` is the invariant that would have
+caught it in a second rather than a day: for all 42 faces, Newell's normal
+of the four vertices **in the order renderlit's face table names them**
+must point the same way as the declared normal, and all four vertices must
+lie on the plane the visibility test uses. With the inward normal it
+reports 28 of 42 wrong.
 
 ## If you pick this up
 
@@ -94,6 +133,10 @@ the frame back.
 
 - Quads must be convex and wound clockwise with y up; `_clockwise` in the
   model enforces it, and renderlit's face table assumes it.
+- **A face's normal must agree with the winding of the same face's four
+  vertices**, or it is culled when it should be drawn and drawn — as
+  nothing — when it should be culled. `check_faces` in the test checks
+  every face against Newell's normal, and its plane against its vertices.
 - The eight vertices must go in renderlit's index order. Get that wrong and
   the sides are drawn as diagonals.
 - Every coordinate value a vertex uses must be in the axis lists, or its

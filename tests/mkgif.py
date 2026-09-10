@@ -433,7 +433,7 @@ PRISM_PAL = ([(32 * i, 32 * i, 30 * i) for i in range(8)]
 
 
 def prism(outdir, seconds=14):
-    """prism at its measured rate: 453,848 T-states a frame, 13.2 Hz.
+    """prism at its measured rate: 518,273 T-states a frame, 11.6 Hz.
 
     A logo cut into seven convex quads and extruded, drawn with
     renderlit's rasteriser and face table: an extruded quad has the
@@ -444,7 +444,7 @@ def prism(outdir, seconds=14):
     b = Bench("harness_prism.asm", org=0)
     s = b.syms
     b.call_regs(s["pr_init"])
-    n = int(seconds * 13.2)
+    n = int(seconds * 11.6)
     frames, ts = [], []
     for t in range(n):
         into = b.peek(s["rndl_back"], 1)[0]

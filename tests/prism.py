@@ -124,7 +124,14 @@ def normals(quad):
     a, b, c, d = quad
     out = []
     for p0, p1 in ((a, b), (c, d), (d, a), (b, c)):
-        nx, ny = unit(p1[1] - p0[1], p0[0] - p1[0])
+        # the quads are wound clockwise, so the outward normal of the
+        # edge p0 -> p1 is (-dy, dx). (dy, -dx) is the inward one, and
+        # with that every side face is culled when it should be drawn
+        # and kept when it should not - and a face kept wrongly is
+        # wound backwards on screen, so its spans come out empty and
+        # nothing is drawn at all. The logo looked like its front face
+        # and nothing else.
+        nx, ny = unit(p0[1] - p1[1], p1[0] - p0[0])
         out.append(((nx, ny, 0), (nx * p0[0] + ny * p0[1]) // 128))
     out.append(((0, 0, 127), D))
     out.append(((0, 0, -127), D))

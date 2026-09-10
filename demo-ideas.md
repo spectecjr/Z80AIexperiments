@@ -224,7 +224,7 @@ Same as the existing room kind of implementation, but now it actually renders a 
 
 ### 6. Lit 3D Convex Shapes  — **BUILT, on a provisional shape**
 
-`prism.z80s`, 453,848 T-states a frame, 13.2 Hz. An extruded quad has
+`prism.z80s`, 518,273 T-states a frame, 11.6 Hz. An extruded quad has
 exactly a cube's shape - eight vertices, six quad faces - so a logo cut into
 convex quads is a handful of cubes that are not cubes, and renderlit draws
 them unchanged. The sigma and the triangle are built from the description

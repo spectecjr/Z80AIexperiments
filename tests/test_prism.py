@@ -19,6 +19,48 @@ PAL = ([(32 * i, 32 * i, 30 * i) for i in range(8)]
        + [(36 * i, 6 * i, 6 * i) for i in range(8)])
 
 
+def check_faces():
+    """Every declared normal must agree with the face's own winding.
+
+    renderlit keeps a face when N.T + off < 0 and then draws the four
+    vertices its face table names, in that order. If the normal and
+    that winding disagree the face is kept exactly when it should be
+    culled - and being wound backwards on screen it then fills
+    nothing, so it goes missing rather than looking wrong. That is
+    what an inward edge normal did here, to three sides in four.
+
+    The plane offset gets the same treatment: all four of the face's
+    vertices have to lie on n.x = off, or the visibility test is
+    testing some other plane than the face.
+    """
+    bad = 0
+    for pi, (quad, _) in enumerate(P.PIECES):
+        vs, ns = P.verts(quad), P.normals(quad)
+        for fi, idx in enumerate(raster.FACES):
+            q = [vs[k] for k in idx]
+            w = [0, 0, 0]                       # Newell's normal
+            for j in range(4):
+                x0, y0, z0 = q[j]
+                x1, y1, z1 = q[(j + 1) & 3]
+                w[0] += (y0 - y1) * (z0 + z1)
+                w[1] += (z0 - z1) * (x0 + x1)
+                w[2] += (x0 - x1) * (y0 + y1)
+            n, off = ns[fi]
+            if sum(w[a] * n[a] for a in range(3)) <= 0:
+                print("  WINDING piece %d face %d: normal %s against %s"
+                      % (pi, fi, n, tuple(w)))
+                bad += 1
+            for v in q:
+                if abs(sum(n[a] * v[a] for a in range(3)) // 128 - off) > 1:
+                    print("  PLANE   piece %d face %d: %s is not on n.x=%d"
+                          % (pi, fi, v, off))
+                    bad += 1
+                    break
+    print("  %-40s %6d faces, %d wrong"
+          % ("normals against the face winding", 6 * len(P.PIECES), bad))
+    return bad
+
+
 def main():
     b = Bench("harness_prism.asm", org=0)
     s = b.syms
@@ -30,8 +72,9 @@ def main():
           % (len(P.PIECES), 6 * len(P.PIECES), len(set(
               n for q, _ in P.PIECES for n, _ in P.normals(q)))))
 
+    bad = check_faces()
     lo = P.Logo()
-    bad, times, shown = 0, [], None
+    times, shown = [], None
     frames = 256
     for f in range(frames):
         into = b.peek(s["rndl_back"], 1)[0]
