@@ -22,7 +22,9 @@ def main():
     s = b.syms
     it, _ = b.call_regs(s["chq3_init"])
     print("  chq3_init %d T-states once, sky and haze into both buffers" % it)
-    poses = [(x, z) for x in range(0, 256, 19) for z in (0, 100, 900, 4321)]
+    # camx runs past one square and goes negative, because the square
+    # the camera is standing in is a parity of its own
+    poses = [(x, z) for x in range(-640, 641, 47) for z in (0, 100, 900, 4321)]
     bad = 0
     times = []
     for camx, camz in poses:

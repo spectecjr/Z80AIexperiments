@@ -40,11 +40,11 @@ about which of those it is.
 
 | | phase | width | stripes | T-states | |
 |---|---|---|---|---|---|
-| `chequer.z80s` | 4 px | 4 px | palette | 92,404 | 50 Hz |
-| `chequer2.z80s` | **1 px** | 4 px | palette | 104,301 | 50 Hz |
-| `chequer3.z80s` | **1 px** | **1 px** | palette | 110,556 | 50 Hz |
-| **`chequer4.z80s`** | **1 px** | **1 px** | **pixels** | **114,419** | **50 Hz** |
-| `harrier.z80s` | 1 px | 1 px | palette | 221,420 | 25 Hz |
+| `chequer.z80s` | 4 px | 4 px | palette | 92,335 | 50 Hz |
+| `chequer2.z80s` | **1 px** | 4 px | palette | 104,232 | 50 Hz |
+| `chequer3.z80s` | **1 px** | **1 px** | palette | 110,806 | 50 Hz |
+| **`chequer4.z80s`** | **1 px** | **1 px** | **pixels** | **114,656** | **50 Hz** |
+| `harrier.z80s` | 1 px | 1 px | palette | 221,451 | 25 Hz |
 
 `chequer4` is the one to use: it draws chequer3's screen — the GIFs come
 out byte for byte identical — with the depth alternation in the pixels
@@ -72,6 +72,12 @@ bottom of the screen the board slides sideways at most **3 pixels a
 frame, where it used to be 12** — the old swing was five and a half
 squares in 3.8 seconds, which read as a lurch rather than a camera, and
 did not divide into the length of the GIF either.
+
+The swing also crosses square boundaries, which found a real bug: only the
+low byte of `camx` reaches the phase, and the whole squares it drops are a
+parity of their own, so the board jumped a whole square sideways every 256
+world units. All five routines now fold that parity in with the depth's,
+for nothing. See `chequer.md`.
 
 What follows is the original note.
 

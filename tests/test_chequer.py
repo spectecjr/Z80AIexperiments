@@ -25,7 +25,9 @@ def main():
     print("  chq_init  %d T-states once, for %d bytes of compiled run"
           % (it, used))
 
-    poses = [(x, z) for x in range(0, 256, 37) for z in (0, 100, 900, 4321)]
+    # camx runs past one square and goes negative, because the square
+    # the camera is standing in is a parity of its own
+    poses = [(x, z) for x in range(-640, 641, 91) for z in (0, 100, 900, 4321)]
     bad = 0
     times = []
     for camx, camz in poses:

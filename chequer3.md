@@ -2,7 +2,7 @@
 
 **harrier's screen, drawn out of compiled runs, in half the time.** Every
 boundary on its exact pixel — both the width of a square and the phase —
-at **110,556 T-states, 92% of a 50 Hz frame**, against harrier's 221,420,
+at **110,806 T-states, 92% of a 50 Hz frame**, against harrier's 221,451,
 which is a 25 Hz routine.
 
 The test does not check it against a model of its own: it checks it against
@@ -16,10 +16,10 @@ palette table at all. It shares this file's run bank byte for byte. Read
 
 | | phase | width | T-states | |
 |---|---|---|---|---|
-| `chequer` | 4 px | 4 px | 92,404 | 50 Hz, 1.3K of run |
-| `chequer2` | 1 px | 4 px | 104,301 | 50 Hz, 5.3K of run |
-| **`chequer3`** | **1 px** | **1 px** | **110,556** | **50 Hz, 12K of run** |
-| `harrier` | 1 px | 1 px | 221,420 | 25 Hz, no run bank |
+| `chequer` | 4 px | 4 px | 92,335 | 50 Hz, 1.3K of run |
+| `chequer2` | 1 px | 4 px | 104,232 | 50 Hz, 5.3K of run |
+| **`chequer3`** | **1 px** | **1 px** | **110,806** | **50 Hz, 12K of run** |
+| `harrier` | 1 px | 1 px | 221,451 | 25 Hz, no run bank |
 
 (`chequer` and `chequer2` draw 93 scanlines of board from a 4-pixel horizon;
 `chequer3` and `harrier` draw 84 from an 8-pixel one with haze above it.
@@ -78,8 +78,8 @@ it.
 | the run's overrun past the row (see below) | ~4,000 |
 | the row loop, 84 × 129 | ~10,800 |
 | the band code, 57 × ~490 | ~28,000 |
-| `chq3_par8` | 7,019 |
-| **`chq3_frame`** | **min 106,913, mean 110,556, max 114,546** |
+| `chq3_par8` | 7,047 |
+| **`chq3_frame`** | **min 106,970, mean 110,806, max 114,736** |
 
 The band code is the surprise: 57 bands for 84 rows means a band is 1.5 rows,
 so its ~490 T-states amortise to ~330 a row. Halving it would be worth more

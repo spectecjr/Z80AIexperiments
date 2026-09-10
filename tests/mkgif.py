@@ -308,7 +308,7 @@ def maze(outdir, seconds=12, harness="harness_wolf.asm", name="maze"):
 
 
 def chequer(outdir, seconds=8):
-    """chequer at its measured rate: 92,404 T-states a frame, 50 Hz.
+    """chequer at its measured rate: 92,335 T-states a frame, 50 Hz.
 
     Forward all the way and weaving sideways. The palette flips the
     board's depth stripes and grades the whole picture with distance,
@@ -382,7 +382,7 @@ def twist(outdir, seconds=6):
 
 
 def harrier(outdir, seconds=8):
-    """harrier at its measured rate: 221,420 T-states a frame, 25 Hz.
+    """harrier at its measured rate: 221,451 T-states a frame, 25 Hz.
 
     The same floor as chequer, with every boundary on its exact pixel
     instead of a four pixel grid. Compare demo/chequer.gif.
@@ -412,7 +412,7 @@ def harrier(outdir, seconds=8):
 
 
 def chequer3(outdir, seconds=8):
-    """chequer3 at its measured rate: 110,556 T-states a frame, 50 Hz.
+    """chequer3 at its measured rate: 110,806 T-states a frame, 50 Hz.
 
     harrier's screen - every boundary on its exact pixel - drawn out of
     compiled runs instead of a dispatch a square, in half the time.
@@ -447,7 +447,7 @@ PRISM_PAL = ([(32 * i, 32 * i, 30 * i) for i in range(8)]
 
 
 def chequer4(outdir, seconds=8):
-    """chequer4 at its measured rate: 114,419 T-states a frame, 50 Hz.
+    """chequer4 at its measured rate: 114,656 T-states a frame, 50 Hz.
 
     chequer3's board with the depth stripes drawn in the pixels rather
     than flipped in the palette, which is why nothing here rebuilds a
@@ -712,7 +712,7 @@ def vox(outdir, seconds=8):
 
 
 def chequer2(outdir, seconds=8):
-    """chequer2 at its measured rate: 104,301 T-states a frame, 50 Hz.
+    """chequer2 at its measured rate: 104,232 T-states a frame, 50 Hz.
 
     The same floor as chequer with the phase exact to the pixel, so the
     board slides sideways smoothly instead of in four-pixel steps.

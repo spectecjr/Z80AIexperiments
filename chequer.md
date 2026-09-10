@@ -28,12 +28,21 @@ Two consequences, and they are why this is cheap:
 
 - **Scrolling forward costs nothing in pixels at all.** It moves the
   scanlines at which the palette flips, and nothing else. `chq_par8`, which
-  is the entire cost of forward motion, is 7,019 T-states — one 16-bit add
+  is the entire cost of forward motion, is 7,047 T-states — one 16-bit add
   and a bit test a scanline.
 - **Scrolling sideways is a phase**, and the phase as a *fraction of a
   square* is the same at every depth: the camera sits in the same part of a
   square however far away you look. So it is one number a frame, not one a
   scanline.
+
+Only the *fraction* though, which is the low byte of `chq_camx` — and the
+whole squares it drops are a parity of their own. Cross one and the board
+should exchange its two colours; without that it jumps a whole square
+sideways instead, once every 256 world units, which is exactly what the
+demo GIFs used to do. It costs nothing to put right: adding 256 to the
+camera's depth flips bit 8 for every scanline at once, so the square the
+camera is standing in goes into `chq_par8` as one `ADD` on the way in.
+`chequer2`, `chequer3`, `chequer4` and `harrier` all do the same.
 
 Since the palette is being written per scanline anyway, the distance fade
 comes free — the board grades into the sky colour at the horizon for
@@ -91,9 +100,9 @@ is `CHQ_SPILL` pushes, generated to match.
 | | T-states |
 |---|---|
 | `chq_floor` | 80,480 — 93 scanlines, 865 each |
-| `chq_par8` | 7,019 — the palette parities, i.e. all of forward motion |
+| `chq_par8` | 7,047 — the palette parities, i.e. all of forward motion |
 | `chq_entry` | 3,142 — the sixteen run entry points |
-| **`chq_frame`** | **min 90,762, mean 92,404, max 93,216** |
+| **`chq_frame`** | **min 89,416, mean 92,335, max 93,980** |
 | | **77% of the 120,000 a 50 Hz frame has** |
 | `chq_init` | 1,493,036 once, for 1,328 bytes of compiled run |
 
@@ -101,7 +110,7 @@ A scanline is 704 T-states of `PUSH`, 53 of loop, and about 108 of spill.
 The first of those is the floor and cannot be beaten; the third is the price
 of the phase.
 
-The optimisation pass took it from 103,658 to 92,404: rows come in bands
+The optimisation pass took it from 103,658 to 92,335: rows come in bands
 that share a square width (sixteen of them, generated), so the run and its
 entry are worked out once a band rather than once a row, and the row pointer
 moved into the alternate register set.
@@ -127,15 +136,15 @@ behind it is unproven.
 repainted in full every frame, but sideways motion moves each boundary by a
 few pixels: the interiors of the squares do not change. Repainting only the
 columns that changed would cut the 80,480 down towards the parity loop's
-7,019 — and unlike the current design it would get *cheaper* the slower you
+7,047 — and unlike the current design it would get *cheaper* the slower you
 turn. It wants a per-scanline record of where the boundaries were last
 frame, and the runs to become variable-length again, which is `room3d`'s
 machinery rather than this file's. This is the biggest single win left.
 
 One-pixel phase turned out to be neither expensive nor awkward, and is now
 `chequer2.z80s`: four compiled runs per square width instead of one, and a
-`PUSH` of a mixed pair wherever a boundary lands inside one. 104,301
-T-states against this file's 92,404, and still 50 Hz. Prefer it unless the
+`PUSH` of a mixed pair wherever a boundary lands inside one. 104,232
+T-states against this file's 92,335, and still 50 Hz. Prefer it unless the
 5,312 bytes of run are a problem.
 
     python3 tests/mkchqdata.py      # regenerate the tables

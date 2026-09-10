@@ -1,8 +1,8 @@
 # chequer2.z80s — design notes
 
 The Space Harrier floor with the phase exact to the pixel, and still one
-dispatch a scanline. **104,301 T-states — 87% of a 50 Hz frame**, against
-`chequer`'s 92,404 with a four-pixel phase and `harrier`'s 221,420 with
+dispatch a scanline. **104,232 T-states — 87% of a 50 Hz frame**, against
+`chequer`'s 92,335 with a four-pixel phase and `harrier`'s 221,451 with
 everything exact.
 
 Verified bit-exact against `tests/chequer2.py` — pixels and parities — over
@@ -54,9 +54,9 @@ overwritten.
 | | T-states |
 |---|---|
 | `chq2_floor` | 87,164 — 93 scanlines |
-| `chq2_par8` | 7,019 |
+| `chq2_par8` | 7,047 |
 | `chq2_entry` | 8,361 — sixteen square widths |
-| **`chq2_frame`** | **min 102,665, mean 104,301, max 105,109** |
+| **`chq2_frame`** | **min 101,320, mean 104,232, max 105,876** |
 | | **87% of a 50 Hz frame** |
 
 So exact phase costs 12,000 T-states a frame over `chequer` — the `POP AF`
@@ -71,12 +71,12 @@ The runs are static data rather than generated at init, which is why
 
 | | phase | width | T-states | |
 |---|---|---|---|---|
-| `chequer` | 4 px | 4 px | 92,404 | 50 Hz, 1.3K of run |
-| **`chequer2`** | **1 px** | 4 px | **104,301** | **50 Hz, 5.3K of run** |
-| `chequer3` | 1 px | 1 px | 110,556 | 50 Hz, 12K of run |
-| `harrier` | 1 px | 1 px | 221,420 | 25 Hz, no run bank |
+| `chequer` | 4 px | 4 px | 92,335 | 50 Hz, 1.3K of run |
+| **`chequer2`** | **1 px** | 4 px | **104,232** | **50 Hz, 5.3K of run** |
+| `chequer3` | 1 px | 1 px | 110,806 | 50 Hz, 12K of run |
+| `harrier` | 1 px | 1 px | 221,451 | 25 Hz, no run bank |
 
-`chequer3.z80s` has since taken the width off the grid as well, for 110,556
+`chequer3.z80s` has since taken the width off the grid as well, for 110,806
 T-states — still a 50 Hz routine, at 12K of run. Prefer it unless
 that memory is wanted for something else; this file is the cheap middle,
 and `chequer` the cheapest.

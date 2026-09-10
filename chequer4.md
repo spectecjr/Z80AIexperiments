@@ -3,15 +3,15 @@
 **chequer3's board with the depth stripes drawn in the pixels instead of
 flipped in the palette.** Same picture — `demo/chequer4.gif` comes out
 byte for byte `demo/chequer3.gif`, which is why only one of them is in the
-repository — at **114,419 T-states, 95% of a 50 Hz frame**, against
-chequer3's 110,556. Eighty T-states a scanline buys a palette that no
+repository — at **114,656 T-states, 95% of a 50 Hz frame**, against
+chequer3's 110,806. Eighty T-states a scanline buys a palette that no
 longer moves.
 
 | | T-states | |
 |---|---|---|
-| `chequer3` (stripes in the palette) | 110,556 | 92% of a frame |
-| **`chequer4`** (stripes in the pixels) | **114,419** | **95% of a frame** |
-| measured spread | min 110,889, max 118,396 | over 273 camera positions |
+| `chequer3` (stripes in the palette) | 110,806 | 92% of a frame |
+| **`chequer4`** (stripes in the pixels) | **114,656** | **95% of a frame** |
+| measured spread | min 110,835, max 118,586 | over 975 camera positions |
 
 ## Why the palette was the wrong place for them
 
@@ -21,7 +21,7 @@ crosses a square. It costs nothing in pixels, and on a SAM it costs three
 things that do not show up in a T-state count:
 
 - **It moves.** The swap rows come from `ztab[y] + camz`, so they change
-  every frame: the CPU rebuilds the table (`chq3_par8`, 7,019 T-states) and
+  every frame: the CPU rebuilds the table (`chq3_par8`, 7,047 T-states) and
   the copper reads it.
 - **It belongs to the other buffer.** The copper paints the frame being
   *displayed*, which is the one drawn last frame, so the parity table has to
@@ -58,12 +58,18 @@ gains a complement — every byte `XOR 0x33` — sixteen bytes above it, which
 is 416 bytes of table where chequer3 had 104.
 
 Picking between them is a byte a scanline, `0x00` or `0x33`, built by
-`chq4_msk8` (6,888 T-states, in place of `chq3_par8`'s 7,019):
+`chq4_msk8` (6,916 T-states, in place of `chq3_par8`'s 7,047):
 
 | | |
 |---|---|
 | bit 4 of it | the offset from a value set to its complement |
 | all of it | turns the row's last byte round |
+
+It carries two parities, not one: the depth's, and the square the camera is
+standing in — only the low byte of `camx` reaches the phase, so crossing a
+square boundary has to exchange the colours or the board jumps a square
+sideways. Both go in for nothing, because adding 256 to the depth flips
+bit 8 of every scanline at once. See `chequer.md`.
 
 so the row loop pays one `AND` and one `ADD` for the first job and one
 `XOR` for the second.

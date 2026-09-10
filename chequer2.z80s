@@ -272,7 +272,11 @@ chq2_bend:
 chq2_par8:
         LD   A,(chq2_camz)
         LD   (chq2_pz1+1),A
-        LD   A,(chq2_camz+1)
+        LD   A,(chq2_camx+1)    ; the camera's own square is a parity
+        AND  1                  ; too: crossing one exchanges the two
+        LD   C,A                ; colours, which is what a square of
+        LD   A,(chq2_camz+1)    ; depth does, so it goes in with it
+        ADD  A,C
         LD   (chq2_pz2+1),A
         LD   HL,chq_ztab + 2 * (CHQ_HZ + 1)
         LD   DE,chq2_par + CHQ_HZ + 1

@@ -13,8 +13,8 @@ useful part is usually the size of the step rather than the final figure.
 
 | | T-states a frame (min / mean / max) | Hz | |
 |---|---|---|---|
-| `chequer4` | 110,889 / **114,419** / 118,396 | **50** | the floor with its depth stripes in the pixels |
-| `chequer3` | 106,913 / **110,556** / 114,546 | **50** | the same picture, stripes in the palette |
+| `chequer4` | 110,835 / **114,656** / 118,586 | **50** | the floor with its depth stripes in the pixels |
+| `chequer3` | 106,970 / **110,806** / 114,736 | **50** | the same picture, stripes in the palette |
 | `prismpre` | 121,498 / **205,008** / 255,774 | **29.3** | the provisional logo, frame precomputed |
 | `entropypre` | 118,994 / **220,823** / 292,156 | **27.2** | the traced artwork, nine pieces |
 | `democube` + `renderlit` | 102,854 mean | 50 (86% of the budget) | one lit cube |

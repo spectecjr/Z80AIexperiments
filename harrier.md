@@ -6,7 +6,7 @@ does not. It costs about twice as much — a 25 Hz routine where the other is
 a 50 Hz one — so **keep both**.
 
 > **`chequer3.z80s` now draws this same screen, bit for bit, in half the
-> time** — 110,556 T-states against 221,420 — by going back to a compiled
+> time** — 110,806 T-states against 221,451 — by going back to a compiled
 > run a scanline and finding room for the exact width in it. Prefer it
 > unless its 12K of run bank is wanted elsewhere. This file is still the
 > readable statement of what the board *is*, and its model is what
@@ -58,8 +58,8 @@ Two differences worth knowing:
 | | T-states |
 |---|---|
 | `hr_draw` | 214,589 — 84 scanlines, ~2,550 each |
-| `hr_par8` | 7,019 |
-| **`hr_frame`** | **min 220,537, mean 221,420, max 221,837** |
+| `hr_par8` | 7,047 |
+| **`hr_frame`** | **min 220,394, mean 221,451, max 223,413** |
 | | **92% of the 240,000 a 25 Hz frame has** |
 | `hr_init` | 1,511,121 once |
 

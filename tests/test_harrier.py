@@ -17,7 +17,9 @@ def main():
     s = b.syms
     it, _ = b.call_regs(s["hr_init"])
     print("  hr_init   %d T-states once, sky and haze into both buffers" % it)
-    poses = [(x, z) for x in range(0, 256, 37) for z in (0, 100, 900, 4321)]
+    # camx runs past one square and goes negative, because the square
+    # the camera is standing in is a parity of its own
+    poses = [(x, z) for x in range(-640, 641, 91) for z in (0, 100, 900, 4321)]
     bad = 0
     times = []
     for camx, camz in poses:

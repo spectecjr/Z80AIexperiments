@@ -88,7 +88,10 @@ def frame(camx, camz):
         buf[y * STRIDE:(y + 1) * STRIDE] = bytes([HAZE * 0x11]) * STRIDE
     par = [0] * H
     for y in range(HZ + 1, H):
-        par[y] = ((ZTAB[y] + camz) >> 8) & 1
+        # the camera's own square is a parity too: crossing one
+        # exchanges the two colours, exactly as a square of depth does,
+        # and only the low byte of camx survives into the phase
+        par[y] = (((ZTAB[y] + camz) >> 8) & 1) ^ ((camx >> 8) & 1)
         p = PTAB[y]
         if p:
             k, t, s = entry(p, camx)
