@@ -549,6 +549,63 @@ def chequer6(outdir, seconds=8):
     report(p, size, n, durs, secs, got, bad)
 
 
+def zarch(outdir, seconds=8):
+    """zarch at its measured rate: 206,012 T-states a frame, 25 Hz.
+
+    Zarch's ground: a chequered plane under a camera that turns. The
+    sky and the haze are one index each and graded by the copper, the
+    way chequer's are; the ground's five bands of distance are ten
+    fixed indices, and every one of its spans is PUSHes.
+    """
+    import math
+    import zarch as Z
+    b = Bench("harness_za.asm", org=0)
+    s = b.syms
+    b.call_regs(s["za_init"])
+    pal = Z.palette()
+    n = int(seconds * 25)
+    frames, ts = [], []
+    camx = camz = 0.0
+    for t in range(n):
+        yaw = 128 + 110 * math.sin(2 * math.pi * t / (seconds * 25))
+        phi = math.radians(Z.YAW0 + (Z.YAW1 - Z.YAW0) * yaw / (Z.NYAW - 1))
+        camx += 34 * math.sin(phi)              # a walk forward, in the
+        camz += 34 * math.cos(phi)              # direction it is looking
+        b.poke(s["za_camx"], (int(camx) & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["za_camz"], (int(camz) & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["za_yaw"], bytes([int(yaw) & 255]))
+        into = b.peek(s["za_back"], 1)[0]
+        tt, _ = b.call_regs(s["za_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    idx, cols = [], []
+    seen = {}
+    for f in frames:
+        g = np.zeros(f.shape, np.uint8)
+        for y in range(f.shape[0]):
+            for k, rgb in pal.items():
+                c = rgb
+                if k == Z.SKY:                  # the sky and the haze are
+                    c = tuple(int(a + (bb - a) * min(1.0, y / Z.HZ))
+                              for a, bb in zip((30, 60, 150), (150, 190, 225)))
+                elif k == Z.HAZE:
+                    c = tuple(int(a + (bb - a) *
+                                  min(1.0, max(0.0, (y - Z.HZ)
+                                               / float(Z.TOP - Z.HZ))))
+                              for a, bb in zip((150, 190, 225),
+                                               (110, 160, 130)))
+                if c not in seen:
+                    seen[c] = len(cols)
+                    cols.append(c)
+                g[y][f[y] == k] = seen[c]
+        idx.append(g)
+    p = "%s/zarch.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, idx, cols, durs)
+    got, bad, secs = check_gif(p, idx, cols, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 def entropypre(outdir, seconds=14):
     """The traced Entropy logo, precomputed: 220,823 T-states, 27.2 Hz.
 
@@ -832,6 +889,7 @@ if __name__ == "__main__":
     chequer4(d)
     chequer5(d)
     chequer6(d)
+    zarch(d)
     twist(d)
     roto(d)
     vox(d)

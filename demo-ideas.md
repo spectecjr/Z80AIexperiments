@@ -460,12 +460,17 @@ Every routine in this repo was built the same way and it is worth keeping:
 
 ---
 
-## 15. Zarch / Virus polygonal landscape — **COSTED, not built**
+## 15. Zarch / Virus polygonal landscape — **BUILT, flat**
 
-The question was how hard a Zarch-style rolling polygon floor would be. The
-part nobody can guess at is what a flat-shaded span costs, so that part is
-now measured: `spanfill.z80s`, **63.0 T-states a span and 5.51 a byte**,
-verified bit for bit at six different span counts.
+`zarch.z80s` draws the flat half of it: a chequered plane under a camera
+that turns, **208,206 T-states a frame, 25 Hz**, byte for byte against its
+model over 96 cameras. See `zarch.md`. The costing that came first is below,
+and it held up - the span count was the thing, and the span dispatch came
+in at 33 T-states rather than 63 once the runs and the list shared a page.
+
+The part nobody can guess at is what a flat-shaded span costs, so that part
+was measured first: `spanfill.z80s`, **63.0 T-states a span and 5.51 a
+byte**, verified bit for bit at six different span counts.
 
 **The fill is not the problem.** 128 scanlines of full-width floor is
 101,888 T-states — 42% of a 25 Hz frame — and `PUSH` means there is nothing
@@ -491,6 +496,11 @@ plane every grid line is straight on screen, so only the *ends* of them need
 projecting — about 36 vertices at ~300 T-states, not 144. Call it 200,000
 T-states all in. It is a chequer floor with roll and a colour a cell, and
 most of the machinery for it is already in `chequer3`.
+
+*Built: 208,206, against an estimate of 200,000. It turned out to want no
+vertices at all — a row is one depth, so each family of grid lines is an
+arithmetic progression along it — but 56 rows rather than 128, because the
+rows near the horizon are where the span count runs away.*
 
 **Zarch proper — a heightfield with hills — is a `vox`-class routine, 13-17
 Hz** (estimated). Three things change and all of them cost: every vertex

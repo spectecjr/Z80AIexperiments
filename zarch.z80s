@@ -1,0 +1,649 @@
+;------------------------------------------------------------------
+; zarch.z80s - Zarch's ground: a chequered plane, turning under you
+;
+;   za_init     sky and haze into both buffers, once
+;   za_frame    draw from (za_camx, za_camz, za_yaw) and flip
+;
+; The camera looks down at a fixed pitch and turns. What makes that
+; affordable is one fact about a camera that does not roll:
+;
+;   A SCREEN ROW IS ONE DEPTH. So the ground line a row looks along is
+;   straight and level, and a family of parallel grid lines crosses it
+;   at even intervals - which project to even intervals on the row,
+;   because at one depth the projection is linear.
+;
+; So on every row, each of the two families of grid lines is an
+; ARITHMETIC PROGRESSION: a position and a step, both of which walk
+; down the screen by adding a constant. No edge is walked, no vertex is
+; projected, nothing is sorted: the row's spans are two progressions
+; merged, and because the chequer flips at every crossing of either
+; family, the merge does not even have to remember which family a
+; crossing came from.
+;
+; Everything is 8.8 fixed point in PUSHes - a PUSH is two bytes, which
+; is four pixels - for two reasons. The high byte of a position is then
+; the span boundary itself, no shifting; and a step stays inside 16
+; bits even when a family is nearly edge on and its lines are a
+; thousand pixels apart.
+;
+; The span dispatch is 33 T-states, which is spanfill.z80s's 63 halved,
+; and the trick is LD L,(HL): the two runs of PUSHes and the row's list
+; of spans all live in one page, so H never changes, A carries the
+; offset into the list across the run untouched, and a span is
+;
+;       LD L,A / INC A / INC A / LD L,(HL) / JP (HL)
+;
+; with the run itself ending in JP back. The list's last entry points
+; at a JP out, so there is no test in the loop at all.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+ZA_BUF0:        EQU 0x80
+ZA_BUF1:        EQU 0x20
+ZA_RIGHT:       EQU 64          ; the screen, in PUSHes
+ZA_LIST:        EQU 255         ; the first span byte, in za_page
+
+;------------------------------------------------------------------
+; za_init - the sky, and the haze between it and the ground
+;------------------------------------------------------------------
+
+za_init:
+        LD   A,ZA_BUF0
+        LD   (za_back),A
+        LD   A,ZA_BUF1
+        LD   (za_front),A
+        LD   H,ZA_BUF0
+        CALL za_fill
+        LD   H,ZA_BUF1
+        ; fall through
+
+za_fill:
+        LD   L,0
+        LD   D,ZA_HZ + 1        ; the sky
+        LD   A,ZA_SKY * 0x11
+        CALL za_band
+        LD   D,ZA_TOP - ZA_HZ - 1       ; and the haze under it
+        LD   A,ZA_HAZE * 0x11
+za_band:
+        LD   B,128
+za_bf1:
+        LD   (HL),A
+        INC  HL
+        DJNZ za_bf1
+        DEC  D
+        JR   NZ,za_band
+        RET
+
+;------------------------------------------------------------------
+; za_frame - one frame
+;------------------------------------------------------------------
+
+za_frame:
+        CALL za_setup
+        CALL za_draw
+        LD   A,(za_back)
+        LD   B,A
+        LD   A,(za_front)
+        LD   (za_back),A
+        LD   A,B
+        LD   (za_front),A
+        RET
+
+;------------------------------------------------------------------
+; za_setup - where each family stands at the top row of the ground
+;
+; The line through the camera's own cell corner is the one whose place
+; is easy: its step down the screen is the camera's offset inside a
+; cell, times the family's step per cell. From there, walking out to
+; the right hand edge of the screen is a dozen adds - and which colour
+; is to the right of it flips with every line stepped over.
+;------------------------------------------------------------------
+
+za_setup:
+        LD   A,(za_yaw)
+        AND  ZA_NYAW - 1
+        LD   L,A
+        LD   H,0
+        ADD  HL,HL              ; ten bytes an entry
+        LD   D,H
+        LD   E,L
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,DE
+        LD   DE,za_yawtab
+        ADD  HL,DE
+        LD   E,(HL)             ; the step a cell, each family
+        INC  HL
+        LD   D,(HL)
+        INC  HL
+        LD   (za_aa),DE
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        INC  HL
+        LD   (za_ab),DE
+        LD   DE,za_vpa          ; and where their lines radiate from
+        LD   BC,3
+        LDIR
+        LD   DE,za_vpb
+        LD   BC,3
+        LDIR
+
+        LD   IX,za_a            ; family A, then family B
+        LD   HL,(za_camx)
+        CALL za_one
+        LD   IX,za_b
+        LD   HL,(za_camz)
+        CALL za_one
+        LD   A,(za_qa)          ; which colour is out to the right: the
+        LD   HL,za_qb           ; two families, and the cell the camera
+        XOR  (HL)               ; is standing in
+        LD   HL,za_camx + 1
+        XOR  (HL)
+        LD   HL,za_camz + 1
+        XOR  (HL)
+        AND  1
+        LD   (za_par),A
+        RET
+
+;------------------------------------------------------------------
+; za_one - one family: IX its state, L the camera inside a cell
+;
+;   +0 pos (2)  +2 d (2)  +4 step (2)  +6 alpha (2)  +8 vp (3)  +11 par
+;------------------------------------------------------------------
+
+za_one:
+        LD   A,L                ; d0 = -(cam inside a cell) * alpha,
+        LD   C,(IX+7)           ; which is one multiply of each half of
+        CALL za_m8              ; alpha and the top byte of the second.
+        PUSH HL                 ; A comes back out of za_m8 as it went in
+        LD   C,(IX+6)
+        CALL za_m8
+        LD   A,H
+        POP  HL
+        LD   D,0
+        LD   E,A
+        ADD  HL,DE
+        LD   A,H                ; and negate it
+        CPL
+        LD   D,A
+        LD   A,L
+        CPL
+        LD   E,A
+        INC  DE
+        LD   (za_d0),DE
+
+        LD   B,ZA_R0            ; pos = vp + R0 * d0, in 24 bits
+        LD   L,(IX+8)
+        LD   H,(IX+9)
+        LD   A,(IX+10)
+za_o1:
+        ADD  HL,DE
+        JR   NC,za_o2
+        INC  A
+za_o2:
+        BIT  7,D                ; DE is signed, so the top byte of it
+        JR   Z,za_o3            ; is -1 when it is negative
+        DEC  A
+za_o3:
+        DJNZ za_o1
+        PUSH HL
+        LD   C,A
+
+        LD   HL,0               ; step = R0 * alpha
+        LD   E,(IX+6)
+        LD   D,(IX+7)
+        LD   B,ZA_R0
+za_o4:
+        ADD  HL,DE
+        DJNZ za_o4
+        LD   (IX+4),L
+        LD   (IX+5),H
+        EX   DE,HL              ; DE = step, HL = pos, B = its top byte
+        POP  HL
+        LD   B,C
+        LD   C,0                ; and C counts the lines walked over
+
+; Out to the right hand edge, and no further. Only the count of lines
+; walked over is kept: the rightmost one's step down the screen is
+; d0 + that many alphas, and which colour is out beyond it is the count
+; itself, odd or even. That is what makes an iteration of this 40-odd
+; T-states rather than three hundred.
+
+za_o5:
+        ADD  HL,DE              ; while pos + step < 64.0, another line
+        LD   A,B                ; is on from the right
+        ADC  A,0
+        JP   M,za_o6            ; negative: on it comes
+        LD   B,A                ; (the top byte, for either way out)
+        OR   A
+        JR   NZ,za_o7           ; over 0x10000: it does not
+        LD   A,H
+        CP   ZA_RIGHT
+        JR   NC,za_o7
+        INC  C
+        JR   za_o5
+za_o6:
+        LD   B,A
+        INC  C
+        JR   za_o5
+
+za_o7:
+        OR   A                  ; undo the step that did not fit
+        SBC  HL,DE
+        JR   NC,za_o8
+        DEC  B
+za_o8:
+        LD   A,B                ; while pos >= 64.0, the rightmost line
+        OR   A                  ; has gone off that edge
+        JP   M,za_o10
+        JR   NZ,za_o9
+        LD   A,H
+        CP   ZA_RIGHT
+        JR   C,za_o10
+za_o9:
+        OR   A
+        SBC  HL,DE
+        JR   NC,za_o8x
+        DEC  B
+za_o8x:
+        DEC  C
+        JR   za_o8
+
+za_o10:
+        LD   (IX+0),L           ; the position, and from the count the
+        LD   (IX+1),H           ; step down the screen and the colour
+        LD   A,C
+        AND  1
+        LD   (IX+11),A
+        LD   DE,(za_d0)
+        LD   L,(IX+6)
+        LD   H,(IX+7)
+        LD   A,C
+        OR   A
+        JR   Z,za_o13
+        JP   M,za_o12
+za_o11:
+        EX   DE,HL              ; d0 + C alphas
+        ADD  HL,DE
+        EX   DE,HL
+        DEC  A
+        JR   NZ,za_o11
+        JR   za_o13
+za_o12:
+        EX   DE,HL              ; or minus that many
+        OR   A
+        SBC  HL,DE
+        EX   DE,HL
+        INC  A
+        JR   NZ,za_o12
+za_o13:
+        LD   (IX+2),E
+        LD   (IX+3),D
+        RET
+
+;------------------------------------------------------------------
+; za_m8 - HL = A * C, eight bits by eight
+;------------------------------------------------------------------
+
+za_m8:
+        LD   HL,0
+        LD   D,0
+        LD   E,C
+        LD   B,8
+za_m81:
+        RRCA
+        JR   NC,za_m82
+        ADD  HL,DE
+za_m82:
+        SLA  E
+        RL   D
+        DJNZ za_m81
+        RET
+
+;------------------------------------------------------------------
+; za_draw - the ground, a row at a time
+;
+; The two families' state lives in the immediates this patches, which
+; is the only way there are enough registers for the walk: it wants
+; both positions, the row's right hand edge and a scratch, and the two
+; steps come in as SUB n / SBC A,n instead of a register pair.
+;------------------------------------------------------------------
+
+za_draw:
+        DI
+        LD   (za_sp),SP
+        LD   A,(za_back)        ; one past the first row's last byte
+        ADD  A,(ZA_TOP + 1) / 2
+        LD   H,A
+        LD   L,((ZA_TOP + 1) & 1) * 128
+        LD   (za_rowend),HL
+        LD   HL,za_shade
+        LD   (za_cp+1),HL
+        LD   A,192 - ZA_TOP
+        LD   (za_rows),A
+
+        LD   HL,(za_aa)         ; the two alphas, and the two steps,
+        LD   (za_aa1+1),HL      ; where the row loop wants them
+        LD   HL,(za_ab)
+        LD   (za_ab1+1),HL
+        LD   HL,(za_a + 4)
+        CALL za_pata
+        LD   HL,(za_b + 4)
+        CALL za_patb
+        JP   za_r2              ; the top row is already where it stands
+
+za_row:
+        LD   SP,(za_sp)         ; the row loop CALLs, and the last thing
+                                ; SP did was walk the screen
+        LD   HL,(za_sa)         ; family A: the spacing widens first, and
+za_aa1: LD   DE,0               ; the tests below want the new one
+        ADD  HL,DE
+        LD   (za_sa),HL
+        LD   (za_sa1+1),HL
+        LD   A,L
+        LD   (za_sa2+1),A
+        LD   A,H
+        LD   (za_sa3+1),A
+        LD   HL,(za_pa)         ; then the rightmost line steps down
+        LD   DE,(za_da)
+        ADD  HL,DE
+za_sa1: LD   DE,0               ; patched: the step at this row
+        LD   A,H
+        SUB  0x40
+        CP   0x40
+        JP   C,za_adrop         ; off the right: lines to drop
+        ADD  HL,DE              ; is the next line to the right on now?
+        LD   A,H
+        SUB  0x40
+        CP   0x40
+        JP   NC,za_atake
+        OR   A
+        SBC  HL,DE
+za_a9:
+        LD   (za_pa),HL
+
+        LD   HL,(za_sb)         ; family B, the same
+za_ab1: LD   DE,0
+        ADD  HL,DE
+        LD   (za_sb),HL
+        LD   (za_sb1+1),HL
+        LD   A,L
+        LD   (za_sb2+1),A
+        LD   A,H
+        LD   (za_sb3+1),A
+        LD   HL,(za_pb)
+        LD   DE,(za_db)
+        ADD  HL,DE
+za_sb1: LD   DE,0
+        LD   A,H
+        SUB  0x40
+        CP   0x40
+        JP   C,za_bdrop
+        ADD  HL,DE
+        LD   A,H
+        SUB  0x40
+        CP   0x40
+        JP   NC,za_btake
+        OR   A
+        SBC  HL,DE
+za_b9:
+        LD   (za_pb),HL
+
+za_r2:
+        LD   HL,(za_pa)         ; the walk: HL and BC the two positions,
+        BIT  7,H                ; D the right hand edge, E the scratch.
+        JR   Z,za_r3            ; A family with nothing on this row is
+        LD   HL,0               ; parked where it can never win
+za_r3:
+        LD   BC,(za_pb)
+        LD   A,B
+        AND  0x80
+        JR   Z,za_r4
+        LD   BC,0
+za_r4:
+        LD   D,ZA_RIGHT
+        LD   SP,za_page + 256   ; the list, built downwards
+za_bld:
+        LD   A,H
+        CP   B
+        JR   C,za_bb
+        LD   E,A                ; family A is the next boundary left
+        LD   A,L
+za_sa2: SUB  0
+        LD   L,A
+        LD   A,H
+za_sa3: SBC  A,0
+        LD   H,A
+        JR   NC,za_be
+        LD   HL,0               ; and that was its last on this row
+        JR   za_be
+za_bb:
+        LD   E,B                ; family B is
+        LD   A,C
+za_sb2: SUB  0
+        LD   C,A
+        LD   A,B
+za_sb3: SBC  A,0
+        LD   B,A
+        JR   NC,za_be
+        LD   BC,0
+za_be:
+        LD   A,E                ; the run to enter: 64 - the span
+        ADD  A,ZA_RIGHT
+        SUB  D
+        PUSH AF
+        LD   D,E
+        DEC  E
+        JP   P,za_bld
+        LD   A,ZA_OUT           ; and the way out of the row
+        PUSH AF
+
+        LD   HL,(za_rowend)     ; now fill it
+        LD   SP,HL
+        LD   DE,128
+        ADD  HL,DE
+        LD   (za_rowend),HL
+za_cp:  LD   HL,0               ; patched: this row's two colours
+        LD   C,(HL)
+        INC  HL
+        LD   B,(HL)
+        INC  HL
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        INC  HL
+        LD   (za_cp+1),HL
+        LD   A,(za_par)         ; which colour the right hand span is
+        OR   A
+        LD   H,za_page / 256
+        LD   A,ZA_LIST
+        JP   NZ,za_f1
+        JP   za_f0
+
+za_next:
+        LD   A,(za_rows)
+        DEC  A
+        LD   (za_rows),A
+        JP   NZ,za_row
+        LD   SP,(za_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; The rare halves of the row loop: a line off the right hand edge, or
+; a new one on from beyond it. Both flip which colour is out there.
+;------------------------------------------------------------------
+
+za_adrop:
+        OR   A
+        SBC  HL,DE
+        LD   (za_pa),HL
+        LD   HL,(za_da)
+        LD   DE,(za_aa)
+        OR   A
+        SBC  HL,DE
+        LD   (za_da),HL
+        CALL za_flip
+        LD   HL,(za_pa)
+        JP   za_a1
+
+za_atake:
+        LD   (za_pa),HL
+        LD   HL,(za_da)
+        LD   DE,(za_aa)
+        ADD  HL,DE
+        LD   (za_da),HL
+        CALL za_flip
+        LD   HL,(za_pa)
+za_a1:
+        LD   DE,(za_sa)
+        LD   A,H
+        SUB  0x40
+        CP   0x40
+        JP   C,za_adrop
+        ADD  HL,DE
+        LD   A,H
+        SUB  0x40
+        CP   0x40
+        JP   NC,za_atake
+        OR   A
+        SBC  HL,DE
+        JP   za_a9
+
+za_bdrop:
+        OR   A
+        SBC  HL,DE
+        LD   (za_pb),HL
+        LD   HL,(za_db)
+        LD   DE,(za_ab)
+        OR   A
+        SBC  HL,DE
+        LD   (za_db),HL
+        CALL za_flip
+        LD   HL,(za_pb)
+        JP   za_b1
+
+za_btake:
+        LD   (za_pb),HL
+        LD   HL,(za_db)
+        LD   DE,(za_ab)
+        ADD  HL,DE
+        LD   (za_db),HL
+        CALL za_flip
+        LD   HL,(za_pb)
+za_b1:
+        LD   DE,(za_sb)
+        LD   A,H
+        SUB  0x40
+        CP   0x40
+        JP   C,za_bdrop
+        ADD  HL,DE
+        LD   A,H
+        SUB  0x40
+        CP   0x40
+        JP   NC,za_btake
+        OR   A
+        SBC  HL,DE
+        JP   za_b9
+
+za_flip:
+        LD   A,(za_par)
+        XOR  1
+        LD   (za_par),A
+        RET
+
+za_pata:
+        LD   (za_sa1+1),HL
+        LD   A,L
+        LD   (za_sa2+1),A
+        LD   A,H
+        LD   (za_sa3+1),A
+        RET
+
+za_patb:
+        LD   (za_sb1+1),HL
+        LD   A,L
+        LD   (za_sb2+1),A
+        LD   A,H
+        LD   (za_sb3+1),A
+        RET
+
+;------------------------------------------------------------------
+; The span player. A row's list is in the same page as the two runs of
+; PUSHes, so H never changes and LD L,(HL) reads an entry straight into
+; the low half of the jump. A is the offset into the list and survives
+; a run untouched, because a run is nothing but PUSHes.
+;------------------------------------------------------------------
+
+za_f0:
+        LD   L,A                ; the colour the first run pushes
+        DEC  A
+        DEC  A
+        LD   L,(HL)
+        JP   (HL)
+
+za_f1:
+        LD   L,A                ; and the colour the second one does,
+        DEC  A                  ; which is the same list entry with one
+        DEC  A                  ; more bit in it
+        LD   L,(HL)
+        SET  7,L
+        JP   (HL)
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+za_back:        DEFB ZA_BUF0
+za_front:       DEFB ZA_BUF1
+za_camx:        DEFW 0
+za_camz:        DEFW 0
+za_yaw:         DEFB 0
+za_sp:          DEFS 2
+za_rowend:      DEFS 2
+za_rows:        DEFS 1
+za_par:         DEFS 1
+za_d0:          DEFS 2
+
+za_a:                           ; family A: the lines across the view
+za_pa:          DEFS 2
+za_da:          DEFS 2
+za_sa:          DEFS 2
+za_aa:          DEFS 2
+za_vpa:         DEFS 3
+za_qa:          DEFS 1
+
+za_b:                           ; family B: the ones along it
+za_pb:          DEFS 2
+za_db:          DEFS 2
+za_sb:          DEFS 2
+za_ab:          DEFS 2
+za_vpb:         DEFS 3
+za_qb:          DEFS 1
+
+;------------------------------------------------------------------
+; The page: two runs of PUSHes, the ways out of them, and the row's
+; list of spans. A span of n PUSHes is entered at 64 - n, and a span of
+; none lands on the JP at 64, which is exactly right.
+;------------------------------------------------------------------
+
+        ALIGN 256
+za_page:
+        DUP  64
+        PUSH BC
+        EDUP
+        JP   za_f1              ; 64: on to the other colour
+ZA_OUT: EQU  $ - za_page
+        JP   za_next            ; 67: the end of the row
+        DEFS 128 - ($ - za_page)
+        DUP  64
+        PUSH DE
+        EDUP
+        JP   za_f0              ; 192
+        JP   za_next            ; 195, which is 67 with the bit set
+        ASSERT $ - za_page <= 198
+        DEFS 198 - ($ - za_page)
+za_list:                        ; 198..255, built downwards from the top
+        DEFS 256 - ($ - za_page)

@@ -16,6 +16,7 @@ useful part is usually the size of the step rather than the final figure.
 | `chequer4` | 110,835 / **114,656** / 118,586 | **50** | the floor with its depth stripes in the pixels |
 | `chequer5` | 125,343 / **129,183** / 133,151 | 25 | the same routine, board all the way to the horizon |
 | `chequer6` | 150,767 / **154,607** / 158,575 | 25 | and a pilot in a jetpack over the top of it |
+| `zarch` | 195,482 / **208,206** / 215,619 | 25 | Zarch's ground: a chequered plane, turning |
 | `chequer3` | 106,970 / **110,806** / 114,736 | **50** | the same picture, stripes in the palette |
 | `prismpre` | 121,498 / **205,008** / 255,774 | **29.3** | the provisional logo, frame precomputed |
 | `entropypre` | 118,994 / **220,823** / 292,156 | **27.2** | the traced artwork, nine pieces |
