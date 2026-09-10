@@ -18,16 +18,19 @@ Read `costs.md` for what each demo came out at. This file is the other half:
 | | T-states a byte | where |
 |---|---|---|
 | a constant run, `PUSH` | **5.5** | `chequer`, `room3d`, `twist`, `zarch` |
-| a copy, `LDI` unrolled | 16 † | `chequer6` |
+| a clear, `PUSH`, interrupt let in every 232 T | 7.33 | `scroll8` |
+| a clear, `LD (HL),A` / `INC HL` | 13.25 | `scroll8` |
+| a copy, `LDI` unrolled 64 | **16.16** | `scroll8`, `chequer6` |
 | a span, `LD (HL),C` / `INC L` in pairs | 17.5 | `renderlit` |
 | a flat column, no texture | 18.4 | `wolf3d` |
+| a copy through the stack, eight bytes a block | 20.24 | `scroll8` |
 | a copy, `LDIR` | 21 † | — |
 | a textured column, two pixels wide | 22.8 | `wolf3d` |
 | an `LD (HL),0` erase loop | ~30 | what `render` replaced |
 | a textured column, stepping by a fraction | 72.6 | what `wolf3d`'s scalers replaced |
 | **an arbitrary computed byte** | **109.7** | `roto` |
 
-† instruction timings, not a measured loop; everything else was timed.
+† an instruction timing, not a measured loop; everything else was timed.
 
 Two consequences run through the whole repo:
 
@@ -87,6 +90,41 @@ result back:
 `chequer3` and `chequer4` fill all six pushable registers — `BC`, `DE`,
 `HL`, `IX`, `IY`, `AF` — straight off a table with six `POP`s a band, which
 is also the only way to get a value into `F` at all.
+
+**A fill is not a copy.** `PUSH` is unbeatable when the source is a
+register and merely good when the source is memory, because a copy has to
+move `SP` from the source to the destination and back, and there are only
+twelve bytes of register to amortise that over. `scroll8` measures both
+ends of it on the same 24K screen: clearing 1,024 bytes through the stack
+is 7.33 T-states a byte against 13.25 for `LD (HL),A` / `INC HL`, and
+moving 23,552 bytes through the stack is 20.24 against **16.16 for
+unrolled `LDI`** — 18.86 of that even with the interrupt left alone.
+Eight bytes of block cost 92 T-states of `POP` and `PUSH` — 11.5 a byte,
+better than `LDI` — and then 58 more of stack pointer.
+
+**One of the two pointers is always free, and never the one you want.**
+`POP` walks up and `PUSH` walks down, so in a block copy either the source
+or the destination ends up exactly where the next block needs it,
+depending which way the blocks go — and which way they go is fixed by the
+overlap, not by preference. `scroll8` moves the picture *down* memory, so
+the blocks must run *up* it, so it is the source that lands right. It
+cannot be spent either way: pointing `SP` at the other region is what
+destroys it, and saving it across the block is `LD (nn),SP` and
+`LD SP,(nn)`, 40 T-states against the 29 that keeping a pointer in the
+alternate set costs.
+
+**Letting the interrupt in.** A `PUSH` fill runs with `SP` inside the
+screen, so an interrupt would push a return address into the picture:
+`DI`. Anything longer than a frame therefore has to be cut into windows —
+
+    DI / <work> / LD SP,IY / EI / NOP / DI ...
+
+— and **the `NOP` is not padding**: `EI` does not take effect until after
+the instruction that follows it, so `EI / DI` lets nothing in at all. The
+caller's stack goes in `IY` because `LD SP,IY` is 10 T-states where
+`LD SP,(nn)` is 20. Measured on `scroll8`, a window costs **22 T-states**,
+and holding the interrupt off for no more than 322 T-states — 53.7 µs —
+costs the routine **7.3%**.
 
 ---
 
@@ -460,6 +498,16 @@ over again (2,274 and 713.5) and the two stopped crossing at all. Kept in
 the repo, with its test printing both curves live so the comparison cannot
 go stale.
 
+**A whole-screen copy through the stack** (`scroll8`). `POP` and `PUSH`
+move a byte in 11.5 T-states where `LDI` needs 16, and it still loses:
+eight bytes is all the register there is, and the two `LD SP`s that
+bracket them cost 58 T-states more. Measured over the 23,552 bytes an
+eight-line scroll moves: 476,645 T-states through the stack against
+380,552 by unrolled `LDI` — **25% slower, and the only one of the two
+that has to turn the interrupt off.** The clear underneath it goes the
+other way, 7,510 against 13,567, and that is the same fact from the other
+side: the stack wins where the source is a register.
+
 **Removing the lighting to reach 25 Hz** (`prism`). Measured: it cannot,
 because prism's non-drawing work alone is 213,320 T-states.
 
@@ -510,6 +558,9 @@ worth writing down, and it caught, among others:
   from garbage and pushed the runs over the low 8K;
 - `zarch`'s row loop `CALL`ing while `SP` walked the screen, writing return
   addresses into the last two bytes of the row above.
+- `scroll8`'s blocks running down the screen instead of up, so each one
+  carried off the source of a block 1,024 bytes further on — 22,440 of
+  24,576 bytes wrong, in a picture that still looked like a picture.
 
 The models are the specification, not a preview: `tests/zarch.py` does the
 same 8.8 arithmetic in the same order as the assembly, so "the Z80 matches

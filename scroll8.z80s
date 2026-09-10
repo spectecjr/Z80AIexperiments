@@ -1,0 +1,217 @@
+;------------------------------------------------------------------
+; scroll8.z80s - scroll the whole MODE 4 display up by eight lines
+;
+;   sc_scroll    the move and the clear, both through the stack
+;   sc_scrolli   the same picture, the move done by LDI - faster, and
+;                with no interrupt latency at all in the move
+;   sc_clear     the bottom eight lines only, through the stack
+;   sc_cleari    the same eight lines with LD (HL),A, for comparison
+;
+; A MODE 4 screen is 24,576 bytes, so scrolling it up by eight lines is
+; 23,552 bytes moved 1,024 down and 1,024 bytes of black underneath.
+; Nothing does that in a frame: even at the POP-and-PUSH floor of 10.5
+; T-states a byte, with the stack pointer moving between the two
+; regions for free, the move alone is 247,296 T-states - two 50 Hz
+; frames. It is a multi-frame operation whatever it is written in,
+; which is exactly why the interrupt has to be let in while it runs.
+;
+; THE STACK PART. A block is popped off the source into every register
+; that can hold one and pushed back down 1,024 bytes lower:
+;
+;       LD   SP,src      POP BC / POP DE / POP HL / POP IX
+;       LD   SP,dst      PUSH IX / PUSH HL / PUSH DE / PUSH BC
+;
+; POP reads two bytes in 10 T-states and PUSH writes two in 11, so
+; eight bytes cost 92 - 11.5 a byte, against LDI's 16. What is left is
+; getting SP from one region to the other and back, and there are only
+; eight bytes of picture to amortise it over, because there are only
+; eight bytes of register. The two pointers live in the alternate set,
+; where EXX makes them addressable without disturbing the block in
+; flight, and each is stepped with one ADD:
+;
+;       EXX / LD SP,HL / ADD HL,BC / EX DE,HL / EXX      29 T-states
+;
+; twice a block. That is 58 of the block's 150 - 39% of it - and it is
+; why this loses to LDI at 16 T-states a byte and flat. The measured
+; figures are in scroll8.md; sc_scrolli is the LDI version, kept here
+; so the comparison can be re-run rather than believed.
+;
+; DIRECTION. The picture moves *down* in memory, so the copy has to run
+; *up* it: a block written before its own contents were read would take
+; the source of a block 1,024 bytes further on with it. That settles
+; something that would otherwise be a choice, because POP walks up and
+; PUSH walks down, and whichever way round the blocks go, one of the
+; two pointers lands where the next block wants it and the other does
+; not. Going up, it is the source: after the four pops SP is already at
+; the next block's source. It cannot be cashed in, though - pointing SP
+; at the destination is what destroys it - and saving it across the
+; pushes is LD (nn),SP and LD SP,(nn), 40 T-states against the 29 that
+; keeping the pointer in the alternate set costs. So both pointers are
+; kept, and the free one is thrown away.
+;
+; The clear does cash it in: nothing there reads memory, so SP walks
+; down through the eight lines by itself and only the window boundaries
+; cost anything.
+;
+; THE INTERRUPT PART. While a block is in flight SP is inside the
+; screen, so an interrupt taken there would push a return address into
+; the picture - and on a SAM, into whatever the line interrupt does
+; next. So the run is DI, and to keep the latency down it is cut into
+; windows of two blocks:
+;
+;       DI / <two blocks> / LD SP,caller / EI / NOP / DI ...
+;
+; EI does not take effect until after the instruction that follows it,
+; so the NOP is what gives the interrupt a boundary to be accepted at.
+; The window is 322 T-states of DI - 53.7 us at 6 MHz, measured by
+; single-stepping the routine and timing every stretch between two
+; boundaries an interrupt could be taken at.
+;
+; What SP is put back to is the caller's own stack, kept in IY because
+; LD SP,IY is 10 T-states where LD SP,(nn) is 20, and IY is the one
+; register pair the move has no other use for. The clear uses IX for
+; the same thing, IY being its screen pointer by then.
+;
+; Eight windows are unrolled between loop tests, so the test is 14
+; T-states over 128 bytes rather than over 16. A window costs 22
+; T-states, measured off two builds; over the move that is 7.3%, and
+; that figure is what the 400 T-state brief costs.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+SC_SCR:         EQU 0x8000      ; the display file, page aligned
+SC_BPL:         EQU 128         ; bytes a scanline in MODE 4
+SC_ROWS:        EQU 192
+SC_SIZE:        EQU SC_BPL * SC_ROWS            ; 24,576
+SC_LINES:       EQU 8           ; scanlines to scroll by
+SC_SHIFT:       EQU SC_BPL * SC_LINES           ; 1,024
+SC_MOVE:        EQU SC_SIZE - SC_SHIFT          ; 23,552
+
+SC_BLK:         EQU 8           ; bytes of register in flight
+                IFNDEF SC_BLOCKS_A_WINDOW       ; the test builds it wider
+                DEFINE SC_BLOCKS_A_WINDOW 2     ; to measure what a window
+                ENDIF                           ; costs - see scroll8.md
+                IFNDEF SC_WINDOWS_A_GROUP
+                DEFINE SC_WINDOWS_A_GROUP 8
+                ENDIF
+SC_WIN:         EQU SC_BLOCKS_A_WINDOW  ; blocks between EI and the next DI
+SC_GRP:         EQU SC_WINDOWS_A_GROUP  ; windows between loop tests
+SC_GRPS:        EQU SC_MOVE / (SC_BLK * SC_WIN * SC_GRP)       ; 184
+
+SC_CPW:         EQU 16          ; pushes in a window of the clear
+SC_CWINS:       EQU SC_SHIFT / (SC_CPW * 2)                    ; 32
+
+                ASSERT SC_GRPS * SC_BLK * SC_WIN * SC_GRP == SC_MOVE
+                ASSERT SC_GRPS <= 255           ; the group count is in A
+                ASSERT SC_CWINS * SC_CPW * 2 == SC_SHIFT
+                ASSERT (SC_SCR & 255) == 0      ; a page-aligned display file
+                ASSERT (SC_SHIFT & 255) == 0
+
+;------------------------------------------------------------------
+; sc_scroll - the whole thing. Returns with interrupts enabled and SP
+; as it found it. Everything is destroyed, both register sets.
+;------------------------------------------------------------------
+
+sc_scroll:
+        LD   (sc_sp),SP         ; the caller's stack: where the interrupt
+        LD   IY,(sc_sp)         ; gets to push, once a window
+        EXX
+        LD   HL,SC_SCR + SC_SHIFT               ; the first block's source
+        LD   DE,SC_SCR + SC_BLK                 ; where its pushes start
+        LD   BC,SC_BLK                          ; and what a block steps by
+        EXX
+        LD   A,SC_GRPS
+
+sc_grp:
+                DUP SC_GRP
+        DI
+                DUP SC_WIN
+        EXX                     ; 4     the pointers: HL source, DE dest
+        LD   SP,HL              ; 6
+        ADD  HL,BC              ; 11    the next block up
+        EX   DE,HL              ; 4     HL = where this block is going
+        EXX                     ; 4
+        POP  BC                 ; 10    eight bytes of picture
+        POP  DE                 ; 10
+        POP  HL                 ; 10
+        POP  IX                 ; 14
+        EXX                     ; 4
+        LD   SP,HL              ; 6     and 1,024 bytes lower down
+                                ;       (the eight bytes below SP, PUSH
+                                ;        writing downwards)
+        ADD  HL,BC              ; 11
+        EX   DE,HL              ; 4     HL = source again, DE = dest
+        EXX                     ; 4
+        PUSH IX                 ; 15    in the order they came off
+        PUSH HL                 ; 11
+        PUSH DE                 ; 11
+        PUSH BC                 ; 11
+                EDUP
+        LD   SP,IY              ; 10    the caller's stack, for the window
+        EI                      ; 4
+        NOP                     ; 4     the boundary the interrupt is taken at
+                EDUP
+        DEC  A                  ; 4
+        JP   NZ,sc_grp          ; 10
+
+;------------------------------------------------------------------
+; sc_clear - the bottom SC_LINES scanlines, 1,024 bytes of zero at
+; PUSH's floor. SP walks down through them by itself, so IY only has
+; to hold where the next window starts.
+;------------------------------------------------------------------
+
+sc_clear:
+        LD   (sc_sp),SP
+        LD   IX,(sc_sp)         ; the caller's stack again, IY being busy
+        LD   HL,0               ; what a PUSH writes
+        LD   DE,-SC_CPW * 2     ; bytes a window
+        LD   IY,SC_SCR + SC_SIZE
+        LD   B,SC_CWINS
+sc_cw:
+        DI                      ; 4
+        LD   SP,IY              ; 10
+        ADD  IY,DE              ; 15
+                DUP SC_CPW
+        PUSH HL                 ; 11 each
+                EDUP
+        LD   SP,IX              ; 10    the caller's stack
+        EI                      ; 4
+        DJNZ sc_cw              ; 13    and the boundary, after EI
+        RET
+
+sc_sp:  DEFW 0                  ; the only memory this routine keeps
+
+;------------------------------------------------------------------
+; sc_cleari - the clear again, without the stack.
+;------------------------------------------------------------------
+
+sc_cleari:
+        LD   HL,SC_SCR + SC_MOVE        ; the same 1,024 bytes without the
+        XOR  A                          ; stack, for the comparison in
+        LD   B,SC_SHIFT / 64            ; scroll8.md: LD (HL),A / INC HL is
+sc_cli:                                 ; 13 T-states a byte and needs no DI
+                DUP 64
+        LD   (HL),A                     ; 7
+        INC  HL                         ; 6
+                EDUP
+        DEC  B                          ; DJNZ will not reach over 128 bytes
+        JP   NZ,sc_cli
+        RET
+
+;------------------------------------------------------------------
+; sc_scrolli - the same scroll with the move done by LDI. LDI never
+; touches SP, so the move needs no DI at all and has no interrupt
+; latency to argue about; only the clear does. This is the one to use.
+;------------------------------------------------------------------
+
+sc_scrolli:
+        LD   HL,SC_SCR + SC_SHIFT
+        LD   DE,SC_SCR
+        LD   BC,SC_MOVE
+sc_ldi:
+                DUP 64
+        LDI                     ; 16 each, and BC counts itself down
+                EDUP
+        JP   PE,sc_ldi          ; 10    P/V clears as BC reaches zero
+        JP   sc_clear

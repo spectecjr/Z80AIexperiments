@@ -40,6 +40,21 @@ came out of, what each one costs, and where it does not pay.
 Which is what `demo-ideas.md` §15 costs a Zarch-style polygon landscape
 against: about eight cells across a 128-scanline floor at 25 Hz.
 
+And moving memory about, measured on the eight-line scroll (`scroll8`):
+
+| | T-states a byte | |
+|---|---|---|
+| cleared by `PUSH` | **7.33** | the interrupt let in every 232 T-states |
+| cleared by `LD (HL),A` / `INC HL` | 13.25 | |
+| copied by `LDI`, unrolled 64 | **16.16** | and `SP` never touched, so no `DI` |
+| copied through the stack, eight bytes a block | 20.24 | 18.86 with the interrupt left alone; 11.5 of it is the `POP` and the `PUSH` |
+| a DI window, `LD SP,IY` / `EI` / `NOP` / `DI` | 22 a window | 7.3% of the move, for 53.7 µs of latency |
+
+| whole routines | T-states | |
+|---|---|---|
+| `sc_scroll` — 24K screen up eight lines, all stack | 484,155 | 4.0 frames at 50 Hz |
+| `sc_scrolli` — the same, `LDI` for the move | **388,062** | 3.2 frames |
+
 ## 2. The rasteriser (`renderlit`), before and after
 
 Measured by timing `rndl_six` on one quad of a known size.
@@ -128,6 +143,7 @@ else happens at all.
 |---|---|---|
 | **Merge the coplanar front faces** into one polygon a group | ceiling ~26,000 a frame: 3.7 fewer faces and 30 fewer spans of 120 | only 25% of spans merge, and the merged outline needs 1 to 4 spans a scanline, so it wants an active edge table whose crossing sort costs about what the merge saves |
 | **`polyfast`** — chains walked as an 8.8 DDA in a register pair, no scanline arrays | 6,204 a face + 760.5 a scanline, against renderlit's 2,274 + 713.5 | the scanline did get cheaper and flat in the slope, but a DDA needs a step an edge where Bresenham needs none. It broke even at 95 scanlines a face when renderlit was at 3,040 + 798.5, and prism's faces average 23. Kept as `polyfast.z80s` and `polyfast.md` |
+| **A whole-screen copy through the stack** (`scroll8`) | 476,645 T-states for the 23,552 bytes an eight-line scroll moves, against 380,552 by unrolled `LDI` | `POP`/`PUSH` moves a byte in 11.5 T-states against `LDI`'s 16 and still loses: eight bytes is all the register there is, and the two `LD SP`s round them are 58 more. `LDI` also never touches `SP`, so it needs no `DI` at all. The clear underneath goes the other way — 7,510 against 13,567 — because there the source is a register |
 | **Split prismpre's erase box** — one for the sigma, one for the triangle | blanks 94% of the bytes one box does; a box a piece blanks 115% | the pieces' boxes overlap too much |
 | **Drop the lighting from prism** (flat faces, visibility kept) | 446,602 → **410,789**, 14.6 Hz | `pr_light` 73,704 → 37,891; the other half *is* the visibility test. prism's non-drawing work is 213,320 even with no lighting at all — 89% of the whole 25 Hz budget — so no lighting setting reaches 25 Hz |
 | **Divide to get a DDA step** rather than a reciprocal table | `pf_div` 850 T-states against 342 for two quarter-square multiplies | the table (384 bytes) won, but not by enough to save the design |
