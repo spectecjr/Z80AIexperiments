@@ -1,8 +1,8 @@
 # What to build next — candidate demo routines
 
 A shortlist for a future session, with each idea costed against what this
-repo has actually measured rather than against intuition. Nothing here is
-built yet. Where a number is an estimate it says so; every number that is
+repo has actually measured rather than against intuition. Items 1 to 4 and
+5 and 7 are built; the rest are not. Where a number is an estimate it says so; every number that is
 not marked as an estimate was measured on the emulator and is quoted in one
 of the `.md` notes beside the routine it came from.
 
@@ -244,6 +244,69 @@ We can limit the scale of the cubes so that they only take up 1/8th of the scree
 could render multiple cubes, and have them bounce with simple (integer math, no multiplication) physics
 and gravity against the walls (and possibly each other). We should also render the outline of the room
 they're bouncing around in, around the edge of the screen, and behind them for the other edges.
+
+### 8. Copper bars and a raster split  — *free, and the cheapest thing here*
+
+Nothing is drawn at all. The palette is rewritten a few times a scanline,
+as `chequer.z80s` already does for its depth stripes, and the bars are
+whatever the CLUT says. Cost is the copper list, not the picture: a bar
+that moves is two palette writes a scanline, and 192 scanlines of that is
+a few thousand T-states.
+
+**Why it is worth doing anyway:** every routine in this repo spends 40-70%
+of its frame on the span fill, and this one spends none. It is the natural
+thing to put *behind* something else - a twister, a scroller, the cubes -
+because it costs nothing that the foreground wanted.
+
+### 9. Starfield  — *estimated 20,000 T-states for 500 stars, 50 Hz*
+
+Each star is one pixel: erase where it was, move it, plot it. Measured
+neighbours: `cubes.z80s`'s line drawer plots a pixel with a known address
+for 25 T-states, and finds an unknown one for 130. A star costs the second
+kind twice (erase and plot) plus a 16-bit add, so about 300 - call it 500
+stars in 150,000, or 200 stars in 60,000.
+
+Perspective is one divide a star, or a table of 256 reciprocals as
+`transform3d.z80s` already has. **The interesting version is 3D**: z
+decreasing, x/z and y/z projected, which is the same arithmetic `t3d_run`
+does eight times a cube.
+
+### 10. Fire, at quarter resolution  — *estimated 90,000 T-states, 50 Hz*
+
+The classic: each row is the average of a few pixels of the row below,
+minus a little, with noise seeded along the bottom. Per byte it is three
+reads, an add, a shift and a write - about 30 T-states with the addresses
+walked rather than computed.
+
+**Full screen it is 24,576 bytes and hopeless** (740,000). At 128x96, one
+MODE 4 pixel doubled both ways, it is 3,072 source bytes and 90,000
+T-states, and the doubling out to the screen is 5.5 a byte with `PUSH`.
+That is the whole argument for quarter resolution in one line, and it
+applies to water ripple and plasma equally.
+
+### 11. Vector balls  — *estimated 120,000 T-states for 24 balls, 25 Hz*
+
+A sprite per ball, sorted back to front, scaled by z into two or three
+sizes rather than continuously. A 16x16 sprite is 128 bytes; blitting one
+with a mask is about 15 T-states a byte, so 2,000 a ball, plus the erase
+which the dirty-box trick in `render.z80s` already solves. 24 balls in a
+rotating cube or torus formation is 50,000 of blit and the transform of 24
+points on top.
+
+**This is the one that reuses the most of what is here** - `transform3d`
+projects the points, `cubes.z80s` sorts them and keeps a dirty box each,
+and nothing new has to be invented.
+
+### 12. A one bit film  — *estimated 8 Hz full screen, 25 Hz at a quarter*
+
+Run-length decode a stream into the frame buffer. A run of a colour is
+`PUSH` at 5.5 T-states a byte, and the decoder between runs is about 40, so
+a frame is 135,000 plus 40 a run. Full screen at 300 runs a frame is
+147,000 - about 8 Hz once the erase is counted, which is what makes it a
+quarter resolution idea too.
+
+The reason to build it is not the film: it is that **a compiled run bank
+is the same shape as a decoded run**, and the two could share a fill.
 
 ---
 
