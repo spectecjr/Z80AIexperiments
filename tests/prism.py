@@ -138,7 +138,59 @@ def normals(quad):
     return out
 
 
-def light(m, t, lite, piece):
+def _edges(quad):
+    a, b, c, d = quad
+    return [(a, b), (c, d), (d, a), (b, c)]     # renderlit's face order
+
+
+def _onseg(p, q0, q1):
+    """p on the segment q0-q1, in integers, ends included."""
+    if (q1[0] - q0[0]) * (p[1] - q0[1]) - (q1[1] - q0[1]) * (p[0] - q0[0]):
+        return False
+    dot = (p[0] - q0[0]) * (q1[0] - q0[0]) + (p[1] - q0[1]) * (q1[1] - q0[1])
+    return 0 <= dot <= (q1[0] - q0[0]) ** 2 + (q1[1] - q0[1]) ** 2
+
+
+def buried():
+    """A six-bit mask a piece: faces that are inside the solid.
+
+    The pieces are a cut-up of one plate, so wherever two of them meet
+    both own a side face on the join and neither face is part of the
+    plate's surface. The triangle is three trapezoids meeting at three
+    mitred corners, which is six such faces; the sigma's arms meet each
+    other and sit against the bars, which is four more. Their normals
+    are opposite, so exactly one of each pair passes the cull every
+    frame - 4.6 faces and 429 pixels of fill a frame, 12% of all of it,
+    for something that is never on the outside of anything.
+
+    Drawn, they are also what a painter order gets wrong: a piece
+    ordered too near shows the wall it shares with its neighbour.
+    """
+    out = []
+    for i, (qi, _) in enumerate(PIECES):
+        mask = 0
+        for e, (p0, p1) in enumerate(_edges(qi)):
+            for j, (qj, _) in enumerate(PIECES):
+                if j == i:
+                    continue
+                for r0, r1 in _edges(qj):
+                    if not (_onseg(p0, r0, r1) and _onseg(p1, r0, r1)):
+                        continue
+                    d1 = (p1[0] - p0[0], p1[1] - p0[1])
+                    d2 = (r1[0] - r0[0], r1[1] - r0[1])
+                    if d1[0] * d2[1] - d1[1] * d2[0]:
+                        continue                # not the same line
+                    if d1[0] * d2[0] + d1[1] * d2[1] >= 0:
+                        continue                # the same way round: not a join
+                    mask |= 1 << e
+        out.append(mask)
+    return out
+
+
+BURIED = buried()
+
+
+def light(m, t, lite, piece, buried=0):
     """Which of a piece's faces face us, and how lit each one is."""
     w = [v >> 8 for v in t]
     cv = [sum(s8(m[k * 3 + a] & 0xFF) * w[k] for k in range(3))
@@ -150,7 +202,7 @@ def light(m, t, lite, piece):
     for n, off in normals(quad):
         sh = shift7(sum((n[a] * lv[a]) >> 7 for a in range(3)))
         v = sum((n[a] * cv[a]) >> 7 for a in range(3)) + 64 * off
-        vis.append(v < 0)
+        vis.append(v < 0 and not (buried >> len(vis)) & 1)
         col.append((base + RAMP[sh + 128]) & 15)
     return vis, col
 
@@ -266,7 +318,7 @@ class Logo(Model):
         drawn = []
         for i in ord_:
             quad, base = PIECES[i]
-            vis, col = light(self.m, self.p, lite, PIECES[i])
+            vis, col = light(self.m, self.p, lite, PIECES[i], BURIED[i])
             for f, idx in enumerate(FACES):
                 if vis[f]:
                     raster.fill_quad(buf, [pts[i][k] for k in idx], col[f])

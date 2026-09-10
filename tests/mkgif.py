@@ -433,7 +433,7 @@ PRISM_PAL = ([(32 * i, 32 * i, 30 * i) for i in range(8)]
 
 
 def prismpre(outdir, seconds=14):
-    """prismpre at its measured rate: 284,455 T-states a frame, 21.1 Hz.
+    """prismpre at its measured rate: 245,608 T-states a frame, 24.4 Hz.
 
     The same logo as prism, frame for frame, with the spin, the
     transform, the lighting and the sort read out of a 9,216-byte
@@ -444,7 +444,7 @@ def prismpre(outdir, seconds=14):
     b = Bench("harness_prismpre.asm", org=0)
     s = b.syms
     b.call_regs(s["pp_init"])
-    n = int(seconds * 21.1)
+    n = int(seconds * 24.4)
     frames, ts = [], []
     for t in range(n):
         into = b.peek(s["rndl_back"], 1)[0]
@@ -459,7 +459,7 @@ def prismpre(outdir, seconds=14):
 
 
 def prism(outdir, seconds=14):
-    """prism at its measured rate: 536,420 T-states a frame, 11.2 Hz.
+    """prism at its measured rate: 493,506 T-states a frame, 12.2 Hz.
 
     A logo cut into seven convex quads and extruded, drawn with
     renderlit's rasteriser and face table: an extruded quad has the
@@ -470,7 +470,7 @@ def prism(outdir, seconds=14):
     b = Bench("harness_prism.asm", org=0)
     s = b.syms
     b.call_regs(s["pr_init"])
-    n = int(seconds * 11.2)
+    n = int(seconds * 12.2)
     frames, ts = [], []
     for t in range(n):
         into = b.peek(s["rndl_back"], 1)[0]

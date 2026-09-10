@@ -1,7 +1,7 @@
 # prism.z80s — design notes
 
 A lit extruded logo, cut into convex quads and drawn with `renderlit.z80s`'s
-own rasteriser. **536,420 T-states a frame, 11.2 Hz**, verified byte-for-byte
+own rasteriser. **493,506 T-states a frame, 12.2 Hz**, verified byte-for-byte
 against `tests/prism.py` over 256 frames.
 
 > **The shape is provisional.** It is a serif sigma of 45° angles and a
@@ -65,15 +65,15 @@ vertices are signed bytes, which caps a coordinate at 127 independently.
 
 | | T-states | |
 |---|---|---|
-| `pr_draw` | 286,864 | 53% — faces and fill, seven pieces |
-| `pr_proj` | 83,969 | 16% — 56 corners projected, and seven screen boxes |
-| `pr_light` | 73,704 | 14% — two transposed products, then 18 normals |
-| `pr_order` | 33,161 | 6% — 21 separating planes, then a topological sort |
-| `pr_tables` | 27,649 | 5% |
-| `rndl_erase` | 24,022 | 4% — one box for the whole logo |
+| `pr_draw` | 243,950 | 49% — faces and fill, seven pieces |
+| `pr_proj` | 83,969 | 17% — 56 corners projected, and seven screen boxes |
+| `pr_light` | 73,704 | 15% — two transposed products, then 18 normals |
+| `pr_order` | 33,161 | 7% — 21 separating planes, then a topological sort |
+| `pr_tables` | 27,649 | 6% |
+| `rndl_erase` | 24,022 | 5% — one box for the whole logo |
 | `demo_spin` | 6,628 | 1% |
 | `pr_box`, `rndl_flip` | 273 | — |
-| **`pr_frame`** | **min 398,226, mean 536,420, max 626,412** | 11.2 Hz |
+| **`pr_frame`** | **min 389,497, mean 493,506, max 572,276** | 12.2 Hz |
 
 **Ordering the pieces properly cost 3.5% of the frame.** The centroid
 sort was 18,835 T-states and wrong; the separating planes are 33,161 and
@@ -123,6 +123,29 @@ must point the same way as the declared normal, and all four vertices must
 lie on the plane the visibility test uses. With the inward normal it
 reports 28 of 42 wrong.
 
+## The faces that are inside the solid
+
+The seven pieces are a cut-up of one plate, so **wherever two of them meet,
+both own a side face on the join and neither face is on the outside of
+anything**. The triangle is three trapezoids meeting at three mitred
+corners — two buried faces at every corner — and the sigma's arms meet each
+other and sit against the bars. Ten of the 42 faces, and because each pair
+has opposite normals exactly one of the two passes the cull every frame:
+measured, **4.6 faces and 429 pixels of fill a frame, 12% of all the fill**,
+for surfaces that can never be seen.
+
+Worse, they are what a wrong painter order shows. Two pieces ordered the
+wrong way round only *look* wrong if the near one has a face where they
+join — which is precisely one of these. Culling them makes most ordering
+mistakes invisible as well as cheaper.
+
+Bit 7 of a face's normal byte in `pr_face` says so (there are 18 normals,
+so the bit was free), and `pr_one` forces the visibility byte to zero when
+it is set. It cost 42,914 T-states a frame — 8% — to stop drawing them.
+`tests/prism.py`'s `buried()` works the mask out from the geometry rather
+than a list: a face is inside the solid when another piece owns an edge on
+the same line, running the other way, that contains it.
+
 ## Blocks, not faces
 
 The logo is drawn as seven convex prisms, one after another, so the only
@@ -161,7 +184,9 @@ first, which leaves one pair the wrong way round instead of a cascade:
 | **separating planes** | **36, in 36 of 256 frames** |
 
 Nothing short of splitting the pieces — or ordering faces rather than
-blocks — removes the last 36. Every one of them is a cycle among screen
+blocks — removes the last 36, though with the buried faces gone (above)
+what a wrong pair now shows is one exterior surface instead of another,
+rather than the inside of the logo. Every one of them is a cycle among screen
 boxes, so testing the projected octagons instead would too; that is eight
 2D separating-axis tests a pair and 21 pairs, which is not worth 36 frames
 of one pair each.
@@ -180,6 +205,9 @@ of one pair each.
 
 ## Invariants
 
+- A face marked buried must really be buried: `buried()` proves it from the
+  edges, so a piece that overlaps another rather than abutting it would
+  mark a face that is not.
 - Every pair of pieces must have a separating side face, and
   `tests/prism.py`'s `pairs()` raises if one does not. A piece that is not
   convex, or two that interpenetrate, breaks that and the order with it.

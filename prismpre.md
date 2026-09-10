@@ -1,7 +1,7 @@
 # prismpre.z80s — design notes
 
-`prism.z80s` with the whole frame precomputed. **284,455 T-states a frame,
-21.1 Hz** — against prism's 536,420 and 11.2 Hz — and the frames are the
+`prism.z80s` with the whole frame precomputed. **245,608 T-states a frame,
+24.4 Hz** — against prism's 493,506 and 12.2 Hz — and the frames are the
 same frames: verified byte-for-byte both against `tests/prism.py`'s model
 and against `prism.z80s` itself, run side by side at the same turn rates,
 over two full times round the loop.
@@ -20,10 +20,11 @@ Everything in a prism frame that depends on nothing but the frame number:
 | `pr_light` | 73,704 | 18 normals shaded and tested against the eye |
 | `pr_proj`'s boxes | 13,372 | seven screen boxes |
 | `pr_order` | 33,161 | 21 separating planes, then a topological sort |
-| the rest | ~9,200 | the ramp lookup in `rndl_setface`, and the frame's own box |
-| **removed** | **~237,000** | 44% of the frame |
+| | | (the ten buried faces are culled in both, so that saving is prism's too) |
+| the rest | ~11,700 | the ramp lookup in `rndl_setface`, and the frame's own box |
+| **removed** | **~248,000** | 50% of the frame |
 
-What is left is `rndl_erase` (22,766) and renderlit's span fill (261,688).
+What is left is `rndl_erase` (22,766) and renderlit's span fill (222,841).
 There is no multiply anywhere in the frame, and `transform3d.z80s` and
 `democube.z80s` are not needed at all — the harness keeps four of their
 labels alive (`demo_screen`, `t3d_m`, `t3d_tx/ty/tz`, 31 bytes) because
@@ -81,10 +82,10 @@ Two more:
 
 ## What it does not buy
 
-The fill is 92% of what is left, so this is now a rasteriser benchmark. 25 Hz
-(240,000 T-states) needs another 45,000: the mean frame is 284,455 but the
-minimum is 156,510, so the cheap orientations are already inside 25 Hz and
-the expensive ones are not. Fewer, larger pieces would help everywhere;
+The fill is 91% of what is left, so this is now a rasteriser benchmark, and
+it lands **5,608 T-states short of 25 Hz**: 240,000 is the budget and the
+mean frame is 245,608, with the minimum at 145,060 and the maximum at
+305,889. Most orientations already hold 25 Hz; the broadside ones do not. Fewer, larger pieces would help everywhere;
 so would a span fill that pushes constant runs the way `chequer3` does.
 
 ## Invariants

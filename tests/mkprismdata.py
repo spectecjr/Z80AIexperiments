@@ -33,6 +33,10 @@ def main(path):
             if n not in norms:
                 norms.append(n)
             faces += [norms.index(n), (64 * off) & 0xFF, (64 * off) >> 8 & 0xFF]
+    for i, mask in enumerate(P.BURIED):             # bit 7: never drawn
+        for e in range(4):
+            if (mask >> e) & 1:
+                faces[3 * (6 * i + e)] |= 0x80
 
     vals = [sorted(set(v[a] for v in
                        [P.verts(q)[i] for q, _ in P.PIECES for i in range(8)]))
@@ -61,7 +65,7 @@ def main(path):
              "                ; leave that normal's N.T, then the two",
              "\n".join("        DEFW pr_face + %d, pr_nsh + %d\n"
                         "        DEFB %d, %d"
-                        % (3 * f + 1, 3 * faces[3 * f] + 1, i, j)
+                        % (3 * f + 1, 3 * (faces[3 * f] & 0x7F) + 1, i, j)
                         for i, j, f in P.PAIRS),
              "\npr_bit:         ; a bit a piece",
              defb([1 << i for i in range(len(P.PIECES))]),

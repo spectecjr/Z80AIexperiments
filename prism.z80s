@@ -758,7 +758,9 @@ pr_on1:
         LD   (pr_fi),A
 pr_on2:
         LD   HL,(pr_fp)
-        LD   A,(HL)             ; which normal this face has
+        LD   A,(HL)             ; which normal this face has, and whether
+        LD   (pr_fn),A          ; the face is inside the solid at all
+        AND  0x7F
         INC  HL
         LD   E,(HL)
         INC  HL
@@ -786,6 +788,11 @@ pr_on2:
         RLA
         SBC  A,A
         LD   C,A
+        LD   A,(pr_fn)          ; unless it is a join with the next piece
+        AND  0x80               ; along, in which case it is never on the
+        JR   Z,pr_on8           ; outside of anything
+        LD   C,0
+pr_on8:
         LD   A,(pr_fi)
         LD   B,A
         LD   A,(pr_fsh)
@@ -845,6 +852,7 @@ pr_zp:          DEFS 2
 pr_pi:          DEFS 1
 pr_fp:          DEFS 2
 pr_fi:          DEFS 1
+pr_fn:          DEFS 1
 pr_off:         DEFS 2
 pr_fsh:         DEFS 1
 pr_ord:         DEFS PR_NP

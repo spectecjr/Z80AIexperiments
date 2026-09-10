@@ -64,7 +64,7 @@ def build(recip, lite):
                 bx0, bx1 = min(bx0, x), max(bx1, x)
                 by0, by1 = min(by0, y), max(by1, y)
             # a piece whose ramp starts at zero gives the level itself
-            vis, lev = P.light(lo.m, lo.p, lite, (quad, 0))
+            vis, lev = P.light(lo.m, lo.p, lite, (quad, 0), P.BURIED[i])
             nib[i] = [lev[k] | (0 if vis[k] else 8) for k in range(6)]
         order = P.order(lo.m, lo.p, P.boxes([pp[i] for i in range(len(pp))]))
 
@@ -81,7 +81,7 @@ def build(recip, lite):
 
         buf = bytearray(raster.STRIDE * raster.H)
         for i in order:
-            vis, col = P.light(lo.m, lo.p, lite, P.PIECES[i])
+            vis, col = P.light(lo.m, lo.p, lite, P.PIECES[i], P.BURIED[i])
             for fi, idx in enumerate(raster.FACES):
                 if vis[fi]:
                     raster.fill_quad(buf, [pp[i][k] for k in idx], col[fi])
