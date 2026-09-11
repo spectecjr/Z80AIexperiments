@@ -172,7 +172,8 @@ def salience(mag, fr, lo, hi, partials=5, weight=0.8):
 
 
 def track_bass(x, sr, rate, lo=36.0, hi=170.0, win=16384, thresh=0.12,
-               cents_per_step=15.0, oct_ratio=0.05):
+               cents_per_step=15.0, oct_ratio=0.05, min_fund=0.0,
+               mode_frames=41):
     """Bass pitch from a long window, by harmonic sum.
 
     Autocorrelation is the obvious tool and it is the wrong one: a periodic
@@ -224,6 +225,25 @@ def track_bass(x, sr, rate, lo=36.0, hi=170.0, win=16384, thresh=0.12,
             b = np.clip(hbins[:, h], 0, len(S) - 1)
             near = np.maximum(np.maximum(pad[b - 1], pad[b]), pad[b + 1])
             sal += near / (h + 1.0)             # later harmonics weigh less
+        # A candidate an octave below a real note scores well on any
+        # harmonic sum, because every harmonic of the note is also a
+        # harmonic of the half - and the odd-harmonic test cannot save it in
+        # a full mix, where other instruments supply energy at 3f/2 and 5f/2.
+        # Measured against a score: the bass came back one or two octaves
+        # low with the right pitch class, and disabling the octave descent
+        # entirely changed nothing, because the sum was picking the
+        # subharmonic outright. So a candidate must HAVE a fundamental: its
+        # own first partial, against the loudest partial it claims.
+        if min_fund > 0:
+            first = np.maximum(pad[np.clip(hbins[:, 0], 0, len(S) - 1)],
+                               0.0)
+            loudest = np.zeros(n_cand)
+            for h in range(5):
+                b = np.clip(hbins[:, h], 0, len(S) - 1)
+                loudest = np.maximum(loudest, pad[b])
+            sal = np.where(first >= min_fund * loudest, sal, 0.0)
+            if sal.max() <= 0:
+                continue
         j = int(np.argmax(sal))
         f = cand_hz[j]
         # the octave question. The sum above is pulled to whichever partial
@@ -246,7 +266,24 @@ def track_bass(x, sr, rate, lo=36.0, hi=170.0, win=16384, thresh=0.12,
         strength[i] = sal[j]
     if strength.max() > 0:
         out[strength < thresh * strength.max()] = 0.0
-    med = out.copy()                            # median filter over the gaps
+    # A MODE filter, on semitones, not a median on frequencies. A held bass
+    # note makes the tracker alternate between two adjacent semitones frame
+    # by frame - measured, F#1 G1 F#1 G1 across four seconds of one note -
+    # and a median of a 50/50 alternation is whichever side it fell on, so
+    # the note comes apart into dozens of fragments. The commonest semitone
+    # over a window cannot alternate. A score of the same performance says
+    # the notes there are 4.50 s long and the tracker was calling them 0.62.
+    if mode_frames > 1:
+        h = mode_frames // 2
+        mid = np.array([to_midi(v) if v > 0 else 0.0 for v in out])
+        sm = np.zeros(n)
+        for i in range(n):
+            w = [int(round(q)) for q in mid[max(0, i - h):i + h + 1] if q > 0]
+            if len(w) > h // 2:
+                vals, counts = np.unique(w, return_counts=True)
+                sm[i] = from_midi(float(vals[int(np.argmax(counts))]))
+        return sm
+    med = out.copy()
     for i in range(n):
         v = [q for q in out[max(0, i - 2):i + 3] if q > 0]
         med[i] = float(np.median(v)) if len(v) >= 2 else 0.0
@@ -683,7 +720,7 @@ def track_struck(mag, fr, lo=450.0, hi=1700.0, rate=50, back=4,
     return out
 
 
-def legato(notes, min_frames=8, join=3, max_hold=28):
+def legato(notes, min_frames=8, join=3, max_hold=28, tol=0):
     """A note list as a melody: no slivers, no restarts on the same note.
 
     What notes_of produces is a frame-by-frame pitch decision quantised to
@@ -700,11 +737,20 @@ def legato(notes, min_frames=8, join=3, max_hold=28):
     """
     if not notes:
         return []
+    # `tol` lets neighbours within a semitone or two merge, keeping the
+    # pitch of whichever was longer. A tracker on a held bass note wobbles
+    # between adjacent semitones, and requiring equality then cuts one note
+    # into dozens: measured against a score, a 4.50 s bass note came back as
+    # a median of 0.62 s, a seventeenth of its length. Smoothing the pitch
+    # track instead got the lengths right and cost 15 points of pitch-class
+    # accuracy, because it smears through the note changes that are real.
     out = []
     for start, length, pitch in sorted(notes):
-        if out and out[-1][2] == pitch and start <= out[-1][0] + out[-1][1] + join:
+        if out and abs(out[-1][2] - pitch) <= tol \
+                and start <= out[-1][0] + out[-1][1] + join:
             a, l, p = out[-1]
-            out[-1] = (a, max(l, start + length - a), p)
+            out[-1] = (a, max(l, start + length - a),
+                       p if l >= length else pitch)
         else:
             out.append((start, length, pitch))
     kept = []
@@ -733,6 +779,49 @@ def legato(notes, min_frames=8, join=3, max_hold=28):
             out[-1] = (a, max(l, start + length - a), p)
         else:
             out.append((start, length, pitch))
+    return out
+
+
+def trim_tails(notes, mag, fr, rate=50, drop=0.45, keep=3, floor=0.6,
+               hold=3):
+    """Shorten each note to where its own partial stops being loud.
+
+    A pitch tracker ends a note when the pitch stops being detectable, and
+    reverb keeps it detectable long after the player let go. Measured
+    against a score of the same performance: detected melody notes ran
+    1.22x the written length, and a bell's strike partial stays within 12 dB
+    of its own peak for a further 0.15 s after the written note-off.
+
+    So the end of a note is where its energy has fallen to `drop` of the
+    peak it reached inside the note - which is a decay, and is what a player
+    hears as the note ending - rather than where the pitch disappears into
+    the room.
+    """
+    step = fr[1] - fr[0]
+    out = []
+    for start, length, pitch in notes:
+        f = from_midi(pitch)
+        b = int(round(f / step))
+        if not (0 < b < mag.shape[1] - 2) or length <= keep:
+            out.append((start, length, pitch))
+            continue
+        a = max(0, min(start, len(mag) - 1))
+        e = mag[a:a + length, max(0, b - 2):b + 3].max(axis=1)
+        if not len(e) or e.max() <= 0:
+            out.append((start, length, pitch))
+            continue
+        peak = float(e.max())
+        end = len(e)
+        # the drop has to be SUSTAINED, and the note may not lose more than
+        # (1 - floor) of itself. Without either guard this trims almost
+        # everything to the minimum on material whose notes do not decay:
+        # measured, two recordings' melodies went to a median of 0.08 s,
+        # the floor, and their peak coverage fell by 9 points.
+        for i in range(max(keep, int(floor * len(e))), len(e) - hold):
+            if (e[i:i + hold] < drop * peak).all():
+                end = i
+                break
+        out.append((start, max(keep, end), pitch))
     return out
 
 
@@ -777,7 +866,12 @@ def transcribe(x, sr, rate=50, melody="loudest"):
     step16 = max(1.0, beat / 4.0)
     grid = (float(phase) % step16, step16)
     drums = drums_of(perc, fr, fl, rate, grid=None)
-    bass = track_bass(mono, sr, rate)
+    # the mode window at about half a beat: long enough to outvote a
+    # semitone alternation, short enough not to smear a moving bass line.
+    # Fixed at 41 frames it was right for one recording at 80 bpm and took
+    # 9 points of peak coverage off another.
+    bass = track_bass(mono, sr, rate,
+                      mode_frames=max(5, int(round(beat / 2)) | 1))
     # A kick is a pitch too - 40 to 60 Hz of it - and the bass tracker will
     # happily report it. Measured on a recording with eighth-note kicks, the
     # bass line came back alternating E1 with a different note every time,
@@ -836,8 +930,9 @@ def transcribe(x, sr, rate=50, melody="loudest"):
     # recordings, snapping cost both measures: peak coverage 58.7% -> 56.5%
     # and 59.6% -> 59.1%. A 9.375-frame grid moves a note by up to 94 ms,
     # and on an unquantised performance there is nothing there to snap to.
-    bass_notes = notes_of(bass, rate, None, 3)
-    lead_notes = notes_of(lead, rate, None, 3)
+    bass_notes = legato(notes_of(bass, rate, None, 3), min_frames=6,
+                        max_hold=int(round(beat)), tol=1)
+    lead_notes = trim_tails(notes_of(lead, rate, None, 3), harm, fr, rate)
     lead_fixed = octave_fixed(harm, fr, lead_notes)
     bass_fixed = octave_fixed(harm, fr, bass_notes)
     chords = key_quality(chords_of(lead_mag, fr, rate, beat, phase,
@@ -861,4 +956,7 @@ def transcribe(x, sr, rate=50, melody="loudest"):
             "melody_is_struck": melody == "struck",
             "chords": chords,
             "drums": drums,
+            # a loudness envelope, one value a frame: the arranger uses it
+            # for dynamics the way a score would use velocities
+            "env": np.sqrt((mag ** 2).sum(axis=1)),
             "flux": fl}

@@ -159,8 +159,13 @@ def main():
     # either - what must never happen is a different PITCH CLASS. (It gave
     # E1 once, two semitones out, because the candidate grid's floor sat at
     # 40 Hz and the octave search piled up against it.)
-    bb = [T.from_midi(p) for _s, _l, p in sc["bass"]]
-    med = float(np.median(bb)) if bb else 0.0
+    # weighted by how long each note lasts, which is what "the bass note"
+    # means: an unweighted median lets a dozen short mistakes outvote four
+    # long correct notes, and it did.
+    held = []
+    for _s, l, p in sc["bass"]:
+        held += [T.from_midi(p)] * max(1, int(l))
+    med = float(np.median(held)) if held else 0.0
     cents = 1200 * np.log2(med / 36.71) if med else 999
     bad += check("bass note", "%.1f Hz %s" % (med, note_of(med) if med else "-"),
                  "D, at D1 or D2", med and min(abs(cents), abs(cents - 1200)) < 60)

@@ -172,6 +172,31 @@ class Out:
         return frames
 
 
+def detune_hz(hz, units, clock=CLOCK):
+    """A frequency moved by whole divider units, the chip's own detune.
+
+    The SAA1099 divides its clock by 511-n, so the only detune it can
+    express is an integer change in n, and what that is worth in cents
+    depends where in the range the note sits - 6.7 cents at 110 Hz for one
+    unit, 3.7 at 1 kHz. Two channels on one note a unit apart beat at 0.4
+    to 2.2 Hz across that range, which is a chorus and is the only timbre
+    control this chip has: there is no filter, and the envelope generators
+    shape amplitude at a rate this code already drives at 50 Hz.
+    """
+    if not units:
+        return hz
+    best = None
+    for octave in range(8):
+        n = 511 - (CLOCK / 512.0) * (1 << octave) / hz
+        if -1.0 <= n <= 256.0:
+            nn = min(255, max(0, int(round(n)) + units))
+            got = (CLOCK / 512.0) * (1 << octave) / max(1, 511 - nn)
+            err = abs(math.log(got / hz))
+            if best is None or err < best[0]:
+                best = (err, got)
+    return best[1] if best else hz
+
+
 def decay(level, k, fall, floor=0.55):
     """A level k frames into a note, never falling past a sustain.
 
@@ -182,6 +207,35 @@ def decay(level, k, fall, floor=0.55):
     silence.
     """
     return int(round(max(level * floor, level - fall * k)))
+
+
+def loudness_of(notes, env, rate=50, lo=0.88):
+    """A level multiplier per note, from how loud its onset actually was.
+
+    The score of one recording carries 27 distinct velocities on its melody
+    and 19 on its organ, all of which a fixed level per part throws away.
+    Audio has no velocities, but it has the energy at each note's start,
+    which is the same information measured rather than recorded.
+
+    `lo` is the floor, and for the lead it has to be high enough that its
+    quietest note still beats the bass: at 0.55 a lead at level 15 drops to
+    8 under a bass at 12, and a lead that is not the loudest voice is what a
+    listener reports as a missing melody. The test for that caught it twice,
+    at 46% and then 73% of the lead's frames where the rule is 85%. With
+    lead 15 and bass 12 the floor cannot go below 0.8, and 0.88 leaves three
+    levels of dynamics with a level to spare.
+    """
+    if env is None or not len(env):
+        return [1.0] * len(notes)
+    out = []
+    for start, length, _p in notes:
+        a = max(0, min(len(env) - 1, int(start)))
+        b = max(a + 1, min(len(env), a + max(2, int(0.06 * rate))))
+        out.append(float(env[a:b].max()))
+    if not out:
+        return out
+    top = max(out) or 1.0
+    return [lo + (1.0 - lo) * min(1.0, v / top) for v in out]
 
 
 def fold_lead(notes, window=7, span=4, fixed=None):
@@ -223,16 +277,18 @@ def fold_lead(notes, window=7, span=4, fixed=None):
 def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
           arp_step=4, drum_lvl=12, bass_min=60.0, kick_len=5, hold=10,
           top=2700.0, fold=7, vib_cents=14.0, vib_frames=10,
-          vib_after=8):
+          vib_after=8, detune=2, chorus_steals=False):
     """A transcription to six channels of chip, with nothing left out."""
     n = sc["frames"]
     o = Out(n)
     voices = sc.get("voices") or [[], []]
 
-    def lay(ch, notes, level, fall, cap=top, vib=None):
+    def lay(ch, notes, level, fall, cap=top, vib=None, dyn=None, det=0):
         """A part onto a channel, note by note."""
         on = np.zeros(n, bool)
-        for start, length, pitch in notes:
+        gains = dyn if dyn is not None else [1.0] * len(notes)
+        for idx, (start, length, pitch) in enumerate(notes):
+            lvl = max(1, int(round(level * gains[idx])))
             hz = midi_hz(pitch)
             while hz > cap:                     # a square at 3 kHz whistles
                 hz /= 2.0                       # over the arrangement
@@ -249,7 +305,9 @@ def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
                     depth = vib[0] * min(1.0, (k - vib[2]) / float(vib[2]))
                     f = hz * 2 ** (depth * math.sin(
                         2 * math.pi * (k - vib[2]) / vib[1]) / 1200.0)
-                o.tone(ch, i, f, decay(level, k, fall))
+                if det:
+                    f = detune_hz(f, det)
+                o.tone(ch, i, f, decay(lvl, k, fall))
                 on[i] = True
         return on
 
@@ -269,8 +327,10 @@ def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
                 bass_on[start + k] = True
 
     lead = fold_lead(sc["lead"], fold, fixed=sc.get("lead_fixed"))
+    env = sc.get("env")
     lead_on = lay(1, lead, lead_lvl, 0.06, vib=(vib_cents, vib_frames,
-                                                vib_after))
+                                                vib_after),
+                  dyn=loudness_of(lead, env, sc.get("rate", 50)))
     v2_on = lay(2, voices[0] if len(voices) > 0 else [], v2_lvl, 0.05)
     v3_on = lay(4, voices[1] if len(voices) > 1 else [], v3_lvl, 0.05)
 
@@ -293,6 +353,7 @@ def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
     # the chord, arpeggiated, every frame of every chord - and the third
     # voice holds a chord tone wherever the tracker gave it nothing, so
     # neither channel ever falls silent mid-phrase
+    arp_pairs = []
     for start, length, root, kind in sc["chords"]:
         # each chord tone at two octaves, alternating: six steps instead of
         # three, and it reaches into 260-520 Hz where otherwise only the
@@ -304,11 +365,24 @@ def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
                 i = start + k + j
                 if 0 <= i < n:
                     o.tone(3, i, hz, decay(arp_lvl, j, 1.2))
+                    arp_pairs.append((i, hz, j))
         fill = midi_hz(notes[2])                # the fifth, up where it
         for k in range(length):                 # will not mud the root
             i = start + k
             if 0 <= i < n and not v3_on[i]:
                 o.tone(4, i, fill * 2, max(0, v3_lvl - 3))
+
+    # the arpeggio doubled in unison a divider away, wherever the third
+    # voice is not using its channel: one line thickened sounds fuller than
+    # two lines bare, and it needs no transcription to be right
+    if detune:
+        for i, hz, j in arp_pairs:
+            if not (0 <= i < n):
+                continue
+            if chorus_steals and o.sounded[4, i]:
+                o.force(4, i, detune_hz(hz, detune), decay(arp_lvl, j, 1.2))
+            elif not o.sounded[4, i]:
+                o.tone(4, i, detune_hz(hz, detune), decay(arp_lvl - 1, j, 1.2))
 
     # a part whose tracking drops out for a moment holds instead of
     # flickering: a note that stops for four frames and starts again is

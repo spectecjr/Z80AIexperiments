@@ -79,13 +79,92 @@ trackers. Two things had to be fixed before it was honest:
 | before | 2.84 | 52% | 0.92 |
 | after | **3.26** | **17%** | 1.36 |
 
+## 3a. Timbre, and what the chip actually has
+
+Asked to make it fuller, the honest inventory of what this chip can do to
+its own sound is short. There is no filter. The envelope generators shape
+amplitude at a rate this code already drives at 50 Hz, so they buy nothing
+a per-frame level does not. What is left is **detuning**, and it is enough.
+
+The SAA1099 divides its clock by 511−n, so the only detune it can express
+is an integer change in n, and what that is worth depends where the note
+sits: 6.7 cents at 110 Hz for one unit, 3.7 at 1 kHz. Two channels on one
+note a unit apart therefore beat at 0.4 Hz down low and 2.2 Hz up high —
+which is a chorus.
+
+The mistake worth recording: ch4 was first given the harmony's *top line*
+with a detune applied, and the disassembler found **no detuned pair at
+all**. A detune only beats against the same note; two channels on two
+different notes are just two notes. Doubling the arpeggio in unison instead
+gives a pair beating 0.5–6.2 Hz over 8,002 of 8,140 frames at one unit, or
+1.0–12.5 Hz at two. One line thickened sounds fuller than two lines bare,
+and with a median of three distinct pitches in the score against five tone
+channels there is room to spend.
+
+Also added, all of it from the score rather than inferred:
+
+- **velocity.** The bell carries 27 distinct velocities from 92 to 127 and
+  the organ 19 from 65 to 101. A fixed level per part threw all of it away.
+- **toms as pitched tones.** GM 41, 43, 45, 47, 48 and 50 are toms, and
+  reading them as noise loses the only drum in the kit that plays a note.
+- **the melody an octave doubled**, and a resting channel lent to whatever
+  else is sounding: the melody rests 59% of this score.
+
+| | voices a frame | frames with ≤2 | pairs a frame |
+|---|---|---|---|
+| the first score-driven version | 2.84 | 52% | 0.92 |
+| with the chord recovered | 3.26 | 17% | 1.36 |
+| with velocity, fill and chorus | **3.62** | **7%** | 1.89 |
+
+## 3b. Note lengths, measured against the score
+
+Reported: "the MP3 version has a longer decay and a lot of reverb, so the
+notes go on longer than the ones driven by the MIDI." Both halves of that
+turned out to be measurable, and one of them was the opposite way round:
+
+| | detected | written | ratio |
+|---|---|---|---|
+| the melody | 0.38 s | 0.31 s | **1.22×** |
+| the bass | 0.26 s | 4.50 s | **0.06×** |
+
+The melody over-hangs because a pitch tracker ends a note when the pitch
+stops being detectable, and reverb keeps it detectable: a bell's strike
+partial stays within 12 dB of its own peak for a further 0.15 s after the
+written note-off. `trim_tails` ends a note where its own energy has fallen
+to 45% of the peak it reached *inside* the note — a decay, which is what a
+player hears as the end — and the ratio becomes **1.02×**.
+
+The bass was worse and in the other direction: a 4.50 s held note was
+coming back as a median of 0.62 s, a seventeenth of itself. The cause is a
+semitone alternation — measured, `F#1 G1 F#1 G1` across four seconds of one
+note — and a median filter on a 50/50 alternation returns whichever side it
+fell on, so the note comes apart into dozens of fragments. A **mode** filter
+on semitones cannot alternate: at 0.82 s it gave notes 0.92× the written
+length *and* raised pitch-class accuracy from 88% to 89%, where a median
+filter of the same width got the lengths right and cost 15 points.
+
+Two guards were needed, both found by the other recordings:
+
+- `trim_tails` may not cut a note below 60% of itself, and the drop must
+  hold for three frames. Without either, material whose notes do not decay
+  went to a median of 0.08 s — the floor — and lost 9 points of coverage.
+- the mode window follows the tempo (about half a beat) rather than being
+  fixed at 41 frames, which was right for one recording at 80 bpm and took
+  9 points off another.
+
+Both measures then read about a point *below* the fragmented version —
+fit 51.9% against 52.5%, coverage 58.0% against 58.8% on one recording.
+That is the same disagreement as `legato` in `chiparr.md`: a frame-local
+measure prefers fragments, because a fragment tracks the moment-to-moment
+spectrum more closely than a held note. The score says the held notes are
+right, so the score wins.
+
 ## 4. What it says about the audio arrangements
 
-They are **denser than the music**. The score has three to four parts
-sounding at once; the audio-derived arrangement plays 4.3 voices a frame.
-Some of those voices were the partials of notes already being played
-elsewhere — which is what "too thin, add more voices" led to, and the score
-says the thinness was never a shortage of voices.
+The score sounds a median of **three distinct pitches** at once (mean 3.60,
+at most 8) against five tone channels, so there is headroom — but not as
+much as "add more voices" assumed, and some of what the audio path plays as
+separate voices are the partials of notes already sounding elsewhere.
 
 And the perceptual measure prefers the wrong one: the arrangement built
 from the exact score scores **48.3%** where the one built from the audio
@@ -95,3 +174,49 @@ score version plays what was written. `percept.md` §5a says the same thing
 about a smaller decision; this is the same finding at the scale of a whole
 arrangement, and it means the fit number cannot be used to choose between
 them.
+
+## 5. Does any of it transfer to a recording with no score?
+
+Some of it, and it is worth being exact about which.
+
+**Transfers as-is, no score needed.** The tempo fix (scoring a grid by what
+it explains, refining the period to a hundredth of a frame, scanning the
+whole range); leaving notes unquantised; `legato`; `trim_tails` and the
+mode-filtered bass, now that the score has calibrated their thresholds;
+and the chip-side chorus, which is arithmetic on register values.
+
+**Transfers, and measured positive.** Dynamics. Audio has no velocities but
+it has the energy at each note's start, which is the same information
+measured rather than recorded. `loudness_of` uses it: fit 52.2% → 52.5% and
+the lead's level spread 1.31 → 1.67, for nothing.
+
+| | fit | peaks | lead level spread |
+|---|---|---|---|
+| fixed levels | 52.2% | 58.8% | 1.31 |
+| **dynamics from the audio** | **52.5%** | 58.8% | **1.67** |
+
+One trap in it: the floor must be high enough that the lead's quietest note
+still beats the bass. At 0.55 a lead at level 15 drops to 8 under a bass at
+12, and the test for "the lead is the loudest voice" caught that twice, at
+46% and then 73% where the rule is 85%. With lead 15 and bass 12 the floor
+cannot go below 0.8; it is 0.88.
+
+**Transfers mechanically but not economically.** The chorus. It needs a
+spare channel and the audio path has none — it fills all five tone channels
+with distinct lines. Taking one for a chorus gives a real pair (0.5–3.5 Hz
+over 2,926 frames) and costs:
+
+| | fit | peaks |
+|---|---|---|
+| five distinct voices | 52.5% | **58.8%** |
+| four voices and a chorus | 51.4% | **46.9%** |
+
+Twelve points of coverage for a chorus is a bad trade on these numbers. It
+is available as `detune` with `chorus_steals`, off by default.
+
+**Does not transfer.** Which part is the melody. The score settles it by
+name; audio does not, and `percept.py` prefers the wrong answer by a point
+and a half (`percept.md` §5a). The same for a bell's written octave: the
+score says F3–G4 and every spectral method says C6, because that is where a
+struck metal tone puts its energy. Both are right about different things,
+and only a score knows which one the composer wrote.
