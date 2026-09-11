@@ -206,6 +206,33 @@ bass. The struck tracker returns 7 of the 8 strikes (it misses only the one
 at t=0, before the onset detector has any history). The old tracker returns
 `G4 G4 G4 G4 G4 G4 G4 G4` — the organ, never moving, 0 of 8.
 
+### The arpeggio was not in time, and never had been
+
+Reported: "something weird is happening with the timing — some of it might
+be that the arpeggio isn't in time with the music." It was not, and the
+reason is that its step was a **fixed four frames**, which is 12.5 steps a
+second whatever the tempo:
+
+| tempo | a sixteenth | four frames is |
+|---|---|---|
+| 80 bpm | 9.38 frames | 0.43 of a sixteenth |
+| 103 bpm | 7.25 frames | 0.55 |
+| 130 bpm | 5.77 frames | 0.69 |
+| 160 bpm | 4.69 frames | 0.85 |
+
+A free-running oscillator against the music, in other words, at a rate
+bearing no relation to it. Measured on one recording, **16% of its steps
+landed within a frame of the beat grid — where a grid that spacing admits
+32% by chance.** The arpeggio was worse than random.
+
+The step is a subdivision of the beat now, and its positions come from the
+grid and are rounded only at the point of use, so they cannot accumulate
+error either: 100% of steps on the grid, and the distance from it is 0.24
+frames at the start of a recording and 0.26 at the end. That was the same
+error as `int(round(beat / 4))` in the grid itself and
+`int(round(beat_frames * per_chord))` in the chord windows — a musical
+quantity rounded to whole frames, three times in three places.
+
 ### The melody as a line, not as a pitch decision a frame
 
 Reported: "the structure keeps getting lost." The cause is visible in the

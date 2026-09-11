@@ -518,9 +518,19 @@ def chords_of(mag, fr, hz, beat_frames, phase, lo=150.0, hi=2000.0,
         if m <= 0:
             continue
         pc[:, int(round(m)) % 12] += mag[:, b]
+    # float positions, rounded only at use. Rounding the window to whole
+    # frames first is the same drift that put the tempo three halves out:
+    # at 103.4 bpm a two-beat window is 58.03 frames, and 58 loses a frame
+    # every twenty bars.
     out = []
-    step = int(round(beat_frames * per_chord))
-    for start in range(phase, len(mag) - step, step):
+    span = beat_frames * per_chord
+    step = max(1, int(round(span)))
+    k = 0
+    while True:
+        start = int(round(phase + k * span))
+        k += 1
+        if start + step >= len(mag):
+            break
         v = pc[start:start + step].sum(axis=0)
         if v.sum() <= 0:
             continue

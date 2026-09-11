@@ -275,7 +275,7 @@ def fold_lead(notes, window=7, span=4, fixed=None):
 
 
 def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
-          arp_step=4, drum_lvl=12, bass_min=60.0, kick_len=5, hold=10,
+          arp_div=4, drum_lvl=12, bass_min=60.0, kick_len=5, hold=10,
           top=2700.0, fold=7, vib_cents=14.0, vib_frames=10,
           vib_after=8, detune=2, chorus_steals=False):
     """A transcription to six channels of chip, with nothing left out."""
@@ -353,17 +353,30 @@ def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
     # the chord, arpeggiated, every frame of every chord - and the third
     # voice holds a chord tone wherever the tracker gave it nothing, so
     # neither channel ever falls silent mid-phrase
+    # The arpeggio's step is a SUBDIVISION OF THE BEAT, not a fixed number
+    # of frames. It was four frames - 12.5 steps a second whatever the
+    # tempo, which is 0.43 of a sixteenth at 80 bpm and 0.85 at 160, so the
+    # arpeggio ran as a free oscillator against the music and drifted
+    # through it. Positions come from the grid and are rounded only at use,
+    # so they cannot accumulate error either.
+    beat = float(sc.get("beat") or 25.0)
+    g_phase, _g_step = sc.get("grid", (0.0, beat / 4.0))
+    span = max(2.0, beat / float(arp_div))
     arp_pairs = []
     for start, length, root, kind in sc["chords"]:
         # each chord tone at two octaves, alternating: six steps instead of
         # three, and it reaches into 260-520 Hz where otherwise only the
         # lead goes. Measured better in all three bands than a flat triad
         notes = [48 + root + s + o for s in TRIAD[kind] for o in (0, 12)]
-        for k in range(0, length, arp_step):
-            hz = midi_hz(notes[(k // arp_step) % len(notes)])
-            for j in range(arp_step):
-                i = start + k + j
-                if 0 <= i < n:
+        first = int(math.ceil((start - g_phase) / span))
+        last = int(math.floor((start + length - g_phase) / span))
+        for m in range(first, last + 1):
+            a = int(round(g_phase + m * span))
+            b = int(round(g_phase + (m + 1) * span))
+            hz = midi_hz(notes[m % len(notes)])
+            for j in range(max(1, b - a)):
+                i = a + j
+                if 0 <= i < n and start <= i < start + length:
                     o.tone(3, i, hz, decay(arp_lvl, j, 1.2))
                     arp_pairs.append((i, hz, j))
         fill = midi_hz(notes[2])                # the fifth, up where it

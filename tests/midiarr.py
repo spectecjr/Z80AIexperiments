@@ -142,7 +142,8 @@ def notes_in_frames(track, n, rate=RATE, offset=0.0):
 
 
 def build(tracks, n, rate=RATE, offset=0.0, bass_lvl=12, mel_lvl=15,
-          oct_lvl=8, third_lvl=7, arp_lvl=6, arp_step=4, drum_lvl=12,
+          oct_lvl=8, third_lvl=7, arp_lvl=6, arp_div=4, beat=None,
+          drum_lvl=12,
           bass_min=60.0, top=2600.0, kick_len=5, mel_octave=1,
           detune=2, vib_cents=14.0, vib_frames=10, vib_after=8,
           velocity=True, fill=True):
@@ -167,6 +168,9 @@ def build(tracks, n, rate=RATE, offset=0.0, bass_lvl=12, mel_lvl=15,
     """
     parts = classify(tracks)
     out = C.Out(n)
+    # a subdivision of the beat, like chiparr - a fixed frame count is a
+    # free oscillator against the music
+    span = max(2.0, (beat if beat else 30.0) / float(arp_div))
 
     def lay(ch, rows, level, fall, shift=0, cap=top, vib=False, det=0,
             vel=None, only_if_silent=False):
@@ -225,14 +229,16 @@ def build(tracks, n, rate=RATE, offset=0.0, bass_lvl=12, mel_lvl=15,
                   key=lambda t: -len(t.notes))
     if pads:
         live = polyphony(pads[0], n, rate, offset)
-        for i in range(0, n, arp_step):
-            row = live[i] if i < len(live) else []
+        steps = int(n / span) + 1
+        for m in range(steps):
+            a, b = int(round(m * span)), int(round((m + 1) * span))
+            row = live[a] if a < len(live) else []
             if not row:
                 continue
-            pitch = row[(i // arp_step) % len(row)]
-            for j in range(arp_step):
-                if i + j < n:
-                    out.tone(3, i + j, C.midi_hz(pitch),
+            pitch = row[m % len(row)]
+            for j in range(max(1, b - a)):
+                if a + j < n:
+                    out.tone(3, a + j, C.midi_hz(pitch),
                              C.decay(arp_lvl, j, 1.2))
         # and its top line as a sustained voice, which is what a drawbar
         # organ sounds like: the chord's top note held
@@ -244,11 +250,11 @@ def build(tracks, n, rate=RATE, offset=0.0, bass_lvl=12, mel_lvl=15,
         # than two lines bare, and with a median of three distinct pitches
         # in the score against five tone channels there is room to spend.
         arp_rows = []
-        for i in range(0, n, arp_step):
-            row = live[i] if i < len(live) else []
+        for m in range(steps):
+            a, b = int(round(m * span)), int(round((m + 1) * span))
+            row = live[a] if a < len(live) else []
             if row:
-                arp_rows.append((i, arp_step, int(row[(i // arp_step)
-                                                     % len(row)])))
+                arp_rows.append((a, max(1, b - a), int(row[m % len(row)])))
         lay(4, arp_rows, third_lvl, 1.2, det=detune)
         if fill:
             # the second voice of the harmony wherever the melody is not
@@ -293,7 +299,8 @@ def main(argv):
     tracks, _tpb, tempos, _sigs = smf.read(argv[1])
     end = max((q.end for t in tracks for q in t.notes), default=0.0)
     n = int(round(end * RATE)) + RATE
-    out, parts = build(tracks, n)
+    beat = 60.0 * RATE / (60e6 / tempos[0][1])
+    out, parts = build(tracks, n, beat=beat)
     for k, v in parts.items():
         if v:
             print("  %-8s %s" % (k, ", ".join((t.name or "?") for t in v)))
