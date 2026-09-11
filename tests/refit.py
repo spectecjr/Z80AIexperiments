@@ -42,6 +42,13 @@ OCTAVES = (-1, 0, 1)            # in octave-register steps
 LEVELS = (-3, 0, 3)
 MELODIC = (0, 1, 2, 3, 4)       # ch5 is noise; an octave means nothing there
 
+# The lead's level is not the search's to lower. Left free, it took 3.5
+# levels off ch1 across a whole recording - the model prefers the spectral
+# balance that makes the melody quieter, and a listener asked for the
+# opposite in so many words. So the search gets the octaves and the
+# accompaniment's levels, and the arrangement keeps its melody.
+NO_QUIETER = (1,)
+
 
 def segments(n_frames, frames_per):
     for a in range(0, n_frames, frames_per):
@@ -49,7 +56,8 @@ def segments(n_frames, frames_per):
 
 
 def refit(out, ref, sr, rate=RATE, segment=2.0, passes=2, model=None,
-          octaves=OCTAVES, levels=LEVELS, channels=MELODIC, verbose=True):
+          octaves=OCTAVES, levels=LEVELS, channels=MELODIC,
+          no_quieter=NO_QUIETER, verbose=True):
     """Search each segment's octaves and levels. Edits `out` in place.
 
     Returns (before, after) as whole-piece fit fractions.
@@ -94,6 +102,8 @@ def refit(out, ref, sr, rate=RATE, segment=2.0, passes=2, model=None,
                 for d_oct in octaves:
                     for d_lvl in levels:
                         if d_oct == 0 and d_lvl == 0:
+                            continue
+                        if ch in no_quieter and d_lvl < 0:
                             continue
                         keep_o = out.oct[ch, a:b].copy()
                         keep_l = out.lvl[ch, a:b].copy()

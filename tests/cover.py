@@ -54,15 +54,23 @@ def source_peaks(path, rate=50, lo=LO, hi=HI, rel=REL, n_fft=4096):
     return out
 
 
-def coverage(peaks, logpath, cents=60.0, harmonics=ODD):
-    """Of those peaks, how many a sounding chip voice stands within."""
-    frames, _hz = saareg.read_log(logpath)
+def coverage(peaks, logpath, cents=60.0, harmonics=ODD, rate=50):
+    """Of those peaks, how many a sounding chip voice stands within.
+
+    `peaks` is one entry a frame at `rate`; a log written at a different
+    rate is stepped through to match, or the two are compared at different
+    points in time and the answer is noise. (Measured: a 200 Hz log scored
+    28% against a 50 Hz peak list, entirely from the misalignment.)
+    """
+    frames, log_hz = saareg.read_log(logpath)
     snaps = saareg.decode(frames)
+    stride = max(1, int(round(float(log_hz) / rate)))
     hit = tot = 0
     for i, pk in enumerate(peaks):
-        if i >= len(snaps):
+        j = i * stride
+        if j >= len(snaps):
             break
-        s = snaps[i]
+        s = snaps[j]
         base = [c["hz"] for c in s["ch"]
                 if c["tone"] and s["enabled"] and max(c["amp"]) > 0
                 and c["hz"] > 0]

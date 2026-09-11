@@ -138,3 +138,57 @@ detectable: the fit alone says the widest space is best.
 It is also the same lesson as `chiparr.md` §1 — a part that goes quiet is a
 part the arrangement has lost — arriving this time as a measurement rather
 than a judgement.
+
+## 6. Where the remaining gap actually is
+
+The refit is worth +2.6 points over a whole recording (54.3% → 56.9%).
+That is real and it is small, and the question worth answering is what the
+other forty points are made of. Three measurements, all on the same 30 s:
+
+**A ceiling.** `arrange.py` — the spectral matcher, six squares fitted to
+the spectrum frame by frame with no musical structure at all and 10.5
+register pairs a frame — reaches **54.2%**. The part-based arrangement
+reaches 50.2%, and 52.7% after the refit. So the arrangement is within
+about one and a half points of what six square waves can be made to do on
+this material by direct fitting. The decisions are nearly spent.
+
+**Timbre is worth more than any of it.** Taking the arrangement's register
+log and resynthesising the *identical notes* with different waveforms:
+
+| the same notes, as | fit |
+|---|---|
+| squares | 45.4% |
+| sawtooths | 48.3% |
+| sine plus two quiet harmonics | **52.0%** |
+
+6.6 points for timbre alone, with every note, level and onset unchanged —
+more than twice what the whole per-segment search bought. (These are lower
+than the chip's own 50.2% because this crude resynthesis lacks the chip's
+amplitude behaviour; the comparison that means something is between the
+three rows.) A square's odd harmonics at 1/k are brighter than almost any
+instrument in a real mix, and the SAA1099 has no filter. That is the
+hardware, and it is most of the gap.
+
+**What the search wants is not always what the listener wants.** Left
+free, the search made these systematic choices over a whole recording:
+
+| channel | octave | level |
+|---|---|---|
+| ch0 bass | **up** in 3,337 frames | +3.3 |
+| ch1 lead | down in 404 | **−3.5** |
+| ch2 second voice | **down** in 3,745 | −2.0 |
+| ch3 arpeggio | **down** in 5,986 | +3.6 |
+| ch4 third voice | down in 2,100 | +1.9 |
+
+Moving voices down is consistent with the timbre finding: stacked squares
+pile harsh harmonics into the high bands, and the model prefers them out of
+the way. But it also took three and a half levels off the **lead** — and a
+listener had just asked, in so many words, for the lead to stop
+disappearing. The model prefers a spectral balance that buries the melody.
+
+So `refit.py` keeps a list of channels whose level it may raise but never
+lower, and ch1 is on it. Measured, that constraint costs 0.2 points of fit
+(52.7% → 52.5%) and keeps the lead at level 14.2 instead of 9.9. A
+perceptual model is a better judge than peak-counting and it is still not a
+musician; the arrangement's intentions are inputs to the search, not things
+for it to optimise away.
