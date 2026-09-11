@@ -19,10 +19,20 @@ The search is cheap for one specific reason: on the SAA1099 an octave is
 the octave register plus one with the SAME frequency byte, so a candidate
 costs an array add, a 12 ms render and a 21 ms score.
 
+A search given one measure will find what that measure cannot see, so it
+is also handed a second one it is not allowed to optimise: the peak
+coverage of `cover.py`, which a move must not reduce in its own segment
+whatever it does for the fit. Without that guard, every recording tried
+gained perceptual fit and lost coverage - 1.2, 2.8 and 5.9 points - which
+is the search buying spectral balance with the recording's actual notes.
+With it, both move the same way: measured on 40 s, fit +8.3 and coverage
++2.5, where the unguarded search's extra 2.5 points of fit cost 7.2 points
+of coverage.
+
 What it is NOT: a way to make a chip sound like a record. Five squares
-against a full mix has a ceiling, and the measurements in chiparr.md say
-where it is. This closes the part of the gap that is decisions rather than
-hardware.
+against a full mix has a ceiling, and the measurements in percept.md §6 say
+where it is - and that most of the remaining gap is timbre, which no
+arrangement decision can reach.
 
 Written by Claude (Opus) for the Z80AIexperiments repo.
 """
@@ -57,7 +67,7 @@ def segments(n_frames, frames_per):
 
 def refit(out, ref, sr, rate=RATE, segment=2.0, passes=2, model=None,
           octaves=OCTAVES, levels=LEVELS, channels=MELODIC,
-          no_quieter=NO_QUIETER, verbose=True):
+          no_quieter=NO_QUIETER, peaks=None, slack=0.0, verbose=True):
     """Search each segment's octaves and levels. Edits `out` in place.
 
     Returns (before, after) as whole-piece fit fractions.
@@ -70,6 +80,29 @@ def refit(out, ref, sr, rate=RATE, segment=2.0, passes=2, model=None,
     spf = sr // rate                        # audio samples a chip frame
     chosen = 0
     t0 = time.time()
+
+    def held_back(a, b):
+        """The measure the search is NOT allowed to see, as a guard.
+
+        Every track tried gained perceptual fit and LOST peak coverage:
+        -1.2, -2.8 and -5.9 points. The search was buying spectral balance
+        with the recording's actual notes. So a move must not cost coverage
+        in its own segment, whatever it does for the fit.
+        """
+        if peaks is None:
+            return 0.0
+        hit = tot = 0
+        for i in range(a, min(b, len(peaks))):
+            vs = out.sounding_hz(i)
+            if not vs:
+                tot += len(peaks[i])
+                continue
+            vs = np.array([f * h for f in vs for h in (1, 3, 5, 7, 9)])
+            for f in peaks[i]:
+                tot += 1
+                if (np.abs(1200 * np.log2(vs / f)) < 60.0).any():
+                    hit += 1
+        return hit / float(max(1, tot))
 
     def score(a, b):
         """How close this window is now, against the same window of source."""
@@ -90,6 +123,7 @@ def refit(out, ref, sr, rate=RATE, segment=2.0, passes=2, model=None,
         base = score(a, b)
         if base is None:
             continue
+        base_guard = held_back(a, b)
         if first is None:
             first = []
         first.append(base)
@@ -109,7 +143,9 @@ def refit(out, ref, sr, rate=RATE, segment=2.0, passes=2, model=None,
                         keep_l = out.lvl[ch, a:b].copy()
                         out.shift(ch, a, b, d_oct, d_lvl)
                         got = score(a, b)
-                        if got is not None and got > best + 1e-5:
+                        ok = (got is not None and got > best + 1e-5
+                              and held_back(a, b) >= base_guard - slack)
+                        if ok:
                             best, moved, chosen = got, True, chosen + 1
                         else:
                             out.oct[ch, a:b] = keep_o
@@ -136,11 +172,13 @@ def main(argv):
     out = C.build(sc)
     model = percept.Model(sr)
     mono = x.mean(axis=1) if x.ndim > 1 else x
+    import cover
+    peaks = cover.source_peaks(argv[1], RATE)
 
     before = A.render(out.registers(), RATE)
     b0, _ = percept.compare(mono, before, sr, 1e9, model)
     print("  before  %.1f%%" % (100 * b0))
-    refit(out, mono, sr, RATE, seg, model=model)
+    refit(out, mono, sr, RATE, seg, model=model, peaks=peaks)
     after = A.render(out.registers(), RATE)
     a0, _ = percept.compare(mono, after, sr, 1e9, model)
     print("  after   %.1f%%" % (100 * a0))

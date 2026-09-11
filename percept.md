@@ -139,6 +139,44 @@ It is also the same lesson as `chiparr.md` §1 — a part that goes quiet is a
 part the arrangement has lost — arriving this time as a measurement rather
 than a judgement.
 
+## 5a. The guard, and the mistake it caught
+
+§5 says the search space has to stay small and that the rule is both
+measures moving together. That rule was then not enforced in the code, only
+in the choice of space — and the search walked straight through the gap.
+Over three whole recordings, every one gained perceptual fit and **lost**
+peak coverage:
+
+| | fit | peak coverage |
+|---|---|---|
+| first recording | 54.3 → 57.2% | 57.4 → **56.2%** |
+| second | 56.4 → 61.7% | 47.4 → **41.5%** |
+| third | 53.5 → 55.6% | 45.3 → **42.5%** |
+
+A 30 s trial had shown both improving, which is why this was reported as a
+clean gain before the whole thing had been run. It was not one: the search
+was buying spectral balance with the recording's actual notes.
+
+So the guard is now in `refit.py` rather than in the choice of search
+space. A move must not reduce the peak coverage **of its own segment**,
+whatever it does for the fit — the search optimises one measure and is
+graded by a second it cannot see. Measured on 40 s of the second recording:
+
+| | fit | peaks covered |
+|---|---|---|
+| no guard | 46.5 → 57.3% | 43.2 → **38.5%** |
+| guarded | 46.5 → 54.8% | 43.2 → **45.7%** |
+| guarded, 2% slack | 46.5 → 55.7% | 43.2 → 44.4% |
+
+Both move together under the strict guard. The unguarded search's extra 2.5
+points of fit were costing 7.2 points of coverage, so that difference was
+not an improvement in the arrangement at all.
+
+The general lesson, which cost two rounds to learn: a single number is not
+enough to steer a search, however well founded that number is. There has to
+be a second one the search is forbidden to optimise, and it has to be
+checked on the whole piece rather than on a convenient excerpt.
+
 ## 6. Where the remaining gap actually is
 
 The refit is worth +2.6 points over a whole recording (54.3% → 56.9%).

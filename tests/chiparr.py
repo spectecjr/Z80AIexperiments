@@ -116,6 +116,20 @@ class Out:
             v = self.lvl[ch, a:b]
             self.lvl[ch, a:b] = np.where(v > 0, np.clip(v + d_lvl, 1, 15), 0)
 
+    def sounding_hz(self, i):
+        """The frequencies audible in frame i, for a guard to check."""
+        out = []
+        for c in range(6):
+            if self.noise[c, i] or not self.sounded[c, i] \
+                    or self.lvl[c, i] <= 0:
+                continue
+            n = int(self.byte[c, i])
+            if n >= 511:
+                continue
+            out.append((CLOCK / 512.0) * (1 << int(self.oct[c, i]))
+                       / (511 - n))
+        return out
+
     def registers(self, a=0, b=None, absolute=False):
         """The register writes, optionally for one window only.
 
