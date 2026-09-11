@@ -153,13 +153,41 @@ highest genuine fundamental: extracting every fundamental per frame by
 iterative harmonic subtraction and taking the highest gave C4, D5, G3, A3,
 A6, G3, A4 … across fourteen consecutive samples, which is not a part.
 
-So "loudest" does not find it, "highest" does not find it, and nothing in
-this repo knows which line a listener hears as the tune. `tests/probe.py`
-stops guessing: it tracks the best line in each of four registers, renders
-each alone on one channel, and asks. Everything downstream of here depends
-on that answer, because an arrangement built around the wrong line is
-wrong no matter how well it is fitted — and the fit measurements could not
-have told me, because a mid part *is* the loudest thing in the spectrum.
+So "loudest" does not find it, "highest" does not find it, and no
+measurement here could have caught it — a mid part *is* the loudest thing
+in the spectrum, so both the perceptual fit and the peak coverage were
+satisfied. `tests/probe.py` stops guessing: it tracks the best line in each
+of four registers, renders each alone on one channel, and asks.
+
+### What does find it: the line that is struck
+
+Asking got a description of one recording at 45 s — "a high bell sound with
+an organ in the background and a drone bass" — and measuring those three
+layers says why every rule had failed. At 45.0 s:
+
+| layer | components | level |
+|---|---|---|
+| drone bass | C2, E2 | −27, −23 dB |
+| **organ** | C3, E3, G3, B3, C4, E4, G4 | **−1, −2**, −13, −15, −15, −14, −7 |
+| bell | C6 at 46.5 s, D5 at 50 s | **0 dB when struck** |
+
+The organ's C3 and E3 are the loudest components in the whole mix. Any
+tracker ranking by energy takes the organ, and the bell is only loudest in
+the instant after it is hit.
+
+Which is the discriminator. A bell is **struck** and then decays; an organ
+sits. So `transcribe.track_struck` decides a pitch only at onsets, and from
+the **rise** in the spectrum at that onset — the part of it that is new —
+rather than from the spectrum itself, which is mostly whatever was already
+sounding. Onsets come from the flux of that band alone, not of the whole
+signal, and the note holds until the next strike, which is the shape a
+struck note has anyway.
+
+`test_chiparr.py` keeps the case that caught this: a bell playing an
+eight-note tune 12 dB *below* a sustained C–E–G–B organ stack and a drone
+bass. The struck tracker returns 7 of the 8 strikes (it misses only the one
+at t=0, before the onset detector has any history). The old tracker returns
+`G4 G4 G4 G4 G4 G4 G4 G4` — the organ, never moving, 0 of 8.
 
 ### The melody as a line, not as a pitch decision a frame
 

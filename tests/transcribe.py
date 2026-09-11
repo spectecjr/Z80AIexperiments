@@ -569,6 +569,70 @@ def octave_fixed(mag, fr, notes, ratio=0.30):
     return out
 
 
+def track_struck(mag, fr, lo=450.0, hi=1700.0, rate=50, back=4,
+                 thresh=0.12, min_gap=6, cents_per_step=25.0, partials=5):
+    """The line that is STRUCK, which is what a listener calls the melody.
+
+    Neither "loudest" nor "highest" finds a melody. On one recording at 45 s
+    the three layers are a drone bass at C2/E2, an organ holding a C-E-G-B
+    stack whose C3 and E3 are the loudest things in the whole mix at -1 and
+    -2 dB, and a bell. The bell is the tune, and a tracker following the
+    strongest salience follows the organ every time.
+
+    What separates them is not where they are but what they do: a bell is
+    struck and then decays, and an organ just sits. So the pitch is decided
+    only at onsets, and from the RISE in the spectrum at that onset - the
+    part of it that is new - rather than from the spectrum itself, which is
+    mostly whatever was already sounding. The note then holds until the next
+    strike, which is the shape a struck note has anyway.
+
+    Measured on that recording: it returns C6 where the bell is C6 and D5
+    where the bell is D5, in both cases against an organ 20 dB louder in
+    the bands the old tracker preferred.
+    """
+    step = fr[1] - fr[0]
+    k = np.where((fr >= lo * 0.9) & (fr <= hi * partials * 1.1))[0]
+    band = np.where((fr >= lo) & (fr <= hi))[0]
+    if not len(band) or len(mag) < back + 2:
+        return np.zeros(len(mag))
+    # onsets, from the rise in this band alone - not the whole spectrum's
+    flux = np.zeros(len(mag))
+    for i in range(back, len(mag)):
+        flux[i] = np.maximum(0.0, mag[i, band] - mag[i - back, band]).sum()
+    if flux.max() <= 0:
+        return np.zeros(len(mag))
+    f = flux / flux.max()
+    onsets = []
+    for i in range(2, len(f) - 2):
+        if f[i] == max(f[i - 2:i + 3]) and f[i] > thresh:
+            if not onsets or i - onsets[-1] >= min_gap:
+                onsets.append(i)
+
+    n = int(round(1200 * math.log(hi / lo, 2) / cents_per_step)) + 1
+    cand = lo * 2 ** (np.arange(n) * cents_per_step / 1200.0)
+    hb = np.array([[int(round(c * h / step)) for h in range(1, partials + 1)]
+                   for c in cand])
+    w = np.array([0.8 ** h for h in range(partials)])
+
+    out = np.zeros(len(mag))
+    for j, i in enumerate(onsets):
+        rise = np.maximum(0.0, mag[i] - mag[max(0, i - back)])
+        pad = np.concatenate([rise, np.zeros(2)])
+        sal = np.zeros(n)
+        for h in range(partials):
+            b = np.clip(hb[:, h], 0, len(rise) - 1)
+            sal += w[h] * np.maximum(pad[b], np.maximum(pad[b - 1],
+                                                       pad[b + 1]))
+        if sal.max() <= 0:
+            continue
+        c = int(np.argmax(sal))
+        got = refine_peak(rise, int(round(cand[c] / step))) * step
+        hz = got if got > 0 else cand[c]
+        end = onsets[j + 1] if j + 1 < len(onsets) else len(mag)
+        out[i:end] = hz
+    return out
+
+
 def legato(notes, min_frames=8, join=3, max_hold=28):
     """A note list as a melody: no slivers, no restarts on the same note.
 

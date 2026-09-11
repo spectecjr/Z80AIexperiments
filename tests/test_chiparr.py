@@ -81,6 +81,66 @@ def trackers():
     return bad
 
 
+def struck_test():
+    """A bell 12 dB BELOW a sustained organ stack, which must still win.
+
+    This is the case the melody tracker exists for, and the one that caught
+    three rounds of work out: on a real recording the organ's C3 and E3
+    were the loudest components in the whole mix at -1 and -2 dB, so a
+    tracker following the strongest salience followed the organ and the
+    person who wrote the recording heard the result as "the bass and the
+    mids". What separates a bell from an organ is not where it is but that
+    it is struck.
+    """
+    bad = 0
+    dur = 8.0
+    n = int(dur * SR)
+    t = np.arange(n) / float(SR)
+    sig = np.zeros(n)
+    # the organ: a sustained C-E-G-B stack, loud, never re-struck
+    for f in (130.81, 164.81, 196.0, 246.94, 261.63, 329.63, 392.0):
+        sig += 0.40 * np.sin(2 * np.pi * f * t)
+    sig += 0.5 * np.sin(2 * np.pi * 65.41 * t)          # and a drone bass
+    # the bell: struck every second, 12 dB quieter, decaying
+    tune = [1046.5, 1046.5, 783.99, 880.0, 1046.5, 1318.5, 1174.7, 987.77]
+    want = []
+    for i, f in enumerate(tune):
+        k0 = int(i * SR)
+        k = np.arange(min(int(1.0 * SR), n - k0)) / float(SR)
+        env = np.exp(-3.0 * k)
+        for h, a in ((1, 1.0), (2, 0.5), (3, 0.25), (4.2, 0.12)):
+            sig[k0:k0 + len(k)] += 0.10 * a * env * np.sin(2 * np.pi * f * h * k)
+        want.append(f)
+    mag, fr = T.stft(sig, SR, 4096, SR // RATE)
+    mag /= max(1e-12, mag.max())
+    harm, _perc = T.hpss(mag)
+
+    for label, f0 in (("struck", T.track_struck(harm, fr)),
+                      ("loudest salience",
+                       T.track_viterbi(harm, fr, 250.0, 1600.0))):
+        notes = T.legato(T.notes_of(f0, RATE, (0, 7), 3))
+        got = []
+        for i in range(len(tune)):
+            mid = int((i + 0.25) * RATE)
+            hit = [p for st, l, p in notes if st <= mid < st + l]
+            got.append(hit[0] if hit else 0)
+        right = sum(1 for g, w in zip(got, want)
+                    if g and abs(T.to_midi(w) - g) < 0.6)
+        print("    %-18s %s" % (label, " ".join(note_of(T.from_midi(g))
+                                                if g else "-" for g in got)))
+        if label == "struck":
+            bad += check("the struck line finds the bell",
+                         "%d of %d strikes" % (right, len(want)),
+                         "at least 6", right >= 6)
+        else:
+            bad += check("and the old tracker does not",
+                         "%d of %d strikes" % (right, len(want)),
+                         "fewer", right < 6)
+    print("    %-18s %s" % ("the bell played",
+                            " ".join(note_of(f) for f in want)))
+    return bad
+
+
 def main():
     bad = 0
     print("  THE TRACKERS")
@@ -150,6 +210,10 @@ def main():
                                          if (a - b) % 12 == 0), len(raw)),
                  "all of them",
                  all((a - b) % 12 == 0 for a, b in zip(raw, fold)))
+
+    print()
+    print("  THE STRUCK LINE   (a quiet bell under a louder organ)")
+    bad += struck_test()
 
     # legato: what a melody is, as opposed to a pitch decision a frame
     raw = sc["lead"]
