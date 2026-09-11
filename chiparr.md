@@ -137,6 +137,53 @@ it runs out of note. Levels now fall to a sustain at 55% of the attack,
 not to silence, which also *reduced* the register writes, because a level
 that has stopped changing stops being written.
 
+### The melody as a line, not as a pitch decision a frame
+
+Reported: "the structure keeps getting lost." The cause is visible in the
+note list. `notes_of` makes a pitch decision every frame and quantises it
+to the grid, so a part holding one note for three seconds comes out as a
+long note with three-frame fragments punched through it. Measured on one
+recording, the melody's **median event was 0.14 s** inside a part whose
+real notes last seconds - the melody was restarting five times a second,
+and a restarted note is heard as a stutter rather than as phrasing.
+
+`transcribe.legato` makes a melody out of it in three passes: join adjacent
+notes of the same pitch, drop anything still shorter than eight frames and
+give its time to the note before it, then hold each note towards the next -
+but only across a gap of up to about a beat.
+
+That last limit matters as much as the joining. Holding through every gap
+produced melody notes of **16.2 and 16.5 seconds**, because the rule was
+filling the rests. A rest is part of the structure; a phrase held through
+one is a drone.
+
+| | notes | median | coverage |
+|---|---|---|---|
+| one recording, as tracked | 501 | 0.14 s | 59% |
+| the same, as a melody | **125** | **1.54 s** | 78%, so 22% rests |
+| a second recording | 544 → 150 | 0.16 → 0.83 s | 46% → 78% |
+| a third, whose melody really is fast | 357 → 312 | 0.42 s → 0.42 s | 83% → 89% |
+
+The third row is the control: a recording whose melody genuinely moves
+fast is barely changed, which is what a rule like this has to do to be
+trusted.
+
+**And both measures mildly disagree with it.** Applied to every part:
+
+| | fit | peaks covered |
+|---|---|---|
+| as built | 57.7% | 58.8% |
+| with legato everywhere | 57.4% | 56.3% |
+
+Fragments track the source's moment-to-moment spectrum more closely than
+held notes do, so a frame-local measure prefers them. Neither `percept.py`
+nor `cover.py` has any notion of a note being one event, so neither can
+see the difference between a phrase and a stutter - which is exactly what
+was being complained about. This is the one change in this file justified
+by listening rather than by measurement, and it is applied to the melody
+when the melody is what is wanted; `chiparr.build` still takes the score as
+tracked, because on these numbers it should.
+
 ### A second recording, and what it found
 
 Everything above was measured on one recording, which is how an arranger

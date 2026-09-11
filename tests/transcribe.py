@@ -569,6 +569,59 @@ def octave_fixed(mag, fr, notes, ratio=0.30):
     return out
 
 
+def legato(notes, min_frames=8, join=3, max_hold=28):
+    """A note list as a melody: no slivers, no restarts on the same note.
+
+    What notes_of produces is a frame-by-frame pitch decision quantised to
+    the grid, and a line that holds one note for three seconds comes out of
+    it as a long note with three-frame fragments punched through it.
+    Measured on one recording, the median melodic event was 0.14 s inside a
+    part whose real notes last seconds - so the melody restarted five times
+    a second, and a restarted note is heard as a stutter, not as phrasing.
+
+    Two passes. Adjacent notes of the same pitch are joined into one,
+    across gaps of up to `join` frames. Then anything still shorter than
+    `min_frames` is dropped and its time given to the note before it, which
+    is what a player's own legato does.
+    """
+    if not notes:
+        return []
+    out = []
+    for start, length, pitch in sorted(notes):
+        if out and out[-1][2] == pitch and start <= out[-1][0] + out[-1][1] + join:
+            a, l, p = out[-1]
+            out[-1] = (a, max(l, start + length - a), p)
+        else:
+            out.append((start, length, pitch))
+    kept = []
+    for start, length, pitch in out:
+        if length < min_frames and kept:
+            a, l, p = kept[-1]
+            kept[-1] = (a, max(l, start + length - a), p)   # absorbed
+        elif length >= min_frames:
+            kept.append((start, length, pitch))
+    # Hold each note towards the next so the line is unbroken - but only
+    # across a gap of up to `max_hold` frames, about a beat. Past that the
+    # melody is RESTING, and a rest is part of the structure: holding
+    # through one turns a phrase into a drone, and measured on one recording
+    # it produced melody notes of 16.2 and 16.5 seconds.
+    for i in range(len(kept) - 1):
+        a, l, p = kept[i]
+        gap = kept[i + 1][0] - (a + l)
+        if 0 < gap <= max_hold:
+            kept[i] = (a, kept[i + 1][0] - a, p)
+    # and merge again: holding can leave two notes of the same pitch touching,
+    # and a note that stops and restarts where nothing happened is a stutter
+    out = []
+    for start, length, pitch in kept:
+        if out and out[-1][2] == pitch and start <= out[-1][0] + out[-1][1]:
+            a, l, p = out[-1]
+            out[-1] = (a, max(l, start + length - a), p)
+        else:
+            out.append((start, length, pitch))
+    return out
+
+
 def key_quality(chords):
     """One quality per root across the whole piece.
 

@@ -151,6 +151,30 @@ def main():
                  "all of them",
                  all((a - b) % 12 == 0 for a, b in zip(raw, fold)))
 
+    # legato: what a melody is, as opposed to a pitch decision a frame
+    raw = sc["lead"]
+    mel = T.legato(raw)
+    rl = np.array([l for _s, l, _p in raw])
+    ml = np.array([l for _s, l, _p in mel])
+    bad += check("legato lengthens the median note",
+                 "%.2f s -> %.2f s" % (np.median(rl) / RATE,
+                                       np.median(ml) / RATE),
+                 "longer", np.median(ml) >= np.median(rl))
+    bad += check("and leaves no note shorter than its floor",
+                 "shortest %.2f s" % (ml.min() / RATE), "at least 0.16 s",
+                 ml.min() >= 8)
+    touching = sum(1 for a, b in zip(mel, mel[1:])
+                   if a[2] == b[2] and b[0] <= a[0] + a[1])
+    bad += check("no two notes of the same pitch touch",
+                 "%d pairs" % touching, "0", touching == 0)
+    # and a rest stays a rest: holding through one turns a phrase into a drone
+    gaps = [b[0] - (a[0] + a[1]) for a, b in zip(mel, mel[1:])]
+    bad += check("rests longer than a beat survive",
+                 "%d rests, longest %.2f s"
+                 % (sum(1 for g in gaps if g > 0),
+                    max(gaps + [0]) / float(RATE)),
+                 "some", any(g > 28 for g in gaps) or not gaps)
+
     print()
     print("  THE SIX CHANNELS")
     frames = C.arrange_score(sc)
