@@ -228,6 +228,46 @@ coverage 58.0% → 55.4% — and the score says it plays fewer invented notes
 and more of the melody. The score is the better authority, and this is the
 fourth time those two have disagreed.
 
+### A regression, and how it was found
+
+The change above made the arrangement sound worse, and the report was that
+some channels seemed to be "playing the wrong part of the piece at the wrong
+time". They were not, and the first thing to check was whether they were:
+cross-correlating each channel's pitch-class activity against the score over
+±5 seconds puts every channel within 0.2 s of where it belongs. Nothing was
+shifted.
+
+What the arpeggio was doing instead:
+
+| | first 24 steps |
+|---|---|
+| before | `A3 A4 C4 C5 E4 E5 A3 A4 C4 C5 E4 E5` |
+| after the change | `A4 E6 C5 E6 E4 E6 A4 E6 C5 E6 E4 E6` |
+| from the score | `A4 C5 E5 A4 C5 E5 A4 C5 E5` |
+
+**Every other step leapt to E6.** 69% of its intervals were wider than an
+octave and 37% wider than two, against a median of 12 semitones and no
+two-octave leaps in the score-driven version.
+
+The cause was the pool it drew from. `live` included the high voice, which
+lives at 1200–2600 Hz and already has a channel of its own - and because
+that pitch was rarely one another channel had taken, the
+prefer-something-fresh rule picked it every second step. A rule intended to
+stop the arpeggio doubling had turned it into a two-octave saw.
+
+An arpeggio sweeps a chord. The pool is now folded into one octave above its
+lowest note and deduplicated by pitch class, so what cycles is a voicing
+rather than whatever happened to be tracked: `A4 C5 E4 A4 C5 E4`, median
+interval 7 semitones, 2% of steps wider than an octave and none wider than
+two.
+
+Worth noting what caught it. Neither audio measure moved much across the
+regression or the fix - fit 53.0% then 53.5%, coverage 55.4% then 55.1% -
+and `percept.py` is not blind to a two-octave leap in principle; it simply
+cannot weigh one against everything else going on. What showed it was
+looking at the notes as a sequence, which is the one thing none of the
+measures here do.
+
 ## 4b. Why the score version holds the tune and the audio one does not
 
 One number:

@@ -376,19 +376,36 @@ def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
     # The chord estimate is still the fallback, for the moments when nothing
     # else was tracked - better a guessed triad than a silent channel.
     live = [[] for _ in range(n)]
-    for part in (voices[0] if len(voices) > 0 else [],
-                 voices[1] if len(voices) > 1 else [],
+    for part in (voices[1] if len(voices) > 1 else [],
                  sc.get("other") or []):
         for start, length, pitch in part:
             for i in range(max(0, start), min(n, start + length)):
-                if pitch not in live[i]:
-                    live[i].append(pitch)
+                live[i].append(pitch)
     for start, length, pitch in sc["bass"]:     # the root, an octave up
         for i in range(max(0, start), min(n, start + length)):
-            if pitch + 12 not in live[i]:
-                live[i].append(pitch + 12)
-    for row in live:
-        row.sort()
+            live[i].append(pitch + 12)
+    # An arpeggio sweeps a chord; it does not leap about. Folded into one
+    # octave above the lowest note, and deduplicated by pitch class, so what
+    # cycles is a chord voicing rather than whatever happened to be tracked.
+    #
+    # Without this it took the high voice - which lives at 1200-2600 Hz and
+    # is on a channel of its own already - and, because that pitch was rarely
+    # one another channel had taken, the prefer-something-fresh rule below
+    # chose it every other step: A4 E6 C5 E6 E4 E6, a two-octave saw. 69% of
+    # its intervals were wider than an octave and 37% wider than two, where
+    # the score-driven arpeggio's median interval is 12 semitones and none
+    # exceeds two octaves.
+    for i in range(n):
+        row = live[i]
+        if not row:
+            continue
+        base = min(row)
+        seen = {}
+        for pitch in row:
+            while pitch - base >= 12:
+                pitch -= 12
+            seen.setdefault(pitch % 12, pitch)
+        live[i] = sorted(seen.values())
 
     guess = {}
     for start, length, root, kind in sc["chords"]:
