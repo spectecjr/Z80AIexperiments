@@ -562,7 +562,58 @@ def chords_of(mag, fr, hz, beat_frames, phase, lo=150.0, hi=2000.0,
     return out
 
 
-def drums_of(mag, fr, fl, hz, thresh=0.12, rel=0.22, grid=None):
+def drum_sections(perc, fr, rate=50, lo=6000.0, hi=13000.0, pct=55,
+                  smooth=2.0, min_run=4.0, bridge=2.0):
+    """When the piece has a drum part at all, as a mask over frames.
+
+    Onset detection cannot tell a drum from the attack of anything else, and
+    on real music that is not a small error: measured against a score, this
+    file's drums fired across 12 s to 189 s of a piece whose drum track runs
+    from 54 s to 108 s. At 38 s it placed 26 snares where the score has
+    silence - every one of them a bell or an organ chord being struck.
+
+    Per-onset classification does not fix it. Spectral flatness of the rise,
+    the share of it sitting on harmonics, how many bands rise together,
+    energy above 8 kHz, the percussive share of the rise: measured against
+    the score, every one of them landed between 69% and 76% where guessing
+    "not a drum" every time scores 67%.
+
+    What works is asking at the right scale. A drum part is SECTIONAL - it
+    comes in, it plays, it stops - so the question is not "is this onset a
+    drum" but "does this passage have drums in it", and there the high-band
+    percussive flux separates cleanly: 0.0175 in a passage with none against
+    0.1525 in one with them. Errors are frame-to-frame noise while the truth
+    is a contiguous block, so runs shorter than `min_run` seconds are
+    dropped and gaps shorter than `bridge` are closed.
+    """
+    k = np.where((fr >= lo) & (fr <= hi))[0]
+    if not len(k) or not len(perc):
+        return np.ones(len(perc), bool)
+    e = perc[:, k].sum(axis=1)
+    flux_hi = np.concatenate([[0.0], np.maximum(0.0, np.diff(e))])
+    w = max(1, int(round(smooth * rate)))
+    v = np.convolve(flux_hi, np.ones(w) / w, mode="same")
+    on = v > np.percentile(v, pct)
+    idx = np.where(on)[0]
+    out = np.zeros(len(perc), bool)
+    if not len(idx):
+        return out
+    runs = []
+    start = prev = idx[0]
+    for i in idx[1:]:
+        if i - prev > bridge * rate:
+            runs.append((start, prev))
+            start = i
+        prev = i
+    runs.append((start, prev))
+    for a, b in runs:
+        if b - a >= min_run * rate:
+            out[a:b + 1] = True
+    return out
+
+
+def drums_of(mag, fr, fl, hz, thresh=0.12, rel=0.22, grid=None,
+             gate=None):
     """Onsets, and what kind of hit each one is.
 
     The kind is decided on how much each band *rises* at the onset, per bin,
@@ -583,6 +634,8 @@ def drums_of(mag, fr, fl, hz, thresh=0.12, rel=0.22, grid=None):
             continue
         if f[i] < thresh or f[i] < local[i] + rel * (1.0 - local[i]):
             continue
+        if gate is not None and i < len(gate) and not gate[i]:
+            continue                            # the piece has no drums here
         if not pk or i - pk[-1] >= 4:
             pk.append(i)
     bands = {}
@@ -875,7 +928,8 @@ def transcribe(x, sr, rate=50, melody="loudest"):
     # within 1.5 frames of a grid they were all played exactly on.
     step16 = max(1.0, beat / 4.0)
     grid = (float(phase) % step16, step16)
-    drums = drums_of(perc, fr, fl, rate, grid=None)
+    gate = drum_sections(perc, fr, rate)
+    drums = drums_of(perc, fr, fl, rate, grid=None, gate=gate)
     # the mode window at about half a beat: long enough to outvote a
     # semitone alternation, short enough not to smear a moving bass line.
     # Fixed at 41 frames it was right for one recording at 80 bpm and took
@@ -966,6 +1020,7 @@ def transcribe(x, sr, rate=50, melody="loudest"):
             "melody_is_struck": melody == "struck",
             "chords": chords,
             "drums": drums,
+            "drum_sections": gate,
             # a loudness envelope, one value a frame: the arranger uses it
             # for dynamics the way a score would use velocities
             "env": np.sqrt((mag ** 2).sum(axis=1)),

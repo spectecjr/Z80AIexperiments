@@ -331,3 +331,61 @@ and a half (`percept.md` §5a). The same for a bell's written octave: the
 score says F3–G4 and every spectral method says C6, because that is where a
 struck metal tone puts its energy. Both are right about different things,
 and only a score knows which one the composer wrote.
+
+## 6. The drums, and a version mismatch
+
+Reported: the drums sound wrong around 38 s. Against the score, the reason
+was stark - its drum track runs from 54 s to 108 s, and the arrangement was
+placing hits from 12 s to 189 s:
+
+| | score | arrangement |
+|---|---|---|
+| hits | 339 | 555 |
+| span | 54–108 s | 12–189 s |
+| **30–40 s** | **0** | **26 snares** |
+
+Drums through 80% of a piece that has drums for 54 seconds. Every hit
+outside that window is a bell or an organ chord being struck, because onset
+detection cannot tell a drum from the attack of anything else.
+
+**Per-onset classification does not fix it.** Five features were measured
+against the score, and against a base rate of 67% for guessing "not a drum"
+every time:
+
+| | accuracy |
+|---|---|
+| spectral flatness of the rise, 2–10 kHz | 76% |
+| how many third-octave bands rise together | 69% |
+| energy above 8 kHz | 69% |
+| the percussive share of the rise | 69% |
+| the share of the rise sitting on harmonics | 65% |
+
+Nine points of signal at best. The question was being asked at the wrong
+scale: a drum part is **sectional**. It comes in, it plays, it stops. Asked
+"does this passage have drums in it" rather than "is this onset a drum", the
+high-band percussive flux separates cleanly — 0.0175 in a passage with none
+against 0.1525 in one with them — and because the errors are frame-to-frame
+noise while the truth is a contiguous block, keeping only runs of four
+seconds and closing gaps under two turns an 83% frame classifier into a
+usable gate.
+
+555 hits become 310, and 30–40 s goes from 26 to **none**.
+
+### And the recordings are not all the same piece
+
+The gate also marked 120–169 s, which the score says has no drums. It is
+right and the score is incomplete: this export has 11 tracks where an
+earlier one listed `Sub` and `Linn` — a LinnDrum — and the audio's high-band
+percussive energy over that stretch is 0.0953, between the drum section's
+0.1525 and the 0.0175 of a passage with nothing in it. There is a second
+drum part in the recording that the export does not contain.
+
+Then the composer, looking at the project: the drums run from about 38 s to
+73 s. The recording says otherwise, in two independent bands — the
+cymbal band is empty until 60 s, and the kick band carries only the
+Contrabass, which lives at 40–100 Hz, until 70 s. The MP3 and the MIDI agree
+with each other and both differ from the project as it now stands.
+
+Worth stating because it bounds every measurement in this file: the ground
+truth here is a recording and an export of one version of one piece, and a
+score is only ground truth for the audio it was exported with.
