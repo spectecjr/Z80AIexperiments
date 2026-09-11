@@ -66,6 +66,17 @@ A three-minute recording takes about a minute.
     --start S --length L    work on an excerpt, for trying settings out
                             quickly.
 
+## From separated stems
+
+    python3 -m demucs -o stems song.mp3
+    python3 soundchip/tests/chipify.py song.mp3 --stems stems/htdemucs/song
+
+`--stems DIR` reads `drums.wav`, `bass.wav`, `other.wav` and `vocals.wav`
+from a directory, any subset. The drum stem is taken as the drum part
+outright, which removes the hardest guess in the whole pipeline; the bass
+stem is what the bass tracker runs on; `other` is where the melody is
+sought. It does not help with *which* part is the melody — see `stems.md`.
+
 ## From a MIDI score instead
 
     python3 soundchip/tests/chipify.py song.mid --audio song.mp3

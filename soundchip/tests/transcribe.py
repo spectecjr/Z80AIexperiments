@@ -928,14 +928,36 @@ def key_quality(chords):
             for st, ln, root, _k in chords]
 
 
-def transcribe(x, sr, rate=50, melody="loudest"):
+def transcribe(x, sr, rate=50, melody="loudest", stems=None):
     """Everything above, on one piece of audio.
 
     `melody` picks which line becomes the lead: "loudest" (the default, and
     the one the tests cover) or "struck". See the note beside the two
     trackers - nothing here can choose between them reliably, and getting it
     wrong means arranging around the wrong part.
+
+    `stems` is an optional dict of separated sources - {"drums": array,
+    "bass": array, "other": array, "vocals": array}, any subset - as a
+    separator like Demucs produces. Each one that is present replaces a
+    piece of guesswork with a fact:
+
+      drums   the stem IS the drum part, so onsets in it are drum hits and
+              the whole drum_sections apparatus is unnecessary. Four
+              attempts at deciding that from a mix are documented in this
+              file and in midiarr.md, the best of them a correlation
+              heuristic.
+      bass    the bass line without an organ's low notes or a kick's thump
+              in the way. Measured against a score, the tracker on a full
+              mix gets the pitch class right 85% of the time and the octave
+              3%, and most of that is other instruments in the same band.
+      other   what is left after bass, drums and voice, which is where a
+              melody usually is.
+
+    What separation does NOT fix is which part is the tune: a bell and an
+    organ both land in "other", and that is the error worth the most here -
+    57% against a score's 100%. See midiarr.md §4b.
     """
+    stems = stems or {}
     hop = int(round(sr / float(rate)))
     mono = x.mean(axis=1) if x.ndim > 1 else x
     mag, fr = stft(mono, sr, 4096, hop)
@@ -951,8 +973,16 @@ def transcribe(x, sr, rate=50, melody="loudest"):
     # within 1.5 frames of a grid they were all played exactly on.
     step16 = max(1.0, beat / 4.0)
     grid = (float(phase) % step16, step16)
-    gate = drum_sections(perc, fr, rate)
-    drums = drums_of(perc, fr, fl, rate, grid=None, gate=gate)
+    if stems.get("drums") is not None:
+        # the stem is the drum part: no gate, and the onsets are its own
+        d_mag, d_fr = stft(stems["drums"], sr, 4096, hop)
+        d_mag /= max(1e-12, d_mag.max())
+        _dh, d_perc = hpss(d_mag)
+        gate = np.ones(len(d_mag), bool)
+        drums = drums_of(d_perc, d_fr, flux(d_perc), rate, grid=None)
+    else:
+        gate = drum_sections(perc, fr, rate)
+        drums = drums_of(perc, fr, fl, rate, grid=None, gate=gate)
     # the mode window at about half a beat: long enough to outvote a
     # semitone alternation, short enough not to smear a moving bass line.
     # Fixed at 41 frames it was right for one recording at 80 bpm and took
@@ -989,6 +1019,11 @@ def transcribe(x, sr, rate=50, melody="loudest"):
     # pitches as a melody does. So the caller says, and the default is the
     # one with a test behind it: the cue's eight-note motif comes back in
     # order from the loudest line and does not from the struck one.
+    if stems.get("other") is not None:
+        o_mag, _ofr = stft(stems["other"], sr, 4096, hop)
+        o_mag /= max(1e-12, o_mag.max())
+        lead_mag, _op = hpss(o_mag)
+        lead_mag = lead_mag[:len(mag)]
     loudest = track_viterbi(lead_mag, fr, 250.0, 1600.0)
     struck = track_struck(lead_mag, fr, rate=rate)
     lead = struck if melody == "struck" else loudest

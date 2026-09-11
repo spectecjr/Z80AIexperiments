@@ -66,6 +66,11 @@ def main(argv=None):
     ap.add_argument("--chorus-steals", action="store_true",
                     help="give a voice up for the chorus (fuller, and it "
                          "measured 12 points of coverage worse)")
+    ap.add_argument("--stems", metavar="DIR",
+                    help="a directory of separated stems - drums.wav, "
+                         "bass.wav, other.wav, vocals.wav, any subset - as "
+                         "Demucs writes them. Each one present replaces a "
+                         "piece of guesswork: see soundchip/stems.md")
     ap.add_argument("--start", type=float, default=0.0,
                     help="skip to this many seconds in")
     ap.add_argument("--length", type=float, default=0.0,
@@ -119,8 +124,28 @@ def main(argv=None):
                                                   for t in v)))
     else:
         import transcribe as T
+        stems = {}
+        if args.stems:
+            for part in ("drums", "bass", "other", "vocals"):
+                for ext in (".wav", ".mp3", ".flac"):
+                    path = os.path.join(args.stems, part + ext)
+                    if os.path.exists(path):
+                        y, ysr = sf.read(path, dtype="float32")
+                        if ysr != sr:
+                            say("  %s is at %d Hz, the mix at %d - skipped"
+                                % (part, ysr, sr))
+                            break
+                        y = y.mean(axis=1) if y.ndim > 1 else y
+                        if args.start or args.length:
+                            a = int(args.start * sr)
+                            b = a + int(args.length * sr) if args.length \
+                                else len(y)
+                            y = y[a:b]
+                        stems[part] = y
+                        break
+            say("  stems: %s" % (", ".join(sorted(stems)) or "none found"))
         say("  transcribing...")
-        sc = T.transcribe(x, sr, RATE, melody=args.melody)
+        sc = T.transcribe(x, sr, RATE, melody=args.melody, stems=stems)
         say("  %.2f bpm, grid %.3f frames, %d bass notes, %d melody notes, "
             "%d chords, %d drum hits"
             % (sc["bpm"], sc["grid"][1], len(sc["bass"]), len(sc["lead"]),

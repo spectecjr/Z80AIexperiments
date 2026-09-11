@@ -60,6 +60,9 @@ Tools and tests sit together, as they do in the repository's own `tests/`.
 | `versus.py` | two register logs against the score they both mean to play |
 | `probe.py` | one line per register, rendered separately, so a person can say which is the tune |
 
+`stems.md` covers feeding it separated stems (Demucs and the like), what
+that fixes and what it does not.
+
 `percept.md` is worth reading before trusting any of those numbers. The
 short of it: they catch an octave error, a silent part or a grid three
 halves out, and they cannot tell you which part is the melody.
