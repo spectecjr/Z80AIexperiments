@@ -363,27 +363,91 @@ def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
     g_phase, _g_step = sc.get("grid", (0.0, beat / 4.0))
     span = max(2.0, beat / float(arp_div))
     arp_pairs = []
+
+    # The arpeggio plays the pitches actually DETECTED at that moment, not a
+    # triad guessed from a chroma profile. Measured against a score of the
+    # same performance: the guessed version sounded in 99% of frames and only
+    # 64% of what it played was in the score at all - it was the single
+    # largest source of invented notes, and invented notes are what makes an
+    # arrangement lose the tune. Cycling the real harmony instead is what the
+    # score-driven arranger does with a pad's own polyphony, and there it
+    # scores 100%.
+    #
+    # The chord estimate is still the fallback, for the moments when nothing
+    # else was tracked - better a guessed triad than a silent channel.
+    live = [[] for _ in range(n)]
+    for part in (voices[0] if len(voices) > 0 else [],
+                 voices[1] if len(voices) > 1 else [],
+                 sc.get("other") or []):
+        for start, length, pitch in part:
+            for i in range(max(0, start), min(n, start + length)):
+                if pitch not in live[i]:
+                    live[i].append(pitch)
+    for start, length, pitch in sc["bass"]:     # the root, an octave up
+        for i in range(max(0, start), min(n, start + length)):
+            if pitch + 12 not in live[i]:
+                live[i].append(pitch + 12)
+    for row in live:
+        row.sort()
+
+    guess = {}
     for start, length, root, kind in sc["chords"]:
-        # each chord tone at two octaves, alternating: six steps instead of
-        # three, and it reaches into 260-520 Hz where otherwise only the
-        # lead goes. Measured better in all three bands than a flat triad
-        notes = [48 + root + s + o for s in TRIAD[kind] for o in (0, 12)]
-        first = int(math.ceil((start - g_phase) / span))
-        last = int(math.floor((start + length - g_phase) / span))
-        for m in range(first, last + 1):
-            a = int(round(g_phase + m * span))
-            b = int(round(g_phase + (m + 1) * span))
-            hz = midi_hz(notes[m % len(notes)])
-            for j in range(max(1, b - a)):
-                i = a + j
-                if 0 <= i < n and start <= i < start + length:
-                    o.tone(3, i, hz, decay(arp_lvl, j, 1.2))
-                    arp_pairs.append((i, hz, j))
-        fill = midi_hz(notes[2])                # the fifth, up where it
-        for k in range(length):                 # will not mud the root
-            i = start + k
-            if 0 <= i < n and not v3_on[i]:
-                o.tone(4, i, fill * 2, max(0, v3_lvl - 3))
+        notes = [48 + root + q + o for q in TRIAD[kind] for o in (0, 12)]
+        for i in range(max(0, start), min(n, start + length)):
+            guess[i] = notes
+
+    first = int(math.ceil((0 - g_phase) / span))
+    last = int(math.floor((n - g_phase) / span))
+    for m in range(first, last + 1):
+        a = int(round(g_phase + m * span))
+        b = int(round(g_phase + (m + 1) * span))
+        if not (0 <= a < n):
+            continue
+        row = live[a] or guess.get(a) or []
+        if not row:
+            continue
+        # prefer a pitch no other channel is already playing. Measured, the
+        # arpeggio doubled a note another channel had in 61% of its frames,
+        # which spends a channel on nothing: an arpeggio is there to add the
+        # harmony, and doubling is what the octave channel is for.
+        taken = set()
+        for c in (0, 1, 2, 4):
+            if o.sounded[c, a] and o.lvl[c, a] > 0:
+                b2 = int(o.byte[c, a])
+                if b2 < 511:
+                    f2 = (CLOCK / 512.0) * (1 << int(o.oct[c, a])) / (511 - b2)
+                    taken.add(int(round(69 + 12 * math.log(f2 / A4, 2))) % 12)
+        fresh = [q for q in row if q % 12 not in taken]
+        use = fresh or row
+        pitch = use[m % len(use)]
+        hz = midi_hz(pitch)
+        while hz > top:
+            hz /= 2.0
+        for j in range(max(1, b - a)):
+            i = a + j
+            if 0 <= i < n:
+                o.tone(3, i, hz, decay(arp_lvl, j, 1.2))
+                arp_pairs.append((i, hz, j))
+
+    # Wherever the third voice was given nothing, it takes a pitch that was
+    # actually detected rather than a guessed chord tone. The guessed fifth
+    # sounded in every frame of the piece and was 77% right, three semitones
+    # from the nearest real note when wrong - the largest remaining source of
+    # invented notes after the arpeggio. Where nothing at all was detected
+    # the channel now rests, which is what the score does there too.
+    for i in range(n):
+        if v3_on[i] or not live[i]:
+            continue
+        taken = set()
+        for c in (0, 1, 2, 3):
+            if o.sounded[c, i] and o.lvl[c, i] > 0:
+                b2 = int(o.byte[c, i])
+                if b2 < 511:
+                    f2 = (CLOCK / 512.0) * (1 << int(o.oct[c, i])) / (511 - b2)
+                    taken.add(int(round(69 + 12 * math.log(f2 / A4, 2))) % 12)
+        fresh = [q for q in live[i] if q % 12 not in taken]
+        if fresh:
+            o.tone(4, i, midi_hz(fresh[len(fresh) // 2]), max(1, v3_lvl - 3))
 
     # the arpeggio doubled in unison a divider away, wherever the third
     # voice is not using its channel: one line thickened sounds fuller than

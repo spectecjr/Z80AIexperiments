@@ -175,6 +175,77 @@ about a smaller decision; this is the same finding at the scale of a whole
 arrangement, and it means the fit number cannot be used to choose between
 them.
 
+## 4a. The two arrangements, note for note
+
+`tests/versus.py` puts both register logs against the score they are both
+meant to be playing. Per frame it asks two questions, and only one of them
+separates them:
+
+    recall     of the pitches the score has sounding, how many does the
+               arrangement play
+    precision  of the pitches the arrangement plays, how many are in the
+               score at all
+
+| | pitches played a frame | recall (any octave) | **precision (any octave)** |
+|---|---|---|---|
+| from audio | 4.44 | 88% | **80%** |
+| from the score | 2.64 | 85% | **97%** |
+
+The score sounds 3.61 pitches a frame. Both arrangements *find* the piece
+about equally well — 88% against 85% — and the audio one plays 0.8 pitches
+a frame more than the music contains, **a fifth of which are not in the
+piece at all.** Recall was never the problem. Invented notes were.
+
+Per channel, that localises:
+
+| channel | sounds | of what it plays, in the score |
+|---|---|---|
+| bass | 94% | 86% |
+| melody | 84% | 91% — but **72% of it is the organ** |
+| second voice | 88% | 87% |
+| **arpeggio** | **99%** | **64%** |
+| third voice | 100% | 76% |
+
+The arpeggio was the single largest inventor: sounding almost always, and
+two notes in five absent from the piece — because it was playing a triad
+guessed from a chroma profile rather than anything detected. The
+score-driven arranger's arpeggio scores 100% on the same measure, for the
+one reason that it cycles a pad's *actual* polyphony.
+
+So the audio path does that too now: the arpeggio and the third voice both
+take pitches that were really tracked, and both prefer a pitch no other
+channel is already playing — measured, the arpeggio had been doubling
+another channel in **61%** of its frames, which spends a channel on nothing.
+Where nothing was detected the third voice rests, as the score does there.
+
+| | pitches a frame | precision (any octave) | the melody's part |
+|---|---|---|---|
+| before | 4.44 | 80% | 79% |
+| after | 4.07 | 82% | 81% |
+
+Both audio measures read slightly *down* on that change — fit 53.8% → 53.0%,
+coverage 58.0% → 55.4% — and the score says it plays fewer invented notes
+and more of the melody. The score is the better authority, and this is the
+fourth time those two have disagreed.
+
+## 4b. Why the score version holds the tune and the audio one does not
+
+One number:
+
+| the melody channel, against the Bell track | matches its pitch class |
+|---|---|
+| audio, following the loudest line | **57%** |
+| audio, following the struck line | **57%** |
+| from the score | **100%** |
+
+The melody channel plays the right note 57% of the time from audio and
+always from the score, and neither tracker does better than the other —
+both are pulled to the organ, whose C3 and E3 are the loudest components in
+the mix at −1 and −2 dB. That is the coherence difference, and it is a
+transcription limit rather than an arrangement one: it is the cost of
+separating a quiet bell from a loud organ in a finished mix, and a score
+does not have to.
+
 ## 5. Does any of it transfer to a recording with no score?
 
 Some of it, and it is worth being exact about which.
