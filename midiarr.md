@@ -371,6 +371,46 @@ usable gate.
 
 555 hits become 310, and 30–40 s goes from 26 to **none**.
 
+### A second score, and the gate that was measuring the wrong thing
+
+A score for the other recording settled it. 496 notes, 16 tracks, **130.00
+bpm** — which is exactly what the tempo scan had returned for it, an
+independent confirmation on a second piece. Its parts, by the composer's
+names: `Sytrus`, `Lead Rhodes`, `Analog Bass`, `Counterpeggio`, `Knife`,
+`Octaved Breath`, `String Machine`, `Noise Generator`.
+
+**There is no drum track in it at all**, and the arrangement was playing
+**566 hits**.
+
+The sectional gate above did not catch that, and could not have: it
+thresholds each piece's high-band percussive flux at its own 55th
+percentile, so a piece with no drums still has a 55th percentile and is duly
+marked. Worse, the amount of that energy says the opposite of the truth —
+this piece has **nineteen times** the other one's (0.191 against 0.0099),
+from bright synth transients, and it is peakier too, a 90th-to-20th
+contrast of 24.8 against 18.4. Every measure of how much or how spiky the
+high band is calls the drumless piece drums.
+
+What separates them is that a kit **hits low and high at the same time**. A
+kick lands with a hat; a snare has a body and a crack. A bright synth attack
+has no reason to coincide with the bass. The correlation between low-band
+(45–95 Hz) and high-band (6–13 kHz) percussive flux over an eight-second
+window:
+
+| | low/high together |
+|---|---|
+| a section with drums | **+0.405**, **+0.605** |
+| the same piece where there are none | −0.038 |
+| the piece whose score has no drums | **−0.015**, **−0.011** |
+
+| | the gate now says | the score says |
+|---|---|---|
+| first recording | 52–163 s | drums 54–108 s, plus the Linn its export omits |
+| second | 7% of the piece, in three fragments | no drum track |
+| third | 25–265 s | no score; 997 kicks detected, and it is electronic |
+
+566 hits become **17**.
+
 ### And the recordings are not all the same piece
 
 The gate also marked 120–169 s, which the score says has no drums. It is

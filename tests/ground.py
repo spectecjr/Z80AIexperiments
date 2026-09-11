@@ -110,33 +110,54 @@ def main(argv):
           % (60e6 / tempos[0][1], bpm, (60e6 / tempos[0][1]) / bpm))
 
     n = len(mag)
-    def roll(name):
-        for t in tracks:
-            if t.name and t.name.lower().startswith(name.lower()):
-                return piano_roll([smf.Note(q.start + off, q.end + off,
-                                            q.pitch, q.velocity, q.channel)
-                                   for q in t.notes], n, rate)
-        return np.zeros(n)
+
+    def roll(track):
+        return piano_roll([smf.Note(q.start + off, q.end + off, q.pitch,
+                                    q.velocity, q.channel)
+                           for q in track.notes], n, rate)
 
     bass = T.track_bass(mono, sr, rate)
     loudest = T.track_viterbi(harm, fr, 250.0, 1600.0)
     struck = T.track_struck(harm, fr, rate=rate)
     to_midi = np.vectorize(lambda f: T.to_midi(f) if f > 0 else 0.0)
+    lines = [("the loudest line", to_midi(loudest)),
+             ("the struck line", to_midi(struck)),
+             ("the bass tracker", to_midi(bass))]
 
+    # every named part with notes in it, against every tracker: which
+    # tracker follows which part is exactly the question, and hard-coding
+    # the answer for one recording was how the last one got it wrong
     print()
-    print("  THE MELODY   (the score calls it a bell)")
-    bell = roll("Aftermath Bell")
-    report([("the struck line", score(to_midi(struck), bell)),
-            ("the loudest line", score(to_midi(loudest), bell))])
+    print("  %-20s %7s  %s" % ("part", "frames",
+                               "  ".join("%-22s" % nm for nm, _ in lines)))
+    print("  %-20s %7s  %s" % ("", "",
+                               "  ".join("%-22s" % "voiced exact class"
+                                         for _ in lines)))
+    for t in sorted((t for t in tracks if t.notes and 9 not in t.channels),
+                    key=lambda t: -len(t.notes)):
+        truth = roll(t)
+        row = "  %-20s %7d " % ((t.name or "track %d" % t.index)[:20],
+                                int((truth > 0).sum()))
+        for _nm, line in lines:
+            r = score(line, truth)
+            row += "  %5.0f%% %5.0f%% %5.0f%%" % (
+                (100 * r["voiced"], 100 * r["exact"], 100 * r["class"])
+                if r else (0, 0, 0))
+        print(row)
+
+    drums = [t for t in tracks if t.notes and 9 in t.channels]
     print()
-    print("  THE ORGAN")
-    organ = roll("4 drawbars")
-    report([("the loudest line", score(to_midi(loudest), organ)),
-            ("the struck line", score(to_midi(struck), organ))])
-    print()
-    print("  THE BASS")
-    for nm in ("Contrabass", "Moogish"):
-        report([(nm, score(to_midi(bass), roll(nm)))])
+    if drums:
+        d = sorted(q.start for t in drums for q in t.notes)
+        print("  the score's drums: %d hits, %.1f s to %.1f s"
+              % (len(d), d[0] + off, d[-1] + off))
+    else:
+        print("  the score has NO drum track at all")
+    got = T.drums_of(perc, fr, fl, rate, grid=None,
+                     gate=T.drum_sections(perc, fr, rate))
+    if got:
+        print("  the arrangement plays %d hits, %.1f s to %.1f s"
+              % (len(got), got[0][0] / float(rate), got[-1][0] / float(rate)))
     return 0
 
 

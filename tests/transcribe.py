@@ -562,40 +562,63 @@ def chords_of(mag, fr, hz, beat_frames, phase, lo=150.0, hi=2000.0,
     return out
 
 
-def drum_sections(perc, fr, rate=50, lo=6000.0, hi=13000.0, pct=55,
-                  smooth=2.0, min_run=4.0, bridge=2.0):
-    """When the piece has a drum part at all, as a mask over frames.
+def drum_sections(perc, fr, rate=50, win=8.0, thresh=0.15, min_run=4.0,
+                  bridge=2.0, lo=(45.0, 95.0), hi=(6000.0, 13000.0)):
+    """When the piece has a drum part, as a mask over frames.
 
     Onset detection cannot tell a drum from the attack of anything else, and
-    on real music that is not a small error: measured against a score, this
-    file's drums fired across 12 s to 189 s of a piece whose drum track runs
-    from 54 s to 108 s. At 38 s it placed 26 snares where the score has
-    silence - every one of them a bell or an organ chord being struck.
+    that is not a small error on real music: measured against a score, this
+    file's drums fired from 12 s to 189 s of a piece whose drum track runs
+    54 s to 108 s, placing 26 snares at 38 s where the score is silent. On a
+    second piece, whose score has NO DRUM TRACK AT ALL, it played 566.
 
     Per-onset classification does not fix it. Spectral flatness of the rise,
-    the share of it sitting on harmonics, how many bands rise together,
-    energy above 8 kHz, the percussive share of the rise: measured against
-    the score, every one of them landed between 69% and 76% where guessing
-    "not a drum" every time scores 67%.
+    bands rising together, energy above 8 kHz, the percussive share of the
+    rise, the share sitting on harmonics: every one landed between 65% and
+    76% against a base rate of 67% for guessing "not a drum" every time.
 
-    What works is asking at the right scale. A drum part is SECTIONAL - it
-    comes in, it plays, it stops - so the question is not "is this onset a
-    drum" but "does this passage have drums in it", and there the high-band
-    percussive flux separates cleanly: 0.0175 in a passage with none against
-    0.1525 in one with them. Errors are frame-to-frame noise while the truth
-    is a contiguous block, so runs shorter than `min_run` seconds are
-    dropped and gaps shorter than `bridge` are closed.
+    Nor does the amount of high-band percussive energy, however it is
+    thresholded. The second piece has NINETEEN TIMES the first one's, from
+    bright synth transients - a "Knife" and a "Noise Generator", by their
+    track names - and it is peakier too: a 90th-to-20th-percentile contrast
+    of 24.8 against 18.4. Any measure of how much or how spiky the high band
+    is calls that piece drums.
+
+    What separates them is that a kit hits LOW AND HIGH AT THE SAME TIME. A
+    kick lands with a hat; a snare has a body and a crack. A bright synth
+    attack has no reason to coincide with the bass. The correlation between
+    low-band and high-band percussive flux, measured over a window:
+
+        a section with drums                +0.405, +0.605
+        the same piece where there are none -0.038
+        a piece whose score has no drums    -0.015, -0.011
+
+    Errors are frame-to-frame noise while the truth is a contiguous block,
+    so runs shorter than `min_run` seconds go and gaps under `bridge` close.
     """
-    k = np.where((fr >= lo) & (fr <= hi))[0]
-    if not len(k) or not len(perc):
-        return np.ones(len(perc), bool)
-    e = perc[:, k].sum(axis=1)
-    flux_hi = np.concatenate([[0.0], np.maximum(0.0, np.diff(e))])
-    w = max(1, int(round(smooth * rate)))
-    v = np.convolve(flux_hi, np.ones(w) / w, mode="same")
-    on = v > np.percentile(v, pct)
+    kl = np.where((fr >= lo[0]) & (fr <= lo[1]))[0]
+    kh = np.where((fr >= hi[0]) & (fr <= hi[1]))[0]
+    n = len(perc)
+    if not len(kl) or not len(kh) or n < 4:
+        return np.zeros(n, bool)
+
+    def flux_of(k):
+        e = perc[:, k].sum(axis=1)
+        return np.concatenate([[0.0], np.maximum(0.0, np.diff(e))])
+
+    a, b = flux_of(kl), flux_of(kh)
+    w = max(4, int(round(win * rate)))
+    ker = np.ones(w) / w
+    ma = np.convolve(a, ker, "same")
+    mb = np.convolve(b, ker, "same")
+    va = np.convolve(a * a, ker, "same") - ma * ma
+    vb = np.convolve(b * b, ker, "same") - mb * mb
+    cov = np.convolve(a * b, ker, "same") - ma * mb
+    r = cov / np.sqrt(np.maximum(1e-20, va * vb))
+
+    on = r > thresh
     idx = np.where(on)[0]
-    out = np.zeros(len(perc), bool)
+    out = np.zeros(n, bool)
     if not len(idx):
         return out
     runs = []
@@ -606,9 +629,9 @@ def drum_sections(perc, fr, rate=50, lo=6000.0, hi=13000.0, pct=55,
             start = i
         prev = i
     runs.append((start, prev))
-    for a, b in runs:
-        if b - a >= min_run * rate:
-            out[a:b + 1] = True
+    for p, q in runs:
+        if q - p >= min_run * rate:
+            out[p:q + 1] = True
     return out
 
 
