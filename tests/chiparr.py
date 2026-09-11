@@ -101,10 +101,32 @@ class Out:
         self.lvl[c, i] = max(self.lvl[c, i], min(15, level))
         self.sounded[c, i] = True
 
-    def registers(self):
+    def shift(self, ch, a, b, d_oct=0, d_lvl=0):
+        """Move one channel's octave and level over a range of frames.
+
+        An octave on the SAA1099 is the octave register plus one with the
+        SAME frequency byte, so this is the cheapest edit the chip has, and
+        the one the search below spends most of its time on.
+        """
+        if d_oct:
+            o = self.oct[ch, a:b] + d_oct
+            keep = (o >= 0) & (o <= 7)
+            self.oct[ch, a:b] = np.where(keep, o, self.oct[ch, a:b])
+        if d_lvl:
+            v = self.lvl[ch, a:b]
+            self.lvl[ch, a:b] = np.where(v > 0, np.clip(v + d_lvl, 1, 15), 0)
+
+    def registers(self, a=0, b=None, absolute=False):
+        """The register writes, optionally for one window only.
+
+        `absolute` emits every register in the window's first frame instead
+        of only the changes, so a window can be rendered on its own without
+        the state the frames before it would have left.
+        """
+        b = self.n if b is None else b
         frames = []
         state = [None] * 32
-        for i in range(self.n):
+        for i in range(a, b):
             want = {}
             fen = nen = 0
             for c in range(6):
@@ -127,7 +149,7 @@ class Out:
             out = []
             for r in (0x14, 0x15, 0x16, 0x10, 0x11, 0x12, 0x08, 0x09, 0x0A,
                       0x0B, 0x0C, 0x0D, 0x00, 0x01, 0x02, 0x03, 0x04, 0x05):
-                if state[r] != want[r]:
+                if state[r] != want[r] or (absolute and i == a):
                     out.append((r, want[r]))
                     state[r] = want[r]
             frames.append(out)
