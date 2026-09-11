@@ -191,6 +191,30 @@ enough to steer a search, however well founded that number is. There has to
 be a second one the search is forbidden to optimise, and it has to be
 checked on the whole piece rather than on a convenient excerpt.
 
+## 5a. The clearest case of the model being wrong
+
+Two arrangements of the same recording, identical in every respect but
+which line becomes the melody. The composer's own track list names them:
+`Aftermath Bell` and `4 drawbars`.
+
+| the melody is | fit | peaks covered |
+|---|---|---|
+| the **bell** — the tune | 53.9% | 57.4% |
+| the **organ** — the pad | **54.8%** | **58.8%** |
+
+Both measures prefer the organ, and they are not wrong about what they
+measure: the organ's C3 and E3 are the loudest components in the whole mix
+at −1 and −2 dB, so an arrangement that plays the organ matches the
+spectrum more closely than one that plays the bell. It is simply not the
+question. An arrangement whose melody is the pad has lost the piece, and no
+number here says so.
+
+This is the limit of the approach, stated as plainly as it can be: these
+measures are good at catching a tracker that has drifted an octave, a part
+that has fallen silent, a grid that is three halves out. They cannot be
+asked which part is the tune, and asking them gets the confident wrong
+answer, every time, by about a point and a half.
+
 ## 6. Where the remaining gap actually is
 
 The refit is worth +2.6 points over a whole recording (54.3% → 56.9%).
