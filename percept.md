@@ -172,6 +172,20 @@ Both move together under the strict guard. The unguarded search's extra 2.5
 points of fit were costing 7.2 points of coverage, so that difference was
 not an improvement in the arrangement at all.
 
+Re-run over the same three whole recordings with the guard on, every one
+improves on both measures:
+
+| | fit | peak coverage |
+|---|---|---|
+| first recording | 54.3 → **57.2%** | 57.4 → **59.3%** |
+| second | 56.4 → **60.7%** | 47.4 → **48.8%** |
+| third | 53.5 → **55.4%** | 45.3 → **47.1%** |
+
+The first recording is the one worth noting: the guard cost it *nothing* —
+the same 57.2% fit as the unguarded search — and bought 3.1 points of
+coverage. The unguarded search had not found a better arrangement there at
+all, only a way to keep the fit while shedding notes.
+
 The general lesson, which cost two rounds to learn: a single number is not
 enough to steer a search, however well founded that number is. There has to
 be a second one the search is forbidden to optimise, and it has to be
