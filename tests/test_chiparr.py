@@ -158,18 +158,29 @@ def main():
                  "some on ch0, none elsewhere",
                  glides[0] > 0 and sum(glides[1:]) == 0)
 
-    # the arpeggio must rest while the lead plays, or it is not an
-    # arrangement, it is four voices at once
-    lead_on = np.zeros(sc["frames"], bool)
-    for s, l, _p in sc["lead"]:
-        lead_on[s:s + l] = True
+    # the arpeggio must NOT rest - that is the whole rule. It rested under
+    # the lead in the first version and the arrangement measured 23.7% of
+    # the source's strong peaks covered, which is what thin sounds like
+    chord_on = np.zeros(sc["frames"], bool)
+    for st, l, _r, _k in sc["chords"]:
+        chord_on[st:st + l] = True
     arp = np.array(tracks[3].amp[:sc["frames"]]) > 0
-    clash = int((arp & lead_on[:len(arp)]).sum())
-    bad += check("arpeggio rests under the lead", "%d frames overlap" % clash,
-                 "0", clash == 0)
-    played = int(arp.sum())
-    bad += check("but it does play", "%d frames" % played, "over 200",
-                 played > 200)
+    want = int(chord_on[:len(arp)].sum())
+    got_n = int((arp & chord_on[:len(arp)]).sum())
+    bad += check("the arpeggio plays through every chord",
+                 "%d of %d chord frames" % (got_n, want), "over 95%",
+                 want and got_n > 0.95 * want)
+
+    # and nothing else falls silent either: four tone voices above the bass
+    m = min(len(t.amp) for t in tracks)
+    amps = np.array([t.amp[:m] for t in tracks])
+    tone = np.array([[bool(v) for v in t.tone[:m]] for t in tracks])
+    sounding = ((amps > 0) & tone).sum(axis=0)
+    bad += check("tone voices sounding a frame", "%.2f mean" % sounding.mean(),
+                 "over 3.5", sounding.mean() > 3.5)
+    bad += check("frames with two voices or fewer",
+                 "%.1f%%" % (100.0 * (sounding <= 2).mean()), "under 15%",
+                 (sounding <= 2).mean() < 0.15)
 
     # and it plays the right chord: the cue is D minor, so F not F#
     hzs = [h for h, amp in zip(tracks[3].hz, tracks[3].amp) if amp > 0]

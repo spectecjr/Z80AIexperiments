@@ -102,6 +102,22 @@ def tempo_of(fl, hz, lo=80.0, hi=170.0):
     return 60.0 * hz / best[1], best[2]
 
 
+def refine_peak(S, k):
+    """Sub-bin position of the peak at bin k, by parabola.
+
+    The correction is clamped to half a bin: if k is not actually a local
+    maximum the parabola can point anywhere at all, including at negative
+    frequencies, and a frequency of -3 Hz is a crash two functions later.
+    """
+    if not (0 < k < len(S) - 1):
+        return float(k)
+    a, b, c = float(S[k - 1]), float(S[k]), float(S[k + 1])
+    den = a - 2 * b + c
+    if den == 0.0:
+        return float(k)
+    return k + max(-0.5, min(0.5, 0.5 * (a - c) / den))
+
+
 def salience(mag, fr, lo, hi, partials=5, weight=0.8):
     """Harmonic sum: the pitch most of the energy is a harmonic of."""
     k = np.where((fr >= lo) & (fr <= hi))[0]
@@ -172,10 +188,7 @@ def track_bass(x, sr, rate, lo=45.0, hi=170.0, win=16384, thresh=0.12):
             if at(S, half) < 0.05 * at(S, k) or odd < 0.05 * at(S, k):
                 break
             k = int(round(half))
-        if 0 < k < len(S) - 1:
-            a0, b0, c0 = S[k - 1], S[k], S[k + 1]
-            den = a0 - 2 * b0 + c0
-            k = k + (0.5 * (a0 - c0) / den if den else 0.0)
+        k = refine_peak(S, int(round(k)))
         out[i] = k * step
         strength[i] = sal[j]
     if strength.max() > 0:
@@ -272,6 +285,73 @@ def track_viterbi(mag, fr, lo, hi, thresh=0.10, jump=2.0):
     for i in range(n - 1, 0, -1):
         path[i - 1] = back[i, path[i]]
     return np.array([0.0 if p == m else fs[p] for p in path])
+
+
+# one voice a register. Overlapping, because a melody does not stay in its
+# lane, but ordered so the top line is claimed first
+BANDS = ((400.0, 1600.0), (200.0, 700.0))
+
+
+def track_voices(mag, fr, bands=BANDS, thresh=0.09, cents_per_step=50.0):
+    """One melodic line per register, all of them at once.
+
+    One tracker finds one line, and a mix has more: measured on a real
+    recording, 200-2500 Hz holds a median of six strong partials a frame,
+    while an arrangement of a lead, its octave and an arpeggio puts two or
+    three voices there - one of them a duplicate of another. That gap is
+    what "thin" is, and it measured 23.7% of the source's strong peaks
+    covered within 60 cents.
+
+    Each frame, each band in turn: take the harmonic sum over that band,
+    claim its peak, then subtract that pitch's harmonic comb from the
+    spectrum so a lower band cannot claim the same note again.
+
+    Banding is what keeps a voice singing one line. Assigning the strongest
+    three peaks to three voices by continuity was tried first and it let
+    voice 0 run E4 - E5 - C5 - C4 - A3 in ten seconds, which is not a part,
+    and it let two voices land on A3 together. A register each cannot cross
+    and cannot duplicate.
+    """
+    step = fr[1] - fr[0]
+    plan = []
+    for lo, hi in bands:
+        n = int(round(1200 * math.log(hi / lo, 2) / cents_per_step)) + 1
+        cand = lo * 2 ** (np.arange(n) * cents_per_step / 1200.0)
+        bins = np.array([[int(round(f * h / step)) for h in range(1, 7)]
+                         for f in cand])
+        plan.append((cand, bins, bins < mag.shape[1]))
+    w = np.array([0.8 ** h for h in range(6)])
+
+    out = np.zeros((len(mag), len(bands)))
+    for i in range(len(mag)):
+        S = mag[i].copy()
+        ref = float(S.max())
+        if ref <= 0:
+            continue
+        for v, (cand, bins, ok) in enumerate(plan):
+            sal = np.zeros(len(cand))
+            for h in range(6):
+                m = ok[:, h]
+                sal[m] += w[h] * S[bins[m, h]]
+            j = int(np.argmax(sal))
+            if sal[j] <= thresh * ref * w.sum():
+                continue
+            f = cand[j]
+            got = refine_peak(S, int(round(f / step))) * step
+            if got > 0:
+                f = got
+            out[i, v] = f
+            for h in range(1, 9):               # take the note out of the
+                b = int(round(f * h / step))    # spectrum before the next
+                if b < len(S):                  # band looks at it
+                    S[max(0, b - 2):b + 3] = 0.0
+    for v in range(len(bands)):                 # median filter the gaps
+        col = out[:, v].copy()
+        for i in range(len(col)):
+            q = [x for x in out[max(0, i - 2):i + 3, v] if x > 0]
+            col[i] = float(np.median(q)) if len(q) >= 2 else 0.0
+        out[:, v] = col
+    return out
 
 
 def notes_of(f0, hz, grid, min_frames=3, max_jump=14):
@@ -444,6 +524,18 @@ def transcribe(x, sr, rate=50):
             if b < lead_mag.shape[1]:
                 lead_mag[i, max(0, b - 1):b + 2] *= 0.25
     lead = track_viterbi(lead_mag, fr, 250.0, 1600.0)
+    # the lead out of the way too, and whatever is left is the other parts:
+    # the inner lines a single tracker never sees, which are most of what a
+    # two-or-three-voice arrangement is missing
+    rest = lead_mag.copy()
+    for i, f in enumerate(lead):
+        if f <= 0:
+            continue
+        for h in range(1, 7):
+            b = int(round(f * h / (fr[1] - fr[0])))
+            if b < rest.shape[1]:
+                rest[i, max(0, b - 2):b + 3] *= 0.15
+    V = track_voices(rest, fr)
     bass_notes = notes_of(bass, rate, grid, 3)
     lead_notes = notes_of(lead, rate, grid, 3)
     chords = key_quality(chords_of(lead_mag, fr, rate, beat, phase,
@@ -452,6 +544,8 @@ def transcribe(x, sr, rate=50):
             "frames": len(mag), "harm": harm, "perc": perc, "fr": fr,
             "bass": bass_notes,
             "lead": lead_notes,
+            "voices": [notes_of(V[:, v], rate, grid, 3)
+                       for v in range(V.shape[1])],
             "chords": chords,
             "drums": drums_of(perc, fr, fl, rate, grid=grid),
             "flux": fl}

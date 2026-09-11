@@ -10,7 +10,20 @@ it sounds like one. Nothing in it holds a note, because nothing in it
 knows there is a note to hold.
 
 This is the other approach, and the one a chip musician would recognise:
-work out what the PARTS are, then play the parts.
+work out what the PARTS are, then play the parts — **all of them, every
+frame.**
+
+That last clause is the second version of this design, and it is a
+reversal. The first version let parts yield to each other: the arpeggio
+rested while the lead played, the drums held a channel of their own, the
+lead doubled itself an octave up. It measured **23.7%** of the source's
+strong 200–2500 Hz peaks covered by a chip voice within 60 cents (37.6%
+counting the odd harmonics a square really does produce), and it was
+audibly thin — the melody had holes in it and the mid register was empty
+most of the time. A part that goes quiet to make room for another part is
+a part the arrangement has lost. So nothing yields now, and the numbers
+moved to **57.8%** with 4.45 tone voices sounding in the average frame
+against two or three before.
 
     audio  ->  transcribe.py  ->  score  ->  chiparr.py  ->  registers
                 (bass, lead, chords, drums)      (six channels)
@@ -24,11 +37,14 @@ what makes an arrangement sound like music.
 | ch | part | notes |
 |----|------|-------|
 | 0 | bass, **and the kick** | the kick steals this channel for 5 frames |
-| 1 | lead | |
-| 2 | the lead an octave up | same frequency byte, octave register + 1 |
-| 3 | the chord, arpeggiated | **rests while the lead plays** |
-| 4 | the snare's tone | silent otherwise |
-| 5 | percussion noise | a fixed noise rate, not ch3's generator |
+| 1 | the lead | held through gaps in the tracking |
+| 2 | the second voice | the lead an octave up where the tracker found none |
+| 3 | the chord, arpeggiated | **always**, every frame of every chord |
+| 4 | the third voice | falls back to a sustained chord tone |
+| 5 | percussion | noise only, at a fixed rate, not ch3's generator |
+
+Four tone voices above the bass, against a median of six strong partials
+in the source: a reduction still, but no longer a sketch.
 
 Three of those deserve an explanation.
 
@@ -40,11 +56,20 @@ becomes a tone swept 150 Hz down to 82 Hz, then goes back. On the real
 recording measured below this happens 401 times, and it is why ch0 shows 401 glides in a
 disassembly where no other channel glides at all.
 
-**The arpeggio rests under the lead.** It did not, at first: it played
-throughout, ducked four levels when the lead was sounding. Bass plus lead
-plus lead-octave is already three voices, and a fourth running under them
-is the difference between an arrangement and a wall. The arpeggio's job
-is to fill the lead's gaps, so that is all it does now.
+**Nothing falls silent, including between notes.** A voice whose tracking
+drops out for a few frames holds its last note at a falling level for up
+to ten frames rather than stopping: a note that stops for four frames and
+starts again is heard as a fault, not as phrasing. Where a voice has
+nothing at all, it takes a fallback — ch2 plays the lead an octave up, ch4
+holds the chord's fifth — which is the chip version of reducing a line to
+a single tone instead of dropping it.
+
+**The arpeggio runs through every chord.** It did not, at first: it rested
+while the lead played, on the reasoning that bass plus lead plus
+lead-octave is three voices already. That reasoning was wrong in a way
+the measurement caught — the lead sounds for 80% of the recording's
+frames, so "rest under the lead" meant "do not play", and the mid register
+was empty. The mid register is the part, not the padding.
 
 **ch5's noise rate is fixed, not mode 3.** Mode 3 clocks the noise
 generator from the first channel of its group — ch3 for the second group —
@@ -60,8 +85,25 @@ reason; here it is the wrong choice.
 | tempo | flux autocorrelation, candidates folded, log-normal prior at 110 bpm | the unfolded peak read 96 bpm as 63.8 |
 | bass | 16,384-sample window, harmonic sum over 5 partials, then an octave test | see below |
 | lead | harmonic salience with the bass's partials suppressed, then Viterbi | a frame-by-frame argmax followed the metal hits |
+| the other voices | one line per register, from what the bass and lead leave behind | see below |
 | chords | chroma over a beat-aligned window, quality decided by the whole piece | see below |
 | drums | per-band **rise** at each onset, per bin, snapped to the sixteenth grid | absolute band energy misreads every hit |
+
+### The other voices: a register each
+
+One tracker finds one line, and the thing it finds is the melody — which
+leaves the inner parts, and in a mix there are several. The bass's and the
+lead's harmonic combs are attenuated out of the spectrogram first, so what
+the extra tracker sees is only what the first two did not explain.
+
+Assigning the strongest remaining peaks to voices by continuity was tried
+first, and it does not work: voice 0 ran E4 – E5 – C5 – C4 – A3 inside ten
+seconds, which is not a part, and two voices landed on A3 together because
+subtracting a harmonic comb does not stop a candidate 40 cents away from
+reclaiming the same note. Giving each voice a **register** — 400–1600 Hz
+and 200–700 Hz, claimed in that order, each claim subtracted before the
+next — cannot cross and cannot duplicate, and the lines come out
+singable.
 
 ### The bass, and two ways to be an octave out
 
@@ -126,16 +168,37 @@ On the recording it was developed against — 197 s, 9,898 frames at
 
 | | pairs a frame | T-states |
 |---|---|---|
-| mean | 1.77 | 131 |
-| median | 1 | 74 |
-| 99th percentile | 13 | 962 |
+| mean | 2.97 | 220 |
+| median | 2 | 148 |
+| 99th percentile | 11 | 814 |
 | worst frame | 31 | 2,294 |
 
 at the **measured** 74 T-states per (register, value) pair from
 `saa.z80s`. The worst frame is 1.9% of a 120,000 T-state frame, and the
-mean is 0.11%. The spectral arranger in `arrange.md` runs an order of
+mean is 0.18% — filling the arrangement out from two voices to five cost
+1.2 register pairs a frame, which is to say nothing at all. The spectral arranger in `arrange.md` runs an order of
 magnitude above this because it rewrites every channel every frame by
 construction.
+
+## 3a. Measuring "thin"
+
+"Too thin" is a judgement, and it was the right one twice about this
+arranger. `tests/cover.py` turns it into a number so the next change can
+be argued about with measurements:
+
+    python3 tests/cover.py source.wav arrangement.log
+
+Of the strong peaks in the source between 200 Hz and 2.5 kHz — strong
+meaning within 12 dB of that frame's loudest peak in that band — what
+fraction has a sounding chip voice within 60 cents of it. The chip's odd
+harmonics count as well as its fundamentals, because a square wave really
+does produce them and a source peak at 3f really is covered by a voice
+at f.
+
+| | peaks covered |
+|---|---|
+| parts that yield to each other | 37.6% |
+| parts that never yield | **57.8%** |
 
 ## 4. Checking it
 
@@ -150,9 +213,11 @@ part is known, so each answer is compared with the truth:
 - D minor the chord holding the most frames, every root diatonic to it;
 - all 39 drum hits on the sixteenth grid;
 - then the register log is read back with `chipdis.py`, which must find
-  ch2 as 2f of ch1, ch5 as noise, glides on ch0 and nowhere else, zero
-  frames where the arpeggio overlaps the lead, and D–F–A as the
-  arpeggio's three commonest notes.
+  ch2 as 2f of ch1, ch5 as noise, glides on ch0 and nowhere else, the
+  arpeggio sounding in every one of the 992 chord frames, D–F–A as its
+  three commonest notes, and **4.39 tone voices sounding in the average
+  frame** with fewer than 15% of frames down to two or less. That last
+  pair is the check that would have caught the thin version.
 
 The three trackers are also checked on signals built to break them: the
 weak-fundamental spectrum above, a plain sawtooth that must not be read an
@@ -161,12 +226,15 @@ harmonic sum learned to test for energy before taking an argmax of zeros.
 
 ## 5. What it still gets wrong
 
-- The lead sounds for 80% of the recording's frames. Some of that is the
-  track, which has a near-continuous melody; some of it is the tracker
-  following sustained harmonic content that a listener hears as pad. The
-  arpeggio's rest rule means the cost of this lands on the arpeggio.
-- No hi-hats are found in that recording at all: 401 kicks and 220 snares, and
-  nothing classified high. The rise test fixed a bias towards "hat" and
-  may now lean the other way on material whose hats are quiet.
+- 57.8% peak coverage is not 100%, and it cannot be: five tone voices
+  against a median of six strong partials sets the ceiling, and some of
+  those partials are a reverb tail or a cymbal that no square wave is
+  going to stand in for.
+- The extra voices are tracked per register, which is what stops them
+  wandering, but a part that crosses a band edge is handed from one
+  channel to another mid-phrase.
+- No hi-hats are found in that recording at all: 401 kicks and 220
+  snares, and nothing classified high. The rise test fixed a bias towards
+  "hat" and may now lean the other way on material whose hats are quiet.
 - Nothing uses the envelope generators, here or anywhere else in the repo.
   A per-note decay written at 50 Hz is what every part gets instead.

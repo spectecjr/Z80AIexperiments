@@ -1,32 +1,38 @@
 """A score onto six channels, the way a chip musician would spend them.
 
-transcribe.py reduces audio to four lines. This plays them:
+transcribe.py reduces audio to a bass line, a lead, two more melodic
+voices, a chord and a drum part. This plays them - all of them, every
+frame. That is the whole design rule, and it is the second version of it:
 
-    ch0   bass, one note at a time, moved up an octave if it is below
-          what a speaker will reproduce anyway - and the KICK, which steals
-          this channel for five frames. A kick and a bass note land on the
-          same beat in nearly every bar, so spending a second channel on the
-          pair buys nothing; stealing is what a chip musician does instead
-    ch1   lead
-    ch2   the lead an octave up, quieter - the same frequency byte with
-          the octave register one higher, so it costs nothing to work out.
-          It drops out above oct_top: a square wave at 2.6 kHz is not
-          thickening the lead, it is whistling over it
-    ch3   the chord, ARPEGGIATED: one note of the triad every few
-          frames, which is how three notes fit in one channel and is the
-          oldest trick in chip music. It RESTS while the lead plays: bass
-          plus lead plus lead-octave is already three voices, and a fourth
-          running under them is the difference between an arrangement and
-          a wall. The arpeggio is there to fill the lead's gaps
-    ch4   the snare's tone, under its noise - and nothing else, so most
-          frames it is silent
-    ch5   percussion noise, on a FIXED noise rate so it does not depend
-          on channel 3's tone generator, which the arpeggio is using
+    EVERY PART IDENTIFIED GETS A CHANNEL, AND KEEPS IT.
 
-Every part gets a per-note envelope in frames, because a flat level
-sounds like an organ and a decay sounds like an instrument. The
-percussion decays in three to six frames, the arpeggio in two, the bass
-and lead hold with a slight fall.
+The first version let parts yield to each other - the arpeggio rested
+while the lead played, the drums took a channel of their own - and the
+result measured 23.7% of the source's strong 200-2500 Hz peaks covered,
+which is audibly thin. A part that goes quiet to make room for another
+part is a part the arrangement has lost. So now nothing yields: a voice
+with nothing to play holds its last note or falls back to a chord tone,
+which is the chip version of reducing a line to a single tone rather than
+dropping it.
+
+    ch0   bass - and the KICK, which steals this channel for five frames.
+          A kick and a bass note land on the same beat in nearly every bar,
+          so spending a second channel on the pair buys nothing
+    ch1   the lead, held through the gaps in the tracking
+    ch2   the second voice. Where the tracker found none, the lead an
+          octave up, so this channel is never silent under a lead
+    ch3   the chord, ARPEGGIATED, ALWAYS. This is the mid register, and
+          it is the part the first version threw away
+    ch4   the third voice, falling back to a sustained chord tone
+    ch5   percussion, noise only, at a fixed rate - NOT mode 3, which
+          clocks from ch3's tone generator, and ch3 is running the
+          arpeggio. A snare whose brightness follows the chord is not a
+          snare
+
+Four tone voices above the bass, then, against a median of six strong
+partials in the source - so the arrangement is a reduction, but it is no
+longer a sketch. Levels are set so the four do not sum past the mixer:
+the lead leads, the inner voices sit under it, the arpeggio under those.
 """
 import math
 
@@ -135,40 +141,92 @@ def decay(level, k, fall):
     return int(round(max(0, level - fall * k)))
 
 
-def build(sc, bass_lvl=13, lead_lvl=12, oct_lvl=6, arp_lvl=9,
-          arp_step=4, drum_lvl=13, bass_min=60.0, kick_len=5,
-          oct_top=1800.0):
-    """A transcription to six channels of chip."""
+def build(sc, bass_lvl=13, lead_lvl=12, v2_lvl=9, v3_lvl=7, arp_lvl=7,
+          arp_step=4, drum_lvl=12, bass_min=60.0, kick_len=5, hold=10,
+          top=1900.0):
+    """A transcription to six channels of chip, with nothing left out."""
     n = sc["frames"]
     o = Out(n)
+    voices = sc.get("voices") or [[], []]
 
+    def lay(ch, notes, level, fall, cap=top):
+        """A part onto a channel, note by note."""
+        on = np.zeros(n, bool)
+        for start, length, pitch in notes:
+            hz = midi_hz(pitch)
+            while hz > cap:                     # a square at 3 kHz whistles
+                hz /= 2.0                       # over the arrangement
+            for k in range(length):
+                i = start + k
+                if 0 <= i < n:
+                    o.tone(ch, i, hz, decay(level, k, fall))
+                    on[i] = True
+        return on
+
+    bass_on = np.zeros(n, bool)
     for start, length, pitch in sc["bass"]:
         hz = midi_hz(pitch)
         while hz < bass_min:                 # nothing reproduces 37 Hz, and
             hz *= 2                          # the chip's bottom octave is mud
         for k in range(length):
             o.tone(0, start + k, hz, decay(bass_lvl, k, 0.12))
+            if 0 <= start + k < n:
+                bass_on[start + k] = True
 
+    lead_on = lay(1, sc["lead"], lead_lvl, 0.06)
+    v2_on = lay(2, voices[0] if len(voices) > 0 else [], v2_lvl, 0.05)
+    v3_on = lay(4, voices[1] if len(voices) > 1 else [], v3_lvl, 0.05)
+
+    # where the second voice found nothing, the lead an octave up. The
+    # channel is there either way; it may as well thicken the lead
     for start, length, pitch in sc["lead"]:
-        hz = midi_hz(pitch)
+        hz = midi_hz(pitch) * 2
+        while hz > top:
+            hz /= 2.0
         for k in range(length):
-            lv = decay(lead_lvl, k, 0.06)
-            o.tone(1, start + k, hz, lv)
-            if hz * 2 <= oct_top:
-                o.tone(2, start + k, hz * 2, max(0, lv - (lead_lvl - oct_lvl)))
+            i = start + k
+            if 0 <= i < n and not v2_on[i]:
+                o.tone(2, i, hz, decay(v2_lvl - 2, k, 0.05))
 
-    lead_on = np.zeros(n, bool)             # so the arpeggio can get out of
-    for start, length, _p in sc["lead"]:     # the lead's way entirely
-        lead_on[start:start + length] = True
+    # the chord, arpeggiated, every frame of every chord - and the third
+    # voice holds a chord tone wherever the tracker gave it nothing, so
+    # neither channel ever falls silent mid-phrase
     for start, length, root, kind in sc["chords"]:
         notes = [48 + root + s for s in TRIAD[kind]]
         for k in range(0, length, arp_step):
             hz = midi_hz(notes[(k // arp_step) % len(notes)])
             for j in range(arp_step):
                 i = start + k + j
-                if i < 0 or i >= n or lead_on[i]:
-                    continue
-                o.tone(3, i, hz, decay(arp_lvl, j, 1.5))
+                if 0 <= i < n:
+                    o.tone(3, i, hz, decay(arp_lvl, j, 1.2))
+        fill = midi_hz(notes[2])                # the fifth, up where it
+        for k in range(length):                 # will not mud the root
+            i = start + k
+            if 0 <= i < n and not v3_on[i]:
+                o.tone(4, i, fill * 2, max(0, v3_lvl - 3))
+
+    # a part whose tracking drops out for a moment holds instead of
+    # flickering: a note that stops for four frames and starts again is
+    # heard as a fault, not as phrasing
+    for ch, on in ((1, lead_on), (2, v2_on), (4, v3_on)):
+        gap = 0
+        for i in range(1, n):
+            if o.sounded[ch, i]:
+                gap = 0
+                continue
+            if o.sounded[ch, i - 1] or gap:
+                gap += 1
+                if gap <= hold:
+                    o.oct[ch, i] = o.oct[ch, i - 1]
+                    o.byte[ch, i] = o.byte[ch, i - 1]
+                    lv = int(o.lvl[ch, i - 1]) - 1
+                    if lv > 0:
+                        o.lvl[ch, i] = lv
+                        o.sounded[ch, i] = True
+                    else:
+                        gap = hold + 1
+                else:
+                    gap = hold + 1
 
     for i, kind, vel in sc["drums"]:
         lv = int(round(drum_lvl * (0.55 + 0.45 * vel)))
@@ -178,7 +236,6 @@ def build(sc, bass_lvl=13, lead_lvl=12, oct_lvl=6, arp_lvl=9,
                 o.force(0, i + k, f, decay(lv, k, 2.2))      # on the bass
         elif kind == "snare":
             for k in range(5):
-                o.tone(4, i + k, 190.0, decay(lv - 3, k, 2.0))
                 o.hiss(5, i + k, 1, decay(lv, k, 2.2))
         else:
             for k in range(3):

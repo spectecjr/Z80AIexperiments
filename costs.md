@@ -82,9 +82,9 @@ T-states** a (register, value) pair from `saa.z80s`:
 
 | | pairs a frame | T-states |
 |---|---|---|
-| mean | 1.77 | 131 — 0.11% of a 120,000 T-state frame |
-| median | 1 | 74 |
-| 99th percentile | 13 | 962 |
+| mean | 2.97 | 220 — 0.18% of a 120,000 T-state frame |
+| median | 2 | 148 |
+| 99th percentile | 11 | 814 |
 | worst frame | 31 | 2,294 — 1.9% |
 
 See `chiparr.md`; `arrange.md` is the other way of doing it, an order of
@@ -185,6 +185,8 @@ else happens at all.
 | **The same, taking the shortest lag within 85% of the best** | read a 73.4 Hz saw as D3 (+1200 cents) and the recording an octave above its real line | it takes the half-period peak instead; no tie-break on lag length fixes both directions. Replaced by a 16,384-sample harmonic sum plus an odd-harmonic octave test, which reads the saw at 73.4 Hz exactly — see `chiparr.md` |
 | **Band energy to classify a drum hit** | every one of a cue's 16 metal hits came out "hat" | a sustained hi-hat contributes to the high band whether or not it is part of this hit, and a band three octaves wide sums more bins than one an octave wide. It is the per-bin *rise* at the onset that is the hit |
 | **Chord quality decided per window** | a D minor cue's first two bars came out D major, and the arpeggio played F# against them | those bars contain no third at all. Each root now takes the quality the whole piece's evidence gives it, weighted by duration |
+| **Letting the parts yield to each other** (`chiparr.py` v1) — the arpeggio resting under the lead, a channel each for the drums, the lead doubling itself | 37.6% of the source's strong 200-2500 Hz peaks covered, 2 to 3 tone voices a frame | the lead sounds for 80% of the recording, so "rest under the lead" means "do not play", and the mid register is then empty. Nothing yields now: 57.8% covered, 4.45 voices a frame, for 1.2 more register pairs a frame |
+| **Assigning the extra voices by continuity** rather than by register | voice 0 ran E4 - E5 - C5 - C4 - A3 inside ten seconds, and two voices landed on A3 together | subtracting a claimed note's harmonic comb does not stop a candidate 40 cents away reclaiming it. A register each cannot cross and cannot duplicate |
 | **Divide to get a DDA step** rather than a reciprocal table | `pf_div` 850 T-states against 342 for two quarter-square multiplies | the table (384 bytes) won, but not by enough to save the design |
 
 ## 6. Sizes, and what the shape costs
