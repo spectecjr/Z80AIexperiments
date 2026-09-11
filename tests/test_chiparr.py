@@ -94,11 +94,16 @@ def main():
     bad += check("tempo", "%.1f bpm" % sc["bpm"], "96 bpm",
                  abs(sc["bpm"] - 96.0) < 4.0)
 
-    # the cue's bass is a saw at D2 with a sine an octave under it
+    # The cue's bass is a saw at D2 over a sine an octave below it, so D1
+    # and D2 are both right answers about the note and the tracker may give
+    # either - what must never happen is a different PITCH CLASS. (It gave
+    # E1 once, two semitones out, because the candidate grid's floor sat at
+    # 40 Hz and the octave search piled up against it.)
     bb = [T.from_midi(p) for _s, _l, p in sc["bass"]]
     med = float(np.median(bb)) if bb else 0.0
+    cents = 1200 * np.log2(med / 36.71) if med else 999
     bad += check("bass note", "%.1f Hz %s" % (med, note_of(med) if med else "-"),
-                 "73.4 Hz D2", med and abs(1200 * np.log2(med / 73.42)) < 60)
+                 "D, at D1 or D2", med and min(abs(cents), abs(cents - 1200)) < 60)
     cover = sum(l for _s, l, _p in sc["bass"]) / float(sc["frames"])
     bad += check("bass covers the cue", "%.0f%% of frames" % (100 * cover),
                  "over 40%", cover > 0.40)
@@ -187,6 +192,15 @@ def main():
                  want and got_n > 0.95 * want)
 
     # and nothing else falls silent either: four tone voices above the bass
+    # and whatever octave the tracker chose, the channel must play the note
+    # where a speaker can reproduce it
+    ch0 = [h for h, a, t in zip(tracks[0].hz, tracks[0].amp, tracks[0].tone)
+           if a > 0 and t and h > 0]
+    lo_hz = float(np.percentile(ch0, 10)) if ch0 else 0.0
+    bad += check("ch0 plays the bass above 60 Hz",
+                 "10th percentile %.1f Hz" % lo_hz, "over 60",
+                 lo_hz > 60.0)
+
     m = min(len(t.amp) for t in tracks)
     amps = np.array([t.amp[:m] for t in tracks])
     tone = np.array([[bool(v) for v in t.tone[:m]] for t in tracks])

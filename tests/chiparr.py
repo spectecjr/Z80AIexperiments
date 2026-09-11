@@ -148,7 +148,7 @@ def decay(level, k, fall, floor=0.55):
     return int(round(max(level * floor, level - fall * k)))
 
 
-def fold_lead(notes, window=7, span=4):
+def fold_lead(notes, window=7, span=4, fixed=None):
     """The melody into one register, keeping every pitch class.
 
     A pitch tracker picks whichever partial is loudest, so the line it
@@ -170,6 +170,9 @@ def fold_lead(notes, window=7, span=4):
     raw = [float(p) for _s, _l, p in notes]
     out = []
     for i, (start, length, pitch) in enumerate(notes):
+        if fixed is not None and i < len(fixed) and fixed[i]:
+            out.append((start, length, pitch))    # the spectrum vouches for
+            continue                              # this octave: leave it
         lo = max(0, i - span)
         ref = float(np.median(raw[lo:i + span + 1]))
         p = float(pitch)
@@ -183,7 +186,7 @@ def fold_lead(notes, window=7, span=4):
 
 def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
           arp_step=4, drum_lvl=12, bass_min=60.0, kick_len=5, hold=10,
-          top=1900.0, fold=7, vib_cents=14.0, vib_frames=10,
+          top=2700.0, fold=7, vib_cents=14.0, vib_frames=10,
           vib_after=8):
     """A transcription to six channels of chip, with nothing left out."""
     n = sc["frames"]
@@ -214,8 +217,13 @@ def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
                 on[i] = True
         return on
 
+    # the bass gets the same octave treatment as the lead: on one recording
+    # its line leapt more than a seventh on 189 of 841 steps, with a median
+    # note of eight frames, which is not a bass line but a tracker changing
+    # its mind. The fold only moves notes the spectrum does not vouch for
     bass_on = np.zeros(n, bool)
-    for start, length, pitch in sc["bass"]:
+    for start, length, pitch in fold_lead(sc["bass"], fold,
+                                          fixed=sc.get("bass_fixed")):
         hz = midi_hz(pitch)
         while hz < bass_min:                 # nothing reproduces 37 Hz, and
             hz *= 2                          # the chip's bottom octave is mud
@@ -224,7 +232,7 @@ def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
             if 0 <= start + k < n:
                 bass_on[start + k] = True
 
-    lead = fold_lead(sc["lead"], fold)
+    lead = fold_lead(sc["lead"], fold, fixed=sc.get("lead_fixed"))
     lead_on = lay(1, lead, lead_lvl, 0.06, vib=(vib_cents, vib_frames,
                                                 vib_after))
     v2_on = lay(2, voices[0] if len(voices) > 0 else [], v2_lvl, 0.05)
@@ -250,7 +258,10 @@ def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
     # voice holds a chord tone wherever the tracker gave it nothing, so
     # neither channel ever falls silent mid-phrase
     for start, length, root, kind in sc["chords"]:
-        notes = [48 + root + s for s in TRIAD[kind]]
+        # each chord tone at two octaves, alternating: six steps instead of
+        # three, and it reaches into 260-520 Hz where otherwise only the
+        # lead goes. Measured better in all three bands than a flat triad
+        notes = [48 + root + s + o for s in TRIAD[kind] for o in (0, 12)]
         for k in range(0, length, arp_step):
             hz = midi_hz(notes[(k // arp_step) % len(notes)])
             for j in range(arp_step):
@@ -286,11 +297,17 @@ def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
                 else:
                     gap = hold + 1
 
-    for i, kind, vel in sc["drums"]:
+    kicks = [q[0] for q in sc["drums"] if q[1] == "kick"]
+    for j, (i, kind, vel) in enumerate(sc["drums"]):
         lv = int(round(drum_lvl * (0.55 + 0.45 * vel)))
         if kind == "kick":
-            for k in range(kick_len):        # a tone swept down, which is
-                f = 150.0 * (0.55 ** (k / float(kick_len - 1)))   # a kick,
+            # how long the steal lasts depends on how soon the next kick is.
+            # A track with eighth-note kicks would otherwise spend 30% of its
+            # frames with no bass at all; an accent is enough
+            nxt = next((q for q in kicks if q > i), i + 99)
+            span = max(2, min(kick_len, nxt - i - 2))
+            for k in range(span):            # a tone swept down, which is
+                f = 150.0 * (0.55 ** (k / float(max(1, span - 1))))  # a kick,
                 o.force(0, i + k, f, decay(lv, k, 2.2))      # on the bass
         elif kind == "snare":
             for k in range(5):

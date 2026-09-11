@@ -137,6 +137,50 @@ it runs out of note. Levels now fall to a sustain at 55% of the attack,
 not to silence, which also *reduced* the register writes, because a level
 that has stopped changing stops being written.
 
+### A second recording, and what it found
+
+Everything above was measured on one recording, which is how an arranger
+ends up fitted to one recording. A second one — a different artist, 94 bpm,
+E minor, eighth-note kicks — covered 49.0% against the first one's 57.5%,
+and the gap was three defects the first recording could not have shown:
+
+**The bass tracker could not name a low note.** Its candidates were the
+FFT's own bins, and at 16,384 samples a bin is 2.7 Hz: a sixth of a
+semitone at 300 Hz, but four fifths of one at 58 Hz. A measured B1 came
+back as A#1 on every frame it sounded. The candidates are a logarithmic
+grid at 15 cents now, with each harmonic collected over its bin's
+neighbours so a candidate a few cents off still earns its own energy.
+Pitch-class accuracy on that recording's bass went from 6 of 20 seconds to
+10 of 20.
+
+**The bass tracker was following the kick.** A kick is a pitch too — 40 to
+60 Hz of it — and with eighth-note kicks the bass line came back
+alternating E1 with a different note every time, which is the real bass
+and the kick taking turns. The drums are found first now and the bass
+track is blanked for five frames at each kick, with the note segmenter's
+median bridging the gap: leaps wider than a seventh fell from 189 of 841
+to 43 of 820.
+
+**Everything was a kick.** 862 kicks against 86 snares and 7 hats. Two
+causes: the low band ran 40–140 Hz, which contains a bass note's
+fundamental, so every bass attack read as a kick; and the onset threshold
+was a fraction of the *global* peak flux, which on a track with even
+dynamics passes almost every ripple — 2.81 hits a beat, a hit on nearly
+every sixteenth of four minutes. The low band is 40–90 Hz now, a kick must
+also out-rise the mid band by half again, and the threshold is local: a
+peak must stand above the median flux of the second around it. 2.81 hits a
+beat became 2.30, of which the kicks are now a plausible count rather than
+90% of everything.
+
+The kick's steal of the bass channel is also adaptive now. At two kicks a
+beat a fixed five-frame steal spends 30% of the track with no bass at all,
+so the steal is capped at the gap to the next kick: an accent, not a hole.
+
+A third defect was in the *cue*, found by the same change: dropping the
+candidate floor to 40 Hz put it just above the cue's sub at D1 (36.7 Hz),
+so the octave search piled up against the grid's bottom edge and reported
+E1 — two semitones wrong. The floor is 36 Hz.
+
 ### The other voices: a register each
 
 One tracker finds one line, and the thing it finds is the melody — which
@@ -247,7 +291,27 @@ at f.
 |---|---|
 | parts that yield to each other | 37.6% |
 | parts that never yield | 57.8% |
-| the same, with the lead folded and brought forward | **57.9%** |
+| the lead folded and brought forward | 57.9% |
+| the high register given its own channel | **57.4%** |
+
+and per band, on two recordings:
+
+| | 200–700 Hz | 700–1400 | 1400–2500 |
+|---|---|---|---|
+| first recording, lead-octave on ch2 | 63.2% | 53.2% | 53.6% |
+| first recording, high voice on ch2 | 55.8% | 59.3% | **57.6%** |
+| second recording, high voice on ch2 | 44.5% | 48.8% | 50.6% |
+
+The second row is the trade that was taken deliberately, and it is worth
+being plain about: giving the high register a channel of its own cost the
+low-mid eight points and the total half a point. It was taken because a
+high melody line going missing is a part lost, where the low-mid is
+covered in part by the lead, the arpeggio and the bass's own harmonics.
+The split (1200–2600 Hz for the high voice, 200–700 for the low) was
+chosen by sweeping both against all three bands and taking the
+configuration whose **worst** band was best rather than whose mean was:
+one scoring 70% up high while leaving 49% in the middle has lost a part,
+and losing a part is the failure mode.
 
 The third row is worth a note: folding the lead into one register moves
 notes out of the octave the tracker found them in, and on its own that
@@ -284,7 +348,13 @@ harmonic sum learned to test for energy before taking an argmax of zeros.
 
 ## 5. What it still gets wrong
 
-- 57.8% peak coverage is not 100%, and it cannot be: five tone voices
+- The second recording sits at 47.4% against the first one's 57.4%, and
+  the reason is its bass: its pitch class is right 10 seconds in 20, not
+  because the tracker is unstable any more but because the track carries a
+  sub *and* a bass line and the two disagree about the octave. The
+  arrangement lifts everything under 60 Hz, so the played octave comes out
+  right where the class does.
+- 57.4% peak coverage is not 100%, and it cannot be: five tone voices
   against a median of six strong partials sets the ceiling, and some of
   those partials are a reverb tail or a cymbal that no square wave is
   going to stand in for.

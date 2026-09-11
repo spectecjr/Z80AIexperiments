@@ -132,7 +132,8 @@ def salience(mag, fr, lo, hi, partials=5, weight=0.8):
     return out, fr[k]
 
 
-def track_bass(x, sr, rate, lo=45.0, hi=170.0, win=16384, thresh=0.12):
+def track_bass(x, sr, rate, lo=36.0, hi=170.0, win=16384, thresh=0.12,
+               cents_per_step=15.0, oct_ratio=0.05):
     """Bass pitch from a long window, by harmonic sum.
 
     Autocorrelation is the obvious tool and it is the wrong one: a periodic
@@ -153,7 +154,18 @@ def track_bass(x, sr, rate, lo=45.0, hi=170.0, win=16384, thresh=0.12):
     fr = np.fft.rfftfreq(win, 1.0 / sr)
     step = fr[1] - fr[0]
     top = int(hi * 5.2 / step) + 2              # five harmonics, and a little
-    cand = np.arange(int(lo / step), int(hi / step) + 1)
+    # A LOGARITHMIC candidate grid, not the FFT's own bins. At 16,384 samples
+    # a bin is 2.7 Hz, which up at 300 Hz is a sixth of a semitone but down at
+    # 58 Hz is four fifths of one - so a candidate set of integer bins cannot
+    # even name the note, and a measured B1 came back as A#1, a semitone
+    # flat, on every frame it sounded.
+    n_cand = int(round(1200 * math.log(hi / lo, 2) / cents_per_step)) + 1
+    cand_hz = lo * 2 ** (np.arange(n_cand) * cents_per_step / 1200.0)
+    # each harmonic of each candidate, as a bin, with its neighbours: a
+    # candidate a few cents off still has to collect its own energy
+    hbins = np.array([[int(round(f * h / step)) for h in range(1, 6)]
+                      for f in cand_hz])
+
     def at(S, k):
         k = int(round(k))
         return float(S[max(0, k - 2):k + 3].max()) if 0 <= k < len(S) else 0.0
@@ -167,29 +179,31 @@ def track_bass(x, sr, rate, lo=45.0, hi=170.0, win=16384, thresh=0.12):
         S = np.abs(np.fft.rfft(seg * w))[:top]  # argmax of zeros is bin zero
         if not S.size:
             continue
-        sal = np.zeros(len(cand))
-        for h in range(1, 6):
-            k = cand * h
-            ok = k < len(S)
-            sal[ok] += S[k[ok]] / h             # later harmonics weigh less
+        pad = np.concatenate([S, np.zeros(3)])
+        sal = np.zeros(n_cand)
+        for h in range(5):
+            b = np.clip(hbins[:, h], 0, len(S) - 1)
+            near = np.maximum(np.maximum(pad[b - 1], pad[b]), pad[b + 1])
+            sal += near / (h + 1.0)             # later harmonics weigh less
         j = int(np.argmax(sal))
-        k = cand[j]
+        f = cand_hz[j]
         # the octave question. The sum above is pulled to whichever partial
         # is loudest, and in a mix whose bass fundamental is rolled off that
         # is the second harmonic. What settles it is the ODD harmonics of
         # the note an octave down - 3f/2 and 5f/2 are not harmonics of f at
         # all, so energy there can only come from the lower note really
-        # being played. (Measured on the same file: at 6 s the ladder runs
+        # being played. (Measured on a real recording: at 6 s the ladder ran
         # 65.4 / 130.8 / 196 / 261.6 with nothing at 98, which is C2 with a
         # quiet fundamental, not C3 with a rumble underneath.)
-        while k / 2.0 * step >= lo:
-            half = k / 2.0
-            odd = max(at(S, half * 3), at(S, half * 5))
-            if at(S, half) < 0.05 * at(S, k) or odd < 0.05 * at(S, k):
+        while f / 2.0 >= lo:
+            half = f / 2.0
+            odd = max(at(S, half * 3 / step), at(S, half * 5 / step))
+            if at(S, half / step) < oct_ratio * at(S, f / step) \
+                    or odd < oct_ratio * at(S, f / step):
                 break
-            k = int(round(half))
-        k = refine_peak(S, int(round(k)))
-        out[i] = k * step
+            f = half
+        got = refine_peak(S, int(round(f / step))) * step
+        out[i] = got if got > 0 else f
         strength[i] = sal[j]
     if strength.max() > 0:
         out[strength < thresh * strength.max()] = 0.0
@@ -300,12 +314,21 @@ def track_viterbi(mag, fr, lo, hi, thresh=0.10, jump=0.30, max_step=7):
     return out
 
 
-# one voice a register. Overlapping, because a melody does not stay in its
-# lane, but ordered so the top line is claimed first
-BANDS = ((400.0, 1600.0), (200.0, 700.0))
+# One voice a register, and the TOP one reaches to 2.6 kHz. It used to stop
+# at 1.6, which is where the lead tracker stops too, so a line above that
+# was carried by nothing at all - and a listener hears that as the high
+# melody going missing.
+# Chosen by sweeping both against the source's peaks in three bands at once
+# (200-700, 700-1400, 1400-2500 Hz) and taking the split whose WORST band is
+# best, not the one whose mean is best: a configuration that covers 70% of
+# the top band while leaving 49% of the middle has lost a part, and losing a
+# part is the whole failure mode. This one measured 60.1 / 58.4 / 58.7.
+HIGH = (1200.0, 2600.0)
+LOW = (200.0, 700.0)
 
 
-def track_voices(mag, fr, bands=BANDS, thresh=0.09, cents_per_step=50.0):
+def track_voices(mag, fr, bands=(HIGH, LOW), thresh=0.09,
+                 cents_per_step=50.0):
     """One melodic line per register, all of them at once.
 
     One tracker finds one line, and a mix has more: measured on a real
@@ -442,7 +465,7 @@ def chords_of(mag, fr, hz, beat_frames, phase, lo=150.0, hi=2000.0,
     return out
 
 
-def drums_of(mag, fr, fl, hz, thresh=0.25, grid=None):
+def drums_of(mag, fr, fl, hz, thresh=0.12, rel=0.22, grid=None):
     """Onsets, and what kind of hit each one is.
 
     The kind is decided on how much each band *rises* at the onset, per bin,
@@ -451,12 +474,25 @@ def drums_of(mag, fr, fl, hz, thresh=0.25, grid=None):
     """
     pk = []
     f = fl / max(1e-12, fl.max())
+    # the threshold has to be LOCAL. Against the global maximum, a track
+    # whose loudest moment is much louder than its average passes almost
+    # every ripple: measured, one recording produced 2.81 hits a beat, which
+    # is a hit on nearly every sixteenth of every bar of four minutes.
+    half = 50
+    local = np.array([np.median(f[max(0, i - half):i + half + 1])
+                      for i in range(len(f))])
     for i in range(2, len(f) - 2):
-        if f[i] == max(f[i - 2:i + 3]) and f[i] > thresh:
-            if not pk or i - pk[-1] >= 4:
-                pk.append(i)
+        if f[i] != max(f[i - 2:i + 3]):
+            continue
+        if f[i] < thresh or f[i] < local[i] + rel * (1.0 - local[i]):
+            continue
+        if not pk or i - pk[-1] >= 4:
+            pk.append(i)
     bands = {}
-    for name, (lo, hi) in (("low", (40, 140)), ("mid", (160, 1200)),
+    # 40-90, not 40-140: a bass note's fundamental sits in 60-140 and its
+    # attack then reads as a kick. One recording came back as 862 kicks
+    # against 86 snares and 7 hats, which is not a drum kit
+    for name, (lo, hi) in (("low", (40, 90)), ("mid", (160, 1200)),
                            ("high", (3000, 12000))):
         k = np.where((fr >= lo) & (fr < hi))[0]
         bands[name] = mag[:, k].mean(axis=1) if len(k) else np.zeros(len(mag))
@@ -467,7 +503,9 @@ def drums_of(mag, fr, fl, hz, thresh=0.25, grid=None):
             before = b[max(0, i - 3):max(1, i - 1)].min() if i >= 2 else b[i]
             rise[name] = max(0.0, b[i] - before)
         tot = sum(rise.values()) + 1e-12
-        if rise["low"] / tot > 0.35:
+        # and a kick's rise is concentrated low, where a bass note's attack
+        # lifts its harmonics with it
+        if rise["low"] / tot > 0.35 and rise["low"] > 1.5 * rise["mid"]:
             kind = "kick"
         elif rise["high"] / tot > 0.55:
             kind = "hat"
@@ -498,6 +536,39 @@ def snap(hits, grid):
     return [best[k] for k in sorted(best)]
 
 
+def octave_fixed(mag, fr, notes, ratio=0.30):
+    """Which notes are certainly in the octave the tracker put them in.
+
+    A pitch tracker's octave is a guess, and an arranger that folds a
+    melody into one register has to know which guesses to respect: fold a
+    note that really was up there and the high line disappears, which is
+    what a listener reports as losing the melody.
+
+    The test is the one that settled the bass. A note at f could be the
+    second harmonic of f/2, and what distinguishes the two is the ODD
+    harmonics of f/2: 3f/2 and 5f/2 are not harmonics of f at all, so
+    energy there can only come from f/2 really being played. No energy
+    there means f is a fundamental in its own right, and folding it down
+    would move a note the composer wrote.
+    """
+    step = fr[1] - fr[0]
+
+    def at(row, f):
+        b = int(round(f / step))
+        return float(row[max(0, b - 2):b + 3].max()) if b < len(row) else 0.0
+
+    out = []
+    for start, length, pitch in notes:
+        f = from_midi(pitch)
+        lo = max(0, min(start, len(mag) - 1))
+        hi = max(lo + 1, min(start + length, len(mag)))
+        row = mag[lo:hi].mean(axis=0)
+        here = at(row, f)
+        odd = max(at(row, f / 2 * 3), at(row, f / 2 * 5))
+        out.append(here > 0 and odd < ratio * here)
+    return out
+
+
 def key_quality(chords):
     """One quality per root across the whole piece.
 
@@ -526,7 +597,16 @@ def transcribe(x, sr, rate=50):
     bpm, phase = tempo_of(fl, rate)
     beat = 60.0 * rate / bpm
     grid = (phase % max(1, int(round(beat / 4))), max(1, int(round(beat / 4))))
+    drums = drums_of(perc, fr, fl, rate, grid=grid)
     bass = track_bass(mono, sr, rate)
+    # A kick is a pitch too - 40 to 60 Hz of it - and the bass tracker will
+    # happily report it. Measured on a recording with eighth-note kicks, the
+    # bass line came back alternating E1 with a different note every time,
+    # which is the real bass and the kick taking turns. Blank those frames
+    # and let the note segmenter's median bridge them.
+    for i, kind, _v in drums:
+        if kind == "kick":
+            bass[max(0, i - 1):i + 4] = 0.0
     # take the bass's harmonics off before looking for the lead
     lead_mag = harm.copy()
     for i, f in enumerate(bass):
@@ -548,17 +628,30 @@ def transcribe(x, sr, rate=50):
             b = int(round(f * h / (fr[1] - fr[0])))
             if b < rest.shape[1]:
                 rest[i, max(0, b - 2):b + 3] *= 0.15
-    V = track_voices(rest, fr)
+    # The high voice is tracked with the lead still IN the spectrum, on
+    # purpose. Above the lead, "a separate part" and "the lead's own octave"
+    # are the same frequencies, and taking the lead's harmonics out to tell
+    # them apart removes the high line either way - which is how it went
+    # missing. Whichever it is, it belongs on a channel.
+    hi = track_voices(lead_mag, fr, bands=(HIGH,))
+    lo = track_voices(rest, fr, bands=(LOW,))
+    V = np.concatenate([hi, lo], axis=1)
     bass_notes = notes_of(bass, rate, grid, 3)
     lead_notes = notes_of(lead, rate, grid, 3)
+    lead_fixed = octave_fixed(harm, fr, lead_notes)
+    bass_fixed = octave_fixed(harm, fr, bass_notes)
     chords = key_quality(chords_of(lead_mag, fr, rate, beat, phase,
                                    melody=lead_notes + bass_notes))
     return {"bpm": bpm, "beat": beat, "grid": grid, "rate": rate,
             "frames": len(mag), "harm": harm, "perc": perc, "fr": fr,
             "bass": bass_notes,
             "lead": lead_notes,
+            # which octaves the spectrum vouches for, so the arranger knows
+            # which ones it must not fold away
+            "lead_fixed": lead_fixed,
+            "bass_fixed": bass_fixed,
             "voices": [notes_of(V[:, v], rate, grid, 3)
                        for v in range(V.shape[1])],
             "chords": chords,
-            "drums": drums_of(perc, fr, fl, rate, grid=grid),
+            "drums": drums,
             "flux": fl}
