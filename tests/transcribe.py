@@ -68,38 +68,77 @@ def flux(mag):
     return np.concatenate([[0.0], f])
 
 
-def tempo_of(fl, hz, lo=80.0, hi=170.0):
-    """Beats a minute, and where the beats fall."""
-    f = fl - fl.mean()
-    ac = np.correlate(f, f, "full")[len(f) - 1:]
-    lags = np.arange(len(ac))
-    ok = (lags > hz * 60.0 / hi) & (lags < hz * 60.0 / lo)
-    if not ok.any():
-        return 120.0, 0
-    lag = int(np.argmax(np.where(ok, ac, -1e30)))
-    # A tempo estimate is routinely out by a factor of two or of three
-    # halves - a dotted pulse looks exactly like a beat to an
-    # autocorrelation - so try the relatives and keep whichever pulse
-    # train actually lines up best per pulse, inside a sane range.
-    cands = set()
-    for mult in (0.5, 2.0 / 3, 1.0, 1.5, 2.0):
-        L = int(round(lag * mult))
-        if L > 3 and lo <= 60.0 * hz / L <= hi:
-            cands.add(L)
+def onset_peaks(fl, thresh=0.12, rel=0.22, half=50, min_gap=4):
+    """Where the onsets are: local maxima of the flux, over a local floor."""
+    f = fl / max(1e-12, fl.max())
+    local = np.array([np.median(f[max(0, i - half):i + half + 1])
+                      for i in range(len(f))])
+    out = []
+    for i in range(2, len(f) - 2):
+        if f[i] != max(f[i - 2:i + 3]):
+            continue
+        if f[i] < thresh or f[i] < local[i] + rel * (1.0 - local[i]):
+            continue
+        if not out or i - out[-1] >= min_gap:
+            out.append(i)
+    return out
+
+
+def tempo_of(fl, hz, lo=70.0, hi=240.0, tol=1.0, fine=0.25):
+    """The grid the onsets actually land on, and its phase.
+
+    Scored by what the grid EXPLAINS: the fraction of detected onsets within
+    `tol` frames of it, less the fraction a grid that fine would catch by
+    luck. A finer grid always catches more for nothing - at a sixteenth of
+    7.03 frames, three positions in every seven qualify by chance, 42.7% -
+    so the excess over chance is the only honest score, and without it the
+    search runs away to the fastest tempo in the range.
+
+    The whole range is scanned rather than the relatives of an
+    autocorrelation peak. Both of the previous versions got a recording
+    wrong whose own MIDI says 160 bpm: the first returned 106.7, out by
+    exactly three halves because a dotted pulse looks like a beat to an
+    autocorrelation and a log-normal prior at 110 bpm then preferred the
+    slower reading - 31% of that recording's onsets landed on the grid it
+    chose. The second refined the autocorrelation's own peak and reached
+    157.9 bpm, which sounds close and is not: over 198 seconds a 1.3%
+    period error drifts 127 frames, so the grid is in antiphase long before
+    the end, and it scored 49%. A third recording needed 130 bpm, which is
+    not a simple multiple of any autocorrelation peak at all, so no
+    candidate set built from one could reach it.
+
+    The tempo's OCTAVE is not decidable from onsets and does not need to be.
+    This returns the tightest grid that explains them: on that recording,
+    onsets land on multiples of 9.375 frames, which is 80 bpm counted in
+    sixteenths and the 160 bpm of the MIDI counted in eighths. Both are true;
+    the grid is the same either way, and the grid is what gets used.
+    """
+    onsets = onset_peaks(fl)
+    if len(onsets) < 8:
+        f = fl - fl.mean()
+        ac = np.correlate(f, f, "full")[len(f) - 1:]
+        lags = np.arange(len(ac))
+        ok = (lags > hz * 60.0 / hi) & (lags < hz * 60.0 / lo)
+        if not ok.any():
+            return 120.0, 0
+        return 60.0 * hz / int(np.argmax(np.where(ok, ac, -1e30))), 0
+    ons = np.asarray(onsets, float)
     best = None
-    for L in sorted(cands):
-        bpm = 60.0 * hz / L
-        prior = math.exp(-0.5 * (math.log(bpm / 110.0) / 0.45) ** 2)
-        for p in range(L):
-            pulses = fl[p::L]
-            if not len(pulses):
-                continue
-            score = prior * pulses.mean() / max(1e-12, fl.mean())
-            if best is None or score > best[0]:
-                best = (score, L, p)
+    for bpm in np.arange(lo, hi + fine, fine):
+        step = 60.0 * hz / bpm / 4.0            # onsets land on sixteenths
+        if step <= 2 * tol:
+            continue
+        phases = np.arange(0.0, step, 0.25)
+        d = np.mod(ons[None, :] - phases[:, None], step)
+        d = np.minimum(d, step - d)
+        hits = (d <= tol).mean(axis=1)
+        k = int(np.argmax(hits))
+        score = hits[k] - min(1.0, (2 * tol + 1.0) / step)
+        if best is None or score > best[0]:
+            best = (score, bpm, phases[k], hits[k])
     if best is None:
-        return 60.0 * hz / lag, 0
-    return 60.0 * hz / best[1], best[2]
+        return 120.0, 0
+    return float(best[1]), int(round(best[2]))
 
 
 def refine_peak(S, k):
@@ -391,7 +430,14 @@ def track_voices(mag, fr, bands=(HIGH, LOW), thresh=0.09,
 
 
 def notes_of(f0, hz, grid, min_frames=3, max_jump=14):
-    """A pitch track as notes: quantised to semitones and to the grid."""
+    """A pitch track as notes: quantised to semitones, and to the grid
+    only if one is given.
+
+    Pass grid=None for material that was played by hand. Snapping a note
+    start to a 9.375-frame grid moves it by up to 94 ms, which is audible,
+    and on an unquantised performance there is nothing there to snap TO -
+    the grid is a description of the average, not of any actual note.
+    """
     mid = np.array([to_midi(v) for v in f0])
     q = np.where(mid > 0, np.round(mid), 0)
     # snap starts to the grid and drop anything too short
@@ -405,9 +451,13 @@ def notes_of(f0, hz, grid, min_frames=3, max_jump=14):
         while j < len(q) and q[j] > 0 and abs(q[j] - q[i]) <= 1:
             j += 1
         if j - i >= min_frames:
-            start = int(round((i - grid[0]) / grid[1])) * grid[1] + grid[0]
-            start = max(0, start)
-            length = max(min_frames, int(round((j - i) / grid[1])) * grid[1])
+            if grid is None:
+                start, length = i, j - i
+            else:
+                start = int(round((i - grid[0]) / grid[1])) * grid[1] + grid[0]
+                start = max(0, start)
+                length = max(min_frames,
+                             int(round((j - i) / grid[1])) * grid[1])
             pitch = int(np.median([v for v in q[i:j] if v > 0]))
             if out and start < out[-1][0] + out[-1][1]:
                 out[-1] = (out[-1][0], start - out[-1][0], out[-1][2])
@@ -713,8 +763,14 @@ def transcribe(x, sr, rate=50):
     fl = flux(perc)                     # onsets from the percussive part
     bpm, phase = tempo_of(fl, rate)
     beat = 60.0 * rate / bpm
-    grid = (phase % max(1, int(round(beat / 4))), max(1, int(round(beat / 4))))
-    drums = drums_of(perc, fr, fl, rate, grid=grid)
+    # the grid as a FLOAT. Rounding the step to whole frames is the same
+    # mistake as rounding the period: the test cue's sixteenth is 7.8125
+    # frames and int(round()) makes it 8, which is 2.4% out and drifts a
+    # quarter of a beat across the cue - only 16 of its 43 hits then land
+    # within 1.5 frames of a grid they were all played exactly on.
+    step16 = max(1.0, beat / 4.0)
+    grid = (float(phase) % step16, step16)
+    drums = drums_of(perc, fr, fl, rate, grid=None)
     bass = track_bass(mono, sr, rate)
     # A kick is a pitch too - 40 to 60 Hz of it - and the bass tracker will
     # happily report it. Measured on a recording with eighth-note kicks, the
@@ -733,7 +789,17 @@ def transcribe(x, sr, rate=50):
             b = int(round(f * h / (fr[1] - fr[0])))
             if b < lead_mag.shape[1]:
                 lead_mag[i, max(0, b - 1):b + 2] *= 0.25
-    lead = track_viterbi(lead_mag, fr, 250.0, 1600.0)
+    # Two candidates for the melody. The struck line is the one a listener
+    # calls the tune when there is a struck instrument carrying it - a bell
+    # over an organ, say, where the organ is louder in every band. The
+    # loudest line is the right answer when nothing is being struck. Take
+    # the struck one when it found enough strikes to be a part, and keep the
+    # other either way: if it is an organ it belongs in the chords, which is
+    # where a pad belongs.
+    loudest = track_viterbi(lead_mag, fr, 250.0, 1600.0)
+    struck = track_struck(lead_mag, fr, rate=rate)
+    strikes = len(notes_of(struck, rate, None, 3))
+    lead = struck if strikes >= 0.3 * len(mag) / rate else loudest
     # the lead out of the way too, and whatever is left is the other parts:
     # the inner lines a single tracker never sees, which are most of what a
     # two-or-three-voice arrangement is missing
@@ -753,8 +819,14 @@ def transcribe(x, sr, rate=50):
     hi = track_voices(lead_mag, fr, bands=(HIGH,))
     lo = track_voices(rest, fr, bands=(LOW,))
     V = np.concatenate([hi, lo], axis=1)
-    bass_notes = notes_of(bass, rate, grid, 3)
-    lead_notes = notes_of(lead, rate, grid, 3)
+    # No grid snapping on the notes. The grid is still worth having - the
+    # chord windows and the arpeggio's rate are built on it - but a note
+    # start belongs where it was played. Measured, on two hand-played
+    # recordings, snapping cost both measures: peak coverage 58.7% -> 56.5%
+    # and 59.6% -> 59.1%. A 9.375-frame grid moves a note by up to 94 ms,
+    # and on an unquantised performance there is nothing there to snap to.
+    bass_notes = notes_of(bass, rate, None, 3)
+    lead_notes = notes_of(lead, rate, None, 3)
     lead_fixed = octave_fixed(harm, fr, lead_notes)
     bass_fixed = octave_fixed(harm, fr, bass_notes)
     chords = key_quality(chords_of(lead_mag, fr, rate, beat, phase,
@@ -767,8 +839,13 @@ def transcribe(x, sr, rate=50):
             # which ones it must not fold away
             "lead_fixed": lead_fixed,
             "bass_fixed": bass_fixed,
-            "voices": [notes_of(V[:, v], rate, grid, 3)
+            "voices": [notes_of(V[:, v], rate, None, 3)
                        for v in range(V.shape[1])],
+            # whichever line did not become the melody, for the arranger to
+            # put somewhere: usually the sustained one, which is a pad
+            "other": notes_of(loudest if lead is struck else struck,
+                              rate, None, 3),
+            "melody_is_struck": lead is struck,
             "chords": chords,
             "drums": drums,
             "flux": fl}

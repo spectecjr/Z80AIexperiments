@@ -190,11 +190,20 @@ def main():
     bad += check("every root is a degree of D minor", " ".join(sorted(roots)),
                  "inside " + " ".join(sorted(scale)), roots <= scale)
 
+    # Hits are no longer snapped - the recordings this serves are played by
+    # hand, and snapping cost both measures. So what is checked is the
+    # GRID ESTIMATE, against a cue that really is machine-quantised: its
+    # hits must land near the grid without having been moved onto it.
     off, step = sc["grid"]
-    ongrid = sum(1 for i, _k, _v in sc["drums"] if (i - off) % step == 0)
-    bad += check("drum hits on the sixteenth grid",
-                 "%d of %d" % (ongrid, len(sc["drums"])), "all of them",
-                 ongrid == len(sc["drums"]))
+    near = sum(1 for i, _k, _v in sc["drums"]
+               if min((i - off) % step, step - (i - off) % step) <= 1.5)
+    bad += check("the cue's hits land near the grid on their own",
+                 "%d of %d within 1.5 frames" % (near, len(sc["drums"])),
+                 "over 80%", near > 0.8 * len(sc["drums"]))
+    exact = sum(1 for i, _k, _v in sc["drums"] if (i - off) % step == 0)
+    bad += check("and they were not snapped onto it",
+                 "%d of %d exactly on it" % (exact, len(sc["drums"])),
+                 "not all", exact < len(sc["drums"]))
 
     # folding: the tracker's octave choices are not a melody's octaves
     raw = [p for _s, _l, p in sc["lead"]]
@@ -260,11 +269,14 @@ def main():
     bad += check("ch5 is noise", ch[5]["kind"], "noise",
                  ch[5]["kind"] == "noise")
 
-    # the kick steals ch0, so ch0 glides; nothing else should
+    # the kick steals ch0, so ch0 glides, and far more than anything else.
+    # The melodic channels show a few now that their notes are not snapped:
+    # two notes a semitone apart and adjacent in time read as a glide to the
+    # disassembler, which is a fair description of what the chip is doing.
     glides = [len(c["glides"]) for c in ch]
-    bad += check("only ch0 glides (the kick sweeps)", str(glides),
-                 "some on ch0, none elsewhere",
-                 glides[0] > 0 and sum(glides[1:]) == 0)
+    bad += check("ch0 glides most, being where the kick is", str(glides),
+                 "ch0 highest by a wide margin",
+                 glides[0] > 0 and glides[0] >= 3 * max(glides[1:] + [0]))
 
     # the arpeggio must NOT rest - that is the whole rule. It rested under
     # the lead in the first version and the arrangement measured 23.7% of

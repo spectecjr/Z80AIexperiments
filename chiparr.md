@@ -236,6 +236,76 @@ by listening rather than by measurement, and it is applied to the melody
 when the melody is what is wanted; `chiparr.build` still takes the score as
 tracked, because on these numbers it should.
 
+### The grid: three wrong answers, and a MIDI that settled it
+
+The recording's own MIDI export arrived with no notes in it — 53 bytes the
+first time, then 1254 bytes of track names — but it carried two meta
+events, and one of them was worth the whole exchange: **tempo 160 bpm**.
+The transcription had been saying 107.1.
+
+That is out by exactly three halves, and it had been wrong for every
+measurement in this file. Checked against the recording:
+
+| | sixteenth | onsets landing on it |
+|---|---|---|
+| 107.1 bpm, as estimated | 7.03 frames | 171 of 555 — **31%** |
+| 160 bpm, per the MIDI | 4.69 frames | 551 of 555 — **99%** |
+
+Three separate faults, each found by fixing the one before it:
+
+**A prior at 110 bpm.** `tempo_of` scored a candidate by the mean flux at
+its pulse positions and multiplied in a log-normal prior centred on
+110 bpm. A dotted pulse looks exactly like a beat to an autocorrelation, so
+160 and 106.7 both fit, and the prior then preferred the slower one by a
+factor of 1.4. Mean flux at pulse positions does not measure alignment at
+all, which is why nothing caught it.
+
+**A period rounded to whole frames.** Scoring by what the grid explains
+instead, the autocorrelation's own peak lands at lag 19 = 157.9 bpm. That
+sounds close and is not: over 198 seconds a 1.3% period error drifts 127
+frames, so the grid is in antiphase long before the end. It scored 49%
+where the exact period scores 99%. Periods are refined to a hundredth of a
+frame now.
+
+**Candidates built from one autocorrelation peak.** A third recording needs
+130 bpm, which is not 1, ½, ⅔, 1½, 2 or 3 times any peak in its flux, so no
+candidate set derived from one could reach it. The whole range is scanned.
+
+The scoring is the fraction of onsets within a frame of the grid, **less
+the fraction a grid that fine would catch by luck** — three positions in
+every 7.03 qualify by chance, 42.7%, and the wrong grid's 31% was worse
+than guessing. Without that correction the search runs away to the fastest
+tempo in the range.
+
+And the tempo's octave turns out not to be decidable from onsets, nor to
+matter. This recording's onsets land on multiples of 9.375 frames: 80 bpm
+counted in sixteenths, or the MIDI's 160 counted in eighths. Both are true,
+the grid is identical, and the grid is what gets used. (The composer also
+hears it as a waltz around 105, which is the dotted quarter of 160 — a
+third true description of the same music.)
+
+### Hand-played music does not want a grid
+
+And then: "a lot of this is hand-played and unquantized; it won't always be
+on the grid." `notes_of` had been snapping every note start *and* length
+onto the grid, which at 9.375 frames moves a note by up to 94 ms.
+
+| | fit | peaks covered |
+|---|---|---|
+| snapped | 51.6% | 56.5% |
+| left where they were played | **52.3%** | **58.7%** |
+
+Both measures improve on both recordings tested, so the snapping was
+costing something real. The grid is still worth estimating — the chord
+windows and the arpeggio's rate are built on it — but a note start belongs
+where it was played.
+
+The same rounding bug lived in the grid itself: it was stored as
+`int(round(beat / 4))`, so the test cue's true sixteenth of 7.8125 frames
+became 8, which is 2.4% out and drifts a quarter of a beat across the cue.
+Only 16 of its 43 machine-quantised hits then landed within 1.5 frames of a
+grid they were all played exactly on. Stored as a float: 43 of 43.
+
 ### A second recording, and what it found
 
 Everything above was measured on one recording, which is how an arranger
