@@ -753,8 +753,14 @@ def key_quality(chords):
             for st, ln, root, _k in chords]
 
 
-def transcribe(x, sr, rate=50):
-    """Everything above, on one piece of audio."""
+def transcribe(x, sr, rate=50, melody="loudest"):
+    """Everything above, on one piece of audio.
+
+    `melody` picks which line becomes the lead: "loudest" (the default, and
+    the one the tests cover) or "struck". See the note beside the two
+    trackers - nothing here can choose between them reliably, and getting it
+    wrong means arranging around the wrong part.
+    """
     hop = int(round(sr / float(rate)))
     mono = x.mean(axis=1) if x.ndim > 1 else x
     mag, fr = stft(mono, sr, 4096, hop)
@@ -789,17 +795,22 @@ def transcribe(x, sr, rate=50):
             b = int(round(f * h / (fr[1] - fr[0])))
             if b < lead_mag.shape[1]:
                 lead_mag[i, max(0, b - 1):b + 2] *= 0.25
-    # Two candidates for the melody. The struck line is the one a listener
-    # calls the tune when there is a struck instrument carrying it - a bell
-    # over an organ, say, where the organ is louder in every band. The
-    # loudest line is the right answer when nothing is being struck. Take
-    # the struck one when it found enough strikes to be a part, and keep the
-    # other either way: if it is an organ it belongs in the chords, which is
-    # where a pad belongs.
+    # Two candidates for the melody, and which is right is not something
+    # this file can decide. The struck line is the tune when a struck
+    # instrument carries it - a bell over an organ, where the organ is
+    # louder in every band. The loudest line is right when nothing is being
+    # struck.
+    #
+    # Choosing automatically was tried and is wrong: gated on having enough
+    # strikes to be a part, it took the test cue's METAL PERCUSSION as the
+    # melody, which is struck and is not a tune. Pitch variety does not
+    # separate them either - the clangs' partials give as many distinct
+    # pitches as a melody does. So the caller says, and the default is the
+    # one with a test behind it: the cue's eight-note motif comes back in
+    # order from the loudest line and does not from the struck one.
     loudest = track_viterbi(lead_mag, fr, 250.0, 1600.0)
     struck = track_struck(lead_mag, fr, rate=rate)
-    strikes = len(notes_of(struck, rate, None, 3))
-    lead = struck if strikes >= 0.3 * len(mag) / rate else loudest
+    lead = struck if melody == "struck" else loudest
     # the lead out of the way too, and whatever is left is the other parts:
     # the inner lines a single tracker never sees, which are most of what a
     # two-or-three-voice arrangement is missing
@@ -843,9 +854,11 @@ def transcribe(x, sr, rate=50):
                        for v in range(V.shape[1])],
             # whichever line did not become the melody, for the arranger to
             # put somewhere: usually the sustained one, which is a pad
-            "other": notes_of(loudest if lead is struck else struck,
+            # the line that did not become the melody, for the arranger to
+            # place: usually the sustained one, which is a pad
+            "other": notes_of(loudest if melody == "struck" else struck,
                               rate, None, 3),
-            "melody_is_struck": lead is struck,
+            "melody_is_struck": melody == "struck",
             "chords": chords,
             "drums": drums,
             "flux": fl}

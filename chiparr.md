@@ -159,6 +159,23 @@ in the spectrum, so both the perceptual fit and the peak coverage were
 satisfied. `tests/probe.py` stops guessing: it tracks the best line in each
 of four registers, renders each alone on one channel, and asks.
 
+### Which of the two is the melody: not decidable here
+
+Having both trackers raises the question of which to use, and choosing
+automatically was tried and is wrong. Gated on "enough strikes to be a
+part", the struck tracker took the **test cue's metal percussion** as the
+melody — which is struck, and is not a tune. Pitch variety does not
+separate them either: the clangs' inharmonic partials give as many distinct
+pitches as a melody does.
+
+So `transcribe(..., melody="struck")` is a choice the caller makes, and the
+default stays the one with a test behind it — the cue's eight-note motif
+comes back in order from the loudest line and does not from the struck one.
+On the recording whose layers the composer described, the struck line is
+the bell and the loudest is the organ; on the cue, the loudest is the lead
+and the struck is the percussion. Both defaults are right for their own
+material and no measurement here can tell them apart.
+
 ### What does find it: the line that is struck
 
 Asking got a description of one recording at 45 s — "a high bell sound with
