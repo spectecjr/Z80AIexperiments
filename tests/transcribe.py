@@ -248,43 +248,56 @@ def from_midi(m):
     return A4 * 2 ** ((m - 69) / 12.0)
 
 
-def track_viterbi(mag, fr, lo, hi, thresh=0.10, jump=2.0):
+def track_viterbi(mag, fr, lo, hi, thresh=0.10, jump=0.30, max_step=7):
     """The most likely pitch PATH, not the loudest bin a frame.
 
-    Without continuity a lead tracker follows whatever rings loudest,
-    which on a cue full of struck metal means it plays the metal. A
-    transition penalty in semitones fixes it, and it costs one pass
-    forward and one back.
+    Without continuity a lead tracker follows whatever rings loudest, which
+    on a cue full of struck metal means it plays the metal. A transition
+    penalty in semitones fixes that, and it costs one pass forward and one
+    back.
+
+    There is no silent state, and that is deliberate. With one, the path
+    can go quiet for a frame and come back anywhere it likes, because
+    re-entry from silence carries no pitch penalty - silence is a free
+    teleport between registers. Measured on a real recording, the lead it
+    produced ran A4 C5 E5 A4 C5 C6 F5 A4 ... D6 B4 D5: a line leaping an
+    octave and a half every bar, which does not read as a lead at all. It
+    reads as sparkle, and what a listener reports is that the lead has
+    vanished.
+
+    So the path is continuous by construction, single frame steps are
+    capped at `max_step` semitones, and voicing is decided afterwards from
+    the salience along the path that was chosen. The penalty is then free
+    to be gentle enough for a melody to actually move: at 2.0 a semitone,
+    which is what it was, a two semitone step costs twice the most any
+    frame can pay, so the tracker could only move by teleporting.
     """
     sal, fs = salience(mag, fr, lo, hi)
     sal = sal / np.maximum(1e-12, sal.max())
     semis = np.array([to_midi(f) for f in fs])
     n, m = sal.shape
-    score = np.full((n, m + 1), -1e30)       # the last state is "silent"
-    back = np.zeros((n, m + 1), dtype=np.int32)
-    score[0, :m] = sal[0]
-    score[0, m] = thresh
+    if n == 0 or m == 0:
+        return np.zeros(n)
+    # the transition cost, once: -inf past max_step so no frame can leap
+    d = np.abs(semis[:, None] - semis[None, :])
+    cost = np.where(d <= max_step, -jump * d, -np.inf)
+
+    score = np.empty((n, m))
+    back = np.zeros((n, m), dtype=np.int32)
+    score[0] = sal[0]
     for i in range(1, n):
-        prev = score[i - 1]
-        best_silent = prev[m]
-        for j in range(m):
-            cand = prev[:m] - jump * np.abs(semis - semis[j])
-            k = int(np.argmax(cand))
-            a, b = cand[k], best_silent - 0.5
-            if a >= b:
-                score[i, j], back[i, j] = a + sal[i, j], k
-            else:
-                score[i, j], back[i, j] = b + sal[i, j], m
-        k = int(np.argmax(prev[:m]))
-        stay = prev[m]
-        leave = prev[k] - 0.5
-        score[i, m] = max(stay, leave) + thresh
-        back[i, m] = m if stay >= leave else k
+        cand = score[i - 1][:, None] + cost      # from j to k
+        back[i] = np.argmax(cand, axis=0)
+        score[i] = cand[back[i], np.arange(m)] + sal[i]
     path = np.zeros(n, dtype=np.int32)
     path[-1] = int(np.argmax(score[-1]))
     for i in range(n - 1, 0, -1):
         path[i - 1] = back[i, path[i]]
-    return np.array([0.0 if p == m else fs[p] for p in path])
+    # voiced where the path's own salience earns it
+    out = np.array([fs[p] for p in path])
+    along = np.array([sal[i, path[i]] for i in range(n)])
+    out[along < thresh] = 0.0
+    return out
 
 
 # one voice a register. Overlapping, because a melody does not stay in its

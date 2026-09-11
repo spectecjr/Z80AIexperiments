@@ -82,9 +82,8 @@ T-states** a (register, value) pair from `saa.z80s`:
 
 | | pairs a frame | T-states |
 |---|---|---|
-| mean | 2.97 | 220 — 0.18% of a 120,000 T-state frame |
+| mean | 2.86 | 212 — 0.18% of a 120,000 T-state frame |
 | median | 2 | 148 |
-| 99th percentile | 11 | 814 |
 | worst frame | 31 | 2,294 — 1.9% |
 
 See `chiparr.md`; `arrange.md` is the other way of doing it, an order of
@@ -186,6 +185,10 @@ else happens at all.
 | **Band energy to classify a drum hit** | every one of a cue's 16 metal hits came out "hat" | a sustained hi-hat contributes to the high band whether or not it is part of this hit, and a band three octaves wide sums more bins than one an octave wide. It is the per-bin *rise* at the onset that is the hit |
 | **Chord quality decided per window** | a D minor cue's first two bars came out D major, and the arpeggio played F# against them | those bars contain no third at all. Each root now takes the quality the whole piece's evidence gives it, weighted by duration |
 | **Letting the parts yield to each other** (`chiparr.py` v1) — the arpeggio resting under the lead, a channel each for the drums, the lead doubling itself | 37.6% of the source's strong 200-2500 Hz peaks covered, 2 to 3 tone voices a frame | the lead sounds for 80% of the recording, so "rest under the lead" means "do not play", and the mid register is then empty. Nothing yields now: 57.8% covered, 4.45 voices a frame, for 1.2 more register pairs a frame |
+| **A silent state in the lead tracker's Viterbi** (`transcribe.py`) | the lead leapt more than a seventh on 122 of its 371 intervals - A4 C5 E5 A4 C5 C6 F5 A4 ... D6 B4 D5 | re-entry from silence carried no pitch penalty, so silence was a free teleport between registers - and at 2.0 a semitone, twice the most any frame can pay, teleporting was the only way the path could move. No silent state now: the path is continuous, steps capped at 7 semitones, penalty 0.3, voicing decided afterwards from the salience along the chosen path. 122 leaps became 43 after folding |
+| **The lead at level 12 under a bass at 13** (`chiparr.py`) | reported as "the lead mostly vanishes" at 25 s, where it measurably sounds in 100% of frames with the best peak coverage in the recording | a lead that is not the loudest voice is a lead the listener reports as missing while it plays. Lead 15, bass 12, inner voices 7 and 5: loudest in 96% of its frames, 4.8 dB clear |
+| **A lagging reference for the octave fold** | turned 2 leaps into 3 on the test cue | the reference drags behind a melody that is climbing and then folds a later note back down, inventing a leap. A centred median over four notes either side leaves the cue untouched and still takes the real recording from 122 to 43 |
+| **`decay` running to zero** | the bass sounded in 63% of frames where the score had it in 89% | a 105-frame note at 0.12 a frame runs out of level before it runs out of note. A floor at 55% of the attack fixed it and *reduced* the register writes, because a level that stops changing stops being written |
 | **Assigning the extra voices by continuity** rather than by register | voice 0 ran E4 - E5 - C5 - C4 - A3 inside ten seconds, and two voices landed on A3 together | subtracting a claimed note's harmonic comb does not stop a candidate 40 cents away reclaiming it. A register each cannot cross and cannot duplicate |
 | **Divide to get a DDA step** rather than a reciprocal table | `pf_div` 850 T-states against 342 for two quarter-square multiplies | the table (384 bytes) won, but not by enough to save the design |
 

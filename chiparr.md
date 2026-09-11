@@ -37,8 +37,8 @@ what makes an arrangement sound like music.
 | ch | part | notes |
 |----|------|-------|
 | 0 | bass, **and the kick** | the kick steals this channel for 5 frames |
-| 1 | the lead | held through gaps in the tracking |
-| 2 | the second voice | the lead an octave up where the tracker found none |
+| 1 | the lead | level 15, folded to one register, with vibrato |
+| 2 | the second voice | the lead's own octave where the tracker found none |
 | 3 | the chord, arpeggiated | **always**, every frame of every chord |
 | 4 | the third voice | falls back to a sustained chord tone |
 | 5 | percussion | noise only, at a fixed rate, not ch3's generator |
@@ -88,6 +88,54 @@ reason; here it is the wrong choice.
 | the other voices | one line per register, from what the bass and lead leave behind | see below |
 | chords | chroma over a beat-aligned window, quality decided by the whole piece | see below |
 | drums | per-band **rise** at each onset, per bin, snapped to the sixteenth grid | absolute band energy misreads every hit |
+
+### The lead, and why it sounded like it had vanished
+
+Reported: "around 25 s in, the lead mostly vanishes." Measured, at 25–35 s
+the lead channel sounds in **100%** of frames and the peak coverage there
+is among the best in the whole recording. Nothing was missing. Three
+things were wrong anyway, and all three are about a lead being heard *as*
+a lead rather than about whether it is there:
+
+**It was not the loudest voice.** The lead sat at level 12 under a bass at
+13. A lead that loses to the bass is a lead the listener reports as
+missing while it plays in every frame. It is at 15 now, the bass at 12,
+the inner voices at 7 and 5 — the lead is the loudest tone voice in 96% of
+the frames it sounds in, 4.8 dB clear of the next.
+
+**It leapt octaves.** The line ran A4 C5 E5 A4 C5 **C6** F5 A4 … **D6** B4
+D5 — 122 of its 371 intervals larger than a seventh. That is not a melody
+leaping; it is a pitch tracker picking whichever partial is loudest. The
+cause was in the tracker: its Viterbi had a single silent state, and
+re-entry from silence carried **no pitch penalty**, so silence was a free
+teleport between registers. The penalty was 2.0 a semitone — twice the
+most any frame can pay — so teleporting was the *only* way the path could
+move at all. There is no silent state now: the path is continuous by
+construction, single-frame steps are capped at seven semitones, the
+penalty is 0.3, and voicing is decided afterwards from the salience along
+the path that was chosen.
+
+`fold_lead` then moves each note by whole octaves until it sits within
+seven semitones of the melody's local centre — a **centred** median over
+four notes either side, because a lagging reference drags behind a melody
+that is genuinely climbing and then folds a later note back down, which
+invents a leap rather than removing one (measured: 2 leaps became 3 on the
+test cue). Every pitch class survives; 122 leaps become 43; the test cue's
+own melody, which legitimately spans an octave, comes through untouched.
+
+**It was doing nothing the texture was not.** It has vibrato now — one
+frequency byte of movement at 5 Hz, which near the top of the divider
+range is about 7 cents — fading in after the eighth frame of a note so
+short notes stay clean. That is the cheapest possible way to make one
+channel sound like an instrument playing a tune and the other four sound
+like accompaniment.
+
+A fourth thing turned up while measuring this: the bass sounded in 63% of
+frames where the score had it in 89%, because `decay` ran a long note's
+level to zero — a 105-frame note at 0.12 a frame runs out of level before
+it runs out of note. Levels now fall to a sustain at 55% of the attack,
+not to silence, which also *reduced* the register writes, because a level
+that has stopped changing stops being written.
 
 ### The other voices: a register each
 
@@ -168,15 +216,15 @@ On the recording it was developed against — 197 s, 9,898 frames at
 
 | | pairs a frame | T-states |
 |---|---|---|
-| mean | 2.97 | 220 |
+| mean | 2.86 | 212 |
 | median | 2 | 148 |
-| 99th percentile | 11 | 814 |
 | worst frame | 31 | 2,294 |
 
 at the **measured** 74 T-states per (register, value) pair from
 `saa.z80s`. The worst frame is 1.9% of a 120,000 T-state frame, and the
-mean is 0.18% — filling the arrangement out from two voices to five cost
-1.2 register pairs a frame, which is to say nothing at all. The spectral arranger in `arrange.md` runs an order of
+mean is 0.18% — filling the arrangement out from two voices to five, and
+then adding vibrato on the lead, cost 1.1 register pairs a frame, which is
+to say nothing at all. The spectral arranger in `arrange.md` runs an order of
 magnitude above this because it rewrites every channel every frame by
 construction.
 
@@ -198,7 +246,13 @@ at f.
 | | peaks covered |
 |---|---|
 | parts that yield to each other | 37.6% |
-| parts that never yield | **57.8%** |
+| parts that never yield | 57.8% |
+| the same, with the lead folded and brought forward | **57.9%** |
+
+The third row is worth a note: folding the lead into one register moves
+notes out of the octave the tracker found them in, and on its own that
+cost 3.5 points. Giving ch2 the lead's *original* octave wherever it had
+no voice of its own bought them back, so coherence came for free.
 
 ## 4. Checking it
 
@@ -212,12 +266,16 @@ part is known, so each answer is compared with the truth:
 - the lead's eight-note motif recovered **in order**;
 - D minor the chord holding the most frames, every root diatonic to it;
 - all 39 drum hits on the sixteenth grid;
+- the fold must remove leaps without inventing any, and without changing
+  a single pitch class;
 - then the register log is read back with `chipdis.py`, which must find
   ch2 as 2f of ch1, ch5 as noise, glides on ch0 and nowhere else, the
   arpeggio sounding in every one of the 992 chord frames, D–F–A as its
   three commonest notes, and **4.39 tone voices sounding in the average
-  frame** with fewer than 15% of frames down to two or less. That last
-  pair is the check that would have caught the thin version.
+  frame** with fewer than 15% of frames down to two or less, the lead the
+  loudest tone voice in over 85% of the frames it sounds in, and a long
+  bass note still sounding at its own last frame. Those are the checks
+  that would have caught the thin version and the buried one.
 
 The three trackers are also checked on signals built to break them: the
 weak-fundamental spectrum above, a plain sawtooth that must not be read an
@@ -233,6 +291,10 @@ harmonic sum learned to test for energy before taking an argmax of zeros.
 - The extra voices are tracked per register, which is what stops them
   wandering, but a part that crosses a band edge is handed from one
   channel to another mid-phrase.
+- The lead's fold is a judgement about the tracker, not about the music:
+  where a composer really did write an octave leap wider than the window,
+  it is flattened. The window is deliberately as wide as the test cue's
+  own melody so that this costs as little as possible.
 - No hi-hats are found in that recording at all: 401 kicks and 220
   snares, and nothing classified high. The rise test fixed a bias towards
   "hat" and may now lean the other way on material whose hats are quiet.

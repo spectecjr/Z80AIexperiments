@@ -136,20 +136,61 @@ class Out:
         return frames
 
 
-def decay(level, k, fall):
-    """A level k frames into a note."""
-    return int(round(max(0, level - fall * k)))
+def decay(level, k, fall, floor=0.55):
+    """A level k frames into a note, never falling past a sustain.
+
+    Without the floor a long note fades to nothing and the part disappears
+    under itself: the bass sounded in 63% of frames where the score had it
+    in 89%, because a 105-frame note at 0.12 a frame runs out of level
+    before it runs out of note. An instrument decays to a sustain, not to
+    silence.
+    """
+    return int(round(max(level * floor, level - fall * k)))
 
 
-def build(sc, bass_lvl=13, lead_lvl=12, v2_lvl=9, v3_lvl=7, arp_lvl=7,
+def fold_lead(notes, window=7, span=4):
+    """The melody into one register, keeping every pitch class.
+
+    A pitch tracker picks whichever partial is loudest, so the line it
+    returns jumps octaves: measured on a real recording, 11 of 85 notes
+    leapt more than seven semitones, and the result does not read as one
+    instrument playing a tune - it reads as part of the texture, which is
+    what "the lead vanishes" sounds like from the outside.
+
+    Each note is moved by whole octaves until it sits within `window`
+    semitones of the melody's local centre. The tune keeps its shape and
+    loses the leaps an octave-confused tracker invented.
+
+    The centre is a CENTRED median over the four notes either side, not a
+    running average of the notes before. A lagging reference drags behind a
+    melody that is genuinely climbing and then folds a later note back
+    down, which invents a leap rather than removing one: measured on the
+    test cue, the lagging version turned 2 leaps into 3.
+    """
+    raw = [float(p) for _s, _l, p in notes]
+    out = []
+    for i, (start, length, pitch) in enumerate(notes):
+        lo = max(0, i - span)
+        ref = float(np.median(raw[lo:i + span + 1]))
+        p = float(pitch)
+        while p - ref > window:
+            p -= 12
+        while ref - p > window:
+            p += 12
+        out.append((start, length, int(round(p))))
+    return out
+
+
+def build(sc, bass_lvl=12, lead_lvl=15, v2_lvl=7, v3_lvl=5, arp_lvl=5,
           arp_step=4, drum_lvl=12, bass_min=60.0, kick_len=5, hold=10,
-          top=1900.0):
+          top=1900.0, fold=7, vib_cents=14.0, vib_frames=10,
+          vib_after=8):
     """A transcription to six channels of chip, with nothing left out."""
     n = sc["frames"]
     o = Out(n)
     voices = sc.get("voices") or [[], []]
 
-    def lay(ch, notes, level, fall, cap=top):
+    def lay(ch, notes, level, fall, cap=top, vib=None):
         """A part onto a channel, note by note."""
         on = np.zeros(n, bool)
         for start, length, pitch in notes:
@@ -158,9 +199,19 @@ def build(sc, bass_lvl=13, lead_lvl=12, v2_lvl=9, v3_lvl=7, arp_lvl=7,
                 hz /= 2.0                       # over the arrangement
             for k in range(length):
                 i = start + k
-                if 0 <= i < n:
-                    o.tone(ch, i, hz, decay(level, k, fall))
-                    on[i] = True
+                if not (0 <= i < n):
+                    continue
+                f = hz
+                if vib and length >= vib[2] and k >= vib[2]:
+                    # a lead reads as a lead because it is doing something
+                    # the texture is not. This is the cheapest such thing:
+                    # the frequency byte moves by one, which near the top of
+                    # the divider range is about 7 cents
+                    depth = vib[0] * min(1.0, (k - vib[2]) / float(vib[2]))
+                    f = hz * 2 ** (depth * math.sin(
+                        2 * math.pi * (k - vib[2]) / vib[1]) / 1200.0)
+                o.tone(ch, i, f, decay(level, k, fall))
+                on[i] = True
         return on
 
     bass_on = np.zeros(n, bool)
@@ -173,20 +224,27 @@ def build(sc, bass_lvl=13, lead_lvl=12, v2_lvl=9, v3_lvl=7, arp_lvl=7,
             if 0 <= start + k < n:
                 bass_on[start + k] = True
 
-    lead_on = lay(1, sc["lead"], lead_lvl, 0.06)
+    lead = fold_lead(sc["lead"], fold)
+    lead_on = lay(1, lead, lead_lvl, 0.06, vib=(vib_cents, vib_frames,
+                                                vib_after))
     v2_on = lay(2, voices[0] if len(voices) > 0 else [], v2_lvl, 0.05)
     v3_on = lay(4, voices[1] if len(voices) > 1 else [], v3_lvl, 0.05)
 
-    # where the second voice found nothing, the lead an octave up. The
-    # channel is there either way; it may as well thicken the lead
-    for start, length, pitch in sc["lead"]:
-        hz = midi_hz(pitch) * 2
+    # Where the second voice found nothing, ch2 covers the lead - at the
+    # octave the TRACKER said, not the one the fold chose. Folding the lead
+    # into one register is what makes it read as a line, and it costs 3.5
+    # points of peak coverage because the notes leave their real octave;
+    # putting that octave back on the channel that would otherwise be idle
+    # buys it straight back, and the unison never happens because the two
+    # only differ where the fold moved something.
+    for (start, length, pitch), (_s, _l, raw) in zip(lead, sc["lead"]):
+        hz = midi_hz(raw if raw != pitch else pitch + 12)
         while hz > top:
             hz /= 2.0
         for k in range(length):
             i = start + k
             if 0 <= i < n and not v2_on[i]:
-                o.tone(2, i, hz, decay(v2_lvl - 2, k, 0.05))
+                o.tone(2, i, hz, decay(v2_lvl, k, 0.05))
 
     # the chord, arpeggiated, every frame of every chord - and the third
     # voice holds a chord tone wherever the tracker gave it nothing, so

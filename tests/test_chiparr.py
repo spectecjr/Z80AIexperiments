@@ -131,6 +131,21 @@ def main():
                  "%d of %d" % (ongrid, len(sc["drums"])), "all of them",
                  ongrid == len(sc["drums"]))
 
+    # folding: the tracker's octave choices are not a melody's octaves
+    raw = [p for _s, _l, p in sc["lead"]]
+    fold = [p for _s, _l, p in C.fold_lead(sc["lead"])]
+    d_raw = np.abs(np.diff(raw)) if len(raw) > 1 else np.array([0])
+    d_fold = np.abs(np.diff(fold)) if len(fold) > 1 else np.array([0])
+    bad += check("folding the lead removes its octave leaps",
+                 "%d leaps over 7 semitones, was %d"
+                 % ((d_fold > 7).sum(), (d_raw > 7).sum()),
+                 "fewer than before", (d_fold > 7).sum() <= (d_raw > 7).sum())
+    bad += check("and keeps every pitch class",
+                 "%d of %d notes" % (sum(1 for a, b in zip(raw, fold)
+                                         if (a - b) % 12 == 0), len(raw)),
+                 "all of them",
+                 all((a - b) % 12 == 0 for a, b in zip(raw, fold)))
+
     print()
     print("  THE SIX CHANNELS")
     frames = C.arrange_score(sc)
@@ -178,6 +193,26 @@ def main():
     sounding = ((amps > 0) & tone).sum(axis=0)
     bad += check("tone voices sounding a frame", "%.2f mean" % sounding.mean(),
                  "over 3.5", sounding.mean() > 3.5)
+    # the lead has to WIN. At level 12 under a bass at 13 it did not, and a
+    # lead that is not the loudest voice is a lead the listener reports as
+    # missing even while it sounds in every frame
+    lvl = np.array([[a if t else 0 for a, t in zip(tr.amp[:m], tr.tone[:m])]
+                    for tr in tracks[:5]])
+    lead_on2 = lvl[1] > 0
+    wins = int(((lvl.argmax(axis=0) == 1) & lead_on2).sum())
+    bad += check("the lead is the loudest tone voice",
+                 "%.0f%% of the frames it sounds in"
+                 % (100.0 * wins / max(1, int(lead_on2.sum()))),
+                 "over 85%", wins > 0.85 * max(1, int(lead_on2.sum())))
+
+    # a long note must still be sounding at the end of itself
+    longest = max(sc["bass"], key=lambda q: q[1]) if sc["bass"] else None
+    if longest:
+        st, ln, _p = longest
+        end = min(m - 1, st + ln - 1)
+        bad += check("a %d-frame bass note at its end" % ln,
+                     "level %d" % lvl[0][end], "over 0", lvl[0][end] > 0)
+
     bad += check("frames with two voices or fewer",
                  "%.1f%%" % (100.0 * (sounding <= 2).mean()), "under 15%",
                  (sounding <= 2).mean() < 0.15)
