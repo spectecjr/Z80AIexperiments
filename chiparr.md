@@ -137,6 +137,30 @@ it runs out of note. Levels now fall to a sustain at 55% of the attack,
 not to silence, which also *reduced* the register writes, because a level
 that has stopped changing stops being written.
 
+### What the "lead" tracker actually finds
+
+It is not the melody, and this should have been checked three rounds ago.
+`track_viterbi` follows the pitch with the strongest harmonic salience, and
+in a real mix that is whichever part carries the most energy — usually
+something in the middle of the texture. Asked for the top line of one
+recording it returned a part centred on A4, G4 and D5, and the person who
+wrote the recording heard it as **the bass and the mids**.
+
+The melody is not the highest thing present either. On the same recording,
+the highest peak within 20 dB of the loudest sat between 2.3 and 5.9 kHz in
+every window measured — harmonics and cymbals, not a line. Nor is it the
+highest genuine fundamental: extracting every fundamental per frame by
+iterative harmonic subtraction and taking the highest gave C4, D5, G3, A3,
+A6, G3, A4 … across fourteen consecutive samples, which is not a part.
+
+So "loudest" does not find it, "highest" does not find it, and nothing in
+this repo knows which line a listener hears as the tune. `tests/probe.py`
+stops guessing: it tracks the best line in each of four registers, renders
+each alone on one channel, and asks. Everything downstream of here depends
+on that answer, because an arrangement built around the wrong line is
+wrong no matter how well it is fitted — and the fit measurements could not
+have told me, because a mid part *is* the loudest thing in the spectrum.
+
 ### The melody as a line, not as a pitch decision a frame
 
 Reported: "the structure keeps getting lost." The cause is visible in the
