@@ -10,17 +10,26 @@ by playing that same captured stream through tests/saa1099.py, so what
 you listen to is the Z80's own output and not a Python impression of
 it.
 """
+# its tests; the sound routines moved into soundchip/, not the
+
 import os
 import sys
 
 import numpy as np
 
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)           # soundchip/, with the sources
+sys.path.insert(0, HERE)
+# bench.py is the repository's Z80 harness runner, shared by all of its
+# tests. Only the sound routines moved into soundchip/, not the machinery
+# that assembles and times them, so the path to it is spelled out here.
+sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "tests"))
+
 from bench import Bench
 import crow as C
 import saa1099 as S
 
-HERE = os.path.dirname(os.path.abspath(__file__))
-ROOT = os.path.dirname(HERE)
 FRAMES = 300            # six seconds of them
 CALLS = (0, 100, 200)   # when the crow is asked to caw
 
@@ -77,7 +86,7 @@ def spectrogram(m, rate, seconds=2.2, rows=22, cols=76):
 
 
 def main():
-    b = Bench("harness_crow.asm", org=0)
+    b = Bench("harness_crow.asm", org=0, here=HERE, root=ROOT)
     s = b.syms
     chip = Chip(b)
     model = C.Crow()

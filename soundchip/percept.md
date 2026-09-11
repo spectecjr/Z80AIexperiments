@@ -1,6 +1,6 @@
 # percept.md — how close does it actually sound?
 
-`tests/percept.py`, `tests/refit.py`, with `tests/test_percept.py`.
+`soundchip/tests/percept.py`, `soundchip/tests/refit.py`, with `soundchip/tests/test_percept.py`.
 
 ## 1. Why the old measure was not good enough
 

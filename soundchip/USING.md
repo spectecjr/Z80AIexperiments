@@ -21,7 +21,7 @@ Then clone the repository and work from its root. No build step.
 
 ## One command
 
-    python3 tests/chipify.py song.mp3
+    python3 soundchip/tests/chipify.py song.mp3
 
 writes four files beside the input:
 
@@ -68,7 +68,7 @@ A three-minute recording takes about a minute.
 
 ## From a MIDI score instead
 
-    python3 tests/chipify.py song.mid --audio song.mp3
+    python3 soundchip/tests/chipify.py song.mid --audio song.mp3
 
 The `--audio` is optional and only used to measure the result. A score
 gives exact notes and exact timing, and it lets the part names decide which
@@ -83,7 +83,7 @@ than producing silence.
 
 ## Reading the result
 
-    python3 tests/chipdis.py song-chip.log
+    python3 soundchip/tests/chipdis.py song-chip.log
 
 `chipdis.py` reads a register log back and describes it in musical terms -
 notes, glides, vibrato, detuned pairs and their beat rates, which channels
@@ -92,10 +92,10 @@ an arpeggio that turned out to be running at 12.5 Hz against the music.
 
 ## Measuring it
 
-    python3 tests/percept.py song.wav song-chip.wav     # how close it sounds
-    python3 tests/cover.py  song.wav song-chip.log      # how many notes are there
-    python3 tests/probe.py  song.wav 20 75              # which line is the tune
-    python3 tests/ground.py song.wav song.mid           # trackers against a score
+    python3 soundchip/tests/percept.py song.wav song-chip.wav     # how close it sounds
+    python3 soundchip/tests/cover.py  song.wav song-chip.log      # how many notes are there
+    python3 soundchip/tests/probe.py  song.wav 20 75              # which line is the tune
+    python3 soundchip/tests/ground.py song.wav song.mid           # trackers against a score
 
 `percept.md` explains what those percentages do and do not mean. The short
 version: they are good at catching an octave error or a part that has

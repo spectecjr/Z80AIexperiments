@@ -1,6 +1,6 @@
 # chiparr: a recording as six channels, by its parts
 
-`tests/transcribe.py` and `tests/chiparr.py`, with `tests/test_chiparr.py`.
+`soundchip/tests/transcribe.py` and `soundchip/tests/chiparr.py`, with `soundchip/tests/test_chiparr.py`.
 
 `arrange.md` describes the other way of doing this: match the spectrum
 frame by frame, spending each of the six channels on whichever band needs
@@ -156,7 +156,7 @@ A6, G3, A4 … across fourteen consecutive samples, which is not a part.
 So "loudest" does not find it, "highest" does not find it, and no
 measurement here could have caught it — a mid part *is* the loudest thing
 in the spectrum, so both the perceptual fit and the peak coverage were
-satisfied. `tests/probe.py` stops guessing: it tracks the best line in each
+satisfied. `soundchip/tests/probe.py` stops guessing: it tracks the best line in each
 of four registers, renders each alone on one channel, and asks.
 
 ### Which of the two is the melody: not decidable here
@@ -488,10 +488,10 @@ construction.
 ## 3a. Measuring "thin"
 
 "Too thin" is a judgement, and it was the right one twice about this
-arranger. `tests/cover.py` turns it into a number so the next change can
+arranger. `soundchip/tests/cover.py` turns it into a number so the next change can
 be argued about with measurements:
 
-    python3 tests/cover.py source.wav arrangement.log
+    python3 soundchip/tests/cover.py source.wav arrangement.log
 
 Of the strong peaks in the source between 200 Hz and 2.5 kHz — strong
 meaning within 12 dB of that frame's loudest peak in that band — what
@@ -533,7 +533,7 @@ no voice of its own bought them back, so coherence came for free.
 
 ## 4. Checking it
 
-`python3 tests/test_chiparr.py` — 18 checks, and they are musical rather
+`python3 soundchip/tests/test_chiparr.py` — 18 checks, and they are musical rather
 than spectral, because this path's claim is musical. The source is
 `mkdemosource.build()`, an original cue at 96 bpm in D minor whose every
 part is known, so each answer is compared with the truth:

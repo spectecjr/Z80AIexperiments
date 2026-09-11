@@ -3,7 +3,7 @@
 A string pad out of one SAA1099: **1,097 T-states on a held chord,
 0.9% of a 50 Hz frame**.
 
-Verified against `tests/strings.py` — **every OUT, in order, 4,054 of
+Verified against `soundchip/tests/strings.py` — **every OUT, in order, 4,054 of
 them** — and rendered to `demo/strings.wav` from that captured stream.
 
 ## Interface
@@ -15,7 +15,7 @@ them** — and rendered to `demo/strings.wav` from that captured stream.
 | `st_frame` | one 50 Hz frame of it |
 
 Needs `saa.z80s` and `stringsdata.z80s`
-(`python3 tests/mkstringsdata.py`).
+(`python3 soundchip/tests/mkstringsdata.py`).
 
 ## Six channels, spent the way a string machine spends them
 
@@ -60,7 +60,7 @@ which is the detuned twin and the vibrato, both deliberate.
 ## Invariants
 
 - `n + DET + VIB_DEPTH` must fit in a byte and `n − VIB_DEPTH` must not
-  go below zero; `tests/strings.py` asserts both over every chord.
+  go below zero; `soundchip/tests/strings.py` asserts both over every chord.
 - The vibrato table is laid down **twice** and read at up to +8: shorten
   it and the third note reads off the end.
 - `st_level` starts at 0xFF so the first frame always writes the
@@ -78,5 +78,5 @@ which is the detuned twin and the vibrato, both deliberate.
 3. **`ensemble.z80s` runs this on three channels** so a flute can have
    the other three, and `shaku.md` is the flute.
 
-    python3 tests/mkstringsdata.py  # the chords, from the Hz
-    python3 tests/test_strings.py   # verify, time, and write the wav
+    python3 soundchip/tests/mkstringsdata.py  # the chords, from the Hz
+    python3 soundchip/tests/test_strings.py   # verify, time, and write the wav

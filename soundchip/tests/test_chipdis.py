@@ -12,16 +12,24 @@ and checks the findings against the source.
 import os
 import sys
 
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)           # soundchip/, with the sources
+sys.path.insert(0, HERE)
+# bench.py is the repository's Z80 harness runner, shared by all of its
+# tests. Only the sound routines moved into soundchip/, not the machinery
+# that assembles and times them, so the path to it is spelled out here.
+sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "tests"))
+
 from bench import Bench
 import chipdis
 import saareg
 
-HERE = os.path.dirname(os.path.abspath(__file__))
 
 
 def log_of(harness, init, play, frame, model_frames):
     """Run a routine on the emulator and capture its register log."""
-    b = Bench(harness, org=0)
+    b = Bench(harness, org=0, here=HERE, root=ROOT)
     cap = saareg.capture(b)
     frames = []
     b.fast_timed_call(b.syms[init], 0, 0)

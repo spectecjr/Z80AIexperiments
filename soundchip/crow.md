@@ -8,10 +8,10 @@ No samples and no streaming: six tone generators, one noise generator
 and the amplitude registers, and the CPU touching them fifty times a
 second.
 
-Verified against `tests/crow.py` the way everything else here is
+Verified against `soundchip/tests/crow.py` the way everything else here is
 verified — **every OUT the routine makes, in order, register and value,
 over 1,960 writes** — and then the captured write stream is played
-through `tests/saa1099.py` to make `demo/crow.wav`. What you listen to
+through `soundchip/tests/saa1099.py` to make `demo/crow.wav`. What you listen to
 is the Z80's own output, not a Python impression of it.
 
 ## Interface
@@ -86,7 +86,7 @@ it. A pair of writes is ten bytes of code with no reloading:
 **No clamping anywhere.** Both detunes are downwards and every transpose
 is upwards, so the highest byte the routine can write is the top of the
 pitch arc transposed up and the lowest is the bottom of it detuned down.
-`tests/crow.py` asserts both ends, which is why the frame code can add
+`soundchip/tests/crow.py` asserts both ends, which is why the frame code can add
 and subtract without checking.
 
 ## What it costs
@@ -114,20 +114,20 @@ Measured on the rendered wav, over the first caw:
 
 Which is the shape a corvid caw has: most of it in the fundamental and
 the second harmonic, a tail of noise above, and a voice that is rough
-rather than clean. `tests/test_crow.py` prints a spectrogram of the
+rather than clean. `soundchip/tests/test_crow.py` prints a spectrogram of the
 first two calls in the terminal, so the three caws and their falling
 pitch can be seen without opening anything.
 
 **I cannot hear it.** Everything above is measurement, and the design
 came from what a crow's spectrogram looks like rather than from
 listening. If it wants tuning, the whole voice is the `CAW` table at the
-top of `tests/crow.py`, in Hz and 0-15 levels — change it there, run
-`python3 tests/mkcrowdata.py` and then `tests/test_crow.py`, and the
+top of `soundchip/tests/crow.py`, in Hz and 0-15 levels — change it there, run
+`python3 soundchip/tests/mkcrowdata.py` and then `soundchip/tests/test_crow.py`, and the
 table, the assembly's data file and the wav all follow.
 
 ## What the emulation assumes
 
-`tests/saa1099.py` is a renderer, not something verified against
+`soundchip/tests/saa1099.py` is a renderer, not something verified against
 hardware. The Z80 side is exact; the chip side follows **SAASound**
 (which is what SimCoupe plays) and MAME, and these are the places where
 that mattered:
@@ -171,5 +171,5 @@ that mattered:
    an engine, a beast, a door — is another `CAW` table and the same
    fourteen bytes of state.
 
-    python3 tests/mkcrowdata.py     # the tables, from the Hz
-    python3 tests/test_crow.py      # verify, time, and write demo/crow.wav
+    python3 soundchip/tests/mkcrowdata.py     # the tables, from the Hz
+    python3 soundchip/tests/test_crow.py      # verify, time, and write demo/crow.wav

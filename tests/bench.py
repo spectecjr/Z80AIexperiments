@@ -41,12 +41,21 @@ def zeus_shim(builddir):
     return builddir
 
 
-def assemble(harness="harness.asm", incdirs=()):
+def assemble(harness="harness.asm", incdirs=(), here=None, root=None):
+    """Assemble a harness. `here` is where the harness lives and `root`
+    where its INCLUDEs are, both defaulting to this file's own directory
+    and its parent - which is right for tests/ beside the sources.
+
+    soundchip/tests/ passes its own pair: the sound routines moved with
+    their tests, so their root is soundchip/ rather than the repository's.
+    """
+    here = here or HERE
+    root = root or ROOT
     binf = "/tmp/%s.bin" % harness.replace(".asm", "")
     symf = "/tmp/%s.sym" % harness.replace(".asm", "")
-    cmd = [SJASM, "--sym=" + symf, "--raw=" + binf, "-I" + ROOT]
+    cmd = [SJASM, "--sym=" + symf, "--raw=" + binf, "-I" + root]
     cmd += ["-I" + d for d in incdirs]
-    r = subprocess.run(cmd + [os.path.join(HERE, harness)],
+    r = subprocess.run(cmd + [os.path.join(here, harness)],
                        capture_output=True, text=True)
     if r.returncode:
         sys.exit(r.stdout + r.stderr)
@@ -59,10 +68,11 @@ def assemble(harness="harness.asm", incdirs=()):
 
 
 class Bench:
-    def __init__(self, harness="harness.asm", opsize=2, incdirs=(), org=ORG):
+    def __init__(self, harness="harness.asm", opsize=2, incdirs=(), org=ORG,
+                 here=None, root=None):
         self.opsize = opsize            # bytes per operand (2 or 4)
         self.batchsize = BATCH if opsize == 2 else BATCH // 2
-        code, self.syms = assemble(harness, incdirs)
+        code, self.syms = assemble(harness, incdirs, here, root)
         self.m = z80.Z80Machine()
         self.m.set_memory_block(org, code)
         self.m.set_memory_block(RETADDR, bytes([0x76]))     # HALT

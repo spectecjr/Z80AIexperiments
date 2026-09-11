@@ -4,7 +4,7 @@ The shakuhachi and the string pad at once, **three oscillators each**,
 out of one SAA1099: **3,360 T-states a frame, 2.8%, for two
 instruments.**
 
-Verified against `tests/ensemble.py` — **every OUT, in order, 9,114 of
+Verified against `soundchip/tests/ensemble.py` — **every OUT, in order, 9,114 of
 them** — and rendered to `demo/ensemble.wav`. Measured on what came
 out: every note of both scores within **18 cents**.
 
@@ -86,5 +86,5 @@ somewhere else.
 3. **A third voice would have to come out of the pad**, and a bass note
    under it might be worth more than the fifth.
 
-    python3 tests/mkensembledata.py     # the repacked tables
-    python3 tests/test_ensemble.py      # verify, time, and write the wav
+    python3 soundchip/tests/mkensembledata.py     # the repacked tables
+    python3 soundchip/tests/test_ensemble.py      # verify, time, and write the wav

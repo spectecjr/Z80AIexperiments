@@ -72,13 +72,13 @@ And moving memory about, measured on the eight-line scroll (`scroll8`):
 
 All verified the same way as everything else - every OUT, in order,
 against the routine's model - and then played through
-`tests/saa1099.py` to make the wavs in `demo/`. See `crow.md`,
-`shaku.md`, `strings.md` and `ensemble.md`.
+`soundchip/tests/saa1099.py` to make the wavs in `demo/`. See `soundchip/crow.md`,
+`soundchip/shaku.md`, `soundchip/strings.md` and `soundchip/ensemble.md`.
 
 A whole arrangement driven from a register log costs less than any of
 them, because most frames change nothing. Over 9,898 frames of a 197 s
 recording reduced to six channels by `chiparr.py`, at the measured **74
-T-states** a (register, value) pair from `saa.z80s`:
+T-states** a (register, value) pair from `soundchip/saa.z80s`:
 
 | | pairs a frame | T-states |
 |---|---|---|
@@ -86,7 +86,7 @@ T-states** a (register, value) pair from `saa.z80s`:
 | median | 2 | 148 |
 | worst frame | 31 | 2,294 — 1.9% |
 
-See `chiparr.md`; `arrange.md` is the other way of doing it, an order of
+See `soundchip/chiparr.md`; `soundchip/arrange.md` is the other way of doing it, an order of
 magnitude above this because it rewrites every channel every frame.
 
 ## 2. The rasteriser (`renderlit`), before and after
@@ -181,7 +181,7 @@ else happens at all.
 | **Split prismpre's erase box** — one for the sigma, one for the triangle | blanks 94% of the bytes one box does; a box a piece blanks 115% | the pieces' boxes overlap too much |
 | **Drop the lighting from prism** (flat faces, visibility kept) | 446,602 → **410,789**, 14.6 Hz | `pr_light` 73,704 → 37,891; the other half *is* the visibility test. prism's non-drawing work is 213,320 even with no lighting at all — 89% of the whole 25 Hz budget — so no lighting setting reaches 25 Hz |
 | **Autocorrelation for the bass line** (`transcribe.py`), global argmax | read a 197 s recording's bass as F1 for nearly its whole length, through a progression that moves | a periodic signal correlates as well at 2T as at T, so the peak is an octave out as often as not |
-| **The same, taking the shortest lag within 85% of the best** | read a 73.4 Hz saw as D3 (+1200 cents) and the recording an octave above its real line | it takes the half-period peak instead; no tie-break on lag length fixes both directions. Replaced by a 16,384-sample harmonic sum plus an odd-harmonic octave test, which reads the saw at 73.4 Hz exactly — see `chiparr.md` |
+| **The same, taking the shortest lag within 85% of the best** | read a 73.4 Hz saw as D3 (+1200 cents) and the recording an octave above its real line | it takes the half-period peak instead; no tie-break on lag length fixes both directions. Replaced by a 16,384-sample harmonic sum plus an odd-harmonic octave test, which reads the saw at 73.4 Hz exactly — see `soundchip/chiparr.md` |
 | **Band energy to classify a drum hit** | every one of a cue's 16 metal hits came out "hat" | a sustained hi-hat contributes to the high band whether or not it is part of this hit, and a band three octaves wide sums more bins than one an octave wide. It is the per-bin *rise* at the onset that is the hit |
 | **Chord quality decided per window** | a D minor cue's first two bars came out D major, and the arpeggio played F# against them | those bars contain no third at all. Each root now takes the quality the whole piece's evidence gives it, weighted by duration |
 | **Letting the parts yield to each other** (`chiparr.py` v1) — the arpeggio resting under the lead, a channel each for the drums, the lead doubling itself | 37.6% of the source's strong 200-2500 Hz peaks covered, 2 to 3 tone voices a frame | the lead sounds for 80% of the recording, so "rest under the lead" means "do not play", and the mid register is then empty. Nothing yields now: 57.8% covered, 4.45 voices a frame, for 1.2 more register pairs a frame |

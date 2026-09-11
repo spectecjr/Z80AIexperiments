@@ -1,6 +1,6 @@
 # midiarr.md — the score, and what the trackers got wrong
 
-`tests/smf.py`, `tests/ground.py`, `tests/midiarr.py`.
+`soundchip/tests/smf.py`, `soundchip/tests/ground.py`, `soundchip/tests/midiarr.py`.
 
 A MIDI export of one of the recordings arrived after several rounds of
 arguing about its contents from spectra. It settles those arguments, and
@@ -27,7 +27,7 @@ are fair.
 
 ## 2. What the trackers get right and wrong
 
-`tests/ground.py`, per 20 ms frame in which the named part is sounding:
+`soundchip/tests/ground.py`, per 20 ms frame in which the named part is sounding:
 
 | part | tracker | has a pitch | **exact** | right class, wrong octave |
 |---|---|---|---|---|
@@ -177,7 +177,7 @@ them.
 
 ## 4a. The two arrangements, note for note
 
-`tests/versus.py` puts both register logs against the score they are both
+`soundchip/tests/versus.py` puts both register logs against the score they are both
 meant to be playing. Per frame it asks two questions, and only one of them
 separates them:
 

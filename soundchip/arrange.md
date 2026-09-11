@@ -1,17 +1,17 @@
 # arrange — audio onto six squares
 
 `chipdis` reads a register log and says what the chip is doing.
-`tests/arrange.py` is the other direction: it takes audio and decides
+`soundchip/tests/arrange.py` is the other direction: it takes audio and decides
 what to write to an SAA1099, frame by frame, so that what comes out is
 as close to the input as six oscillators can manage.
 
 | | |
 |---|---|
-| `tests/arrange.py` | the arranger, and the measurements that judge it |
-| `tests/mkdemosource.py` | an original cue at full fidelity — saws, filters, resonant metal, a pad — so the reduction can be heard against something that is *not* chip music |
-| `tests/test_arrange.py` | a synthetic source with known content, and the round trip back through `chipdis` |
+| `soundchip/tests/arrange.py` | the arranger, and the measurements that judge it |
+| `soundchip/tests/mkdemosource.py` | an original cue at full fidelity — saws, filters, resonant metal, a pad — so the reduction can be heard against something that is *not* chip music |
+| `soundchip/tests/test_arrange.py` | a synthetic source with known content, and the round trip back through `chipdis` |
 
-    python3 tests/mkdemosource.py && python3 tests/test_arrange.py
+    python3 soundchip/tests/mkdemosource.py && python3 soundchip/tests/test_arrange.py
 
 ## How it works
 

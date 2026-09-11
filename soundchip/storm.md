@@ -14,9 +14,9 @@ like is entirely in the score. Two are built:
 
 Only one goes into a build; they define the same symbols.
 
-Verified against `tests/storm.py` the way everything else here is —
+Verified against `soundchip/tests/storm.py` the way everything else here is —
 **every OUT, in order, register and value, 7,013 of them** — and then
-that captured stream is played through `tests/saa1099.py` to make
+that captured stream is played through `soundchip/tests/saa1099.py` to make
 `demo/storm.wav`.
 
 ## Interface
@@ -28,7 +28,7 @@ that captured stream is played through `tests/saa1099.py` to make
 | `sm_frame` | one 50 Hz frame of it |
 
 Needs `saa.z80s` and `stormdata.z80s`
-(`python3 tests/mkstormdata.py`).
+(`python3 soundchip/tests/mkstormdata.py`).
 
 ## A noise generator is only hiss if you clock it fast
 
@@ -79,7 +79,7 @@ seven-second sweep is **two 16-bit adds a frame and eight bytes of
 table**. The accumulators are reloaded at each segment rather than
 carried, so nothing drifts.
 
-`tests/storm.py` writes them in Hz and 0..1 levels, and the generator
+`soundchip/tests/storm.py` writes them in Hz and 0..1 levels, and the generator
 does the chip's bookkeeping — including **splitting any segment that
 crosses an octave boundary**, because a frequency byte only spans one
 octave: a sweep through 122 Hz ends at byte 0 of octave 2 and picks up
@@ -173,5 +173,5 @@ it sounding designed.
    driving the level and clock from an LFSR instead — `stars.z80s`'s,
    as `crow.z80s` uses it — would make it never repeat.
 
-    python3 tests/mkstormdata.py    # the scores, from the Hz
-    python3 tests/test_storm.py     # verify, time, and write the wav
+    python3 soundchip/tests/mkstormdata.py    # the scores, from the Hz
+    python3 soundchip/tests/test_storm.py     # verify, time, and write the wav

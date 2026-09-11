@@ -1,18 +1,18 @@
 # chipdis — reading a sound chip backwards
 
 Every synthesis routine in this repo works the same way: a score decides
-what to write to the chip each frame. `tests/chipdis.py` reads that
+what to write to the chip each frame. `soundchip/tests/chipdis.py` reads that
 backwards. Given nothing but a log of register writes — no source, no
 symbols — it recovers what the chip is being made to do.
 
 | | |
 |---|---|
-| `tests/saareg.py` | SAA1099 register logs: the format, the capture hook, and what a frame of them means |
-| `tests/ayreg.py` | VGM and VGZ files, for the AY-3-8910 — because **a VGM file already is a register log** |
-| `tests/chipdis.py` | the analysis, which is chip-agnostic, and the report |
-| `tests/test_chipdis.py` | the only honest test: point it at five routines whose scores are in this repo and check it recovers them |
+| `soundchip/tests/saareg.py` | SAA1099 register logs: the format, the capture hook, and what a frame of them means |
+| `soundchip/tests/ayreg.py` | VGM and VGZ files, for the AY-3-8910 — because **a VGM file already is a register log** |
+| `soundchip/tests/chipdis.py` | the analysis, which is chip-agnostic, and the report |
+| `soundchip/tests/test_chipdis.py` | the only honest test: point it at five routines whose scores are in this repo and check it recovers them |
 
-    python3 tests/test_chipdis.py
+    python3 soundchip/tests/test_chipdis.py
 
 ## What it finds
 

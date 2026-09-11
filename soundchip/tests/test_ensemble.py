@@ -8,6 +8,15 @@ import sys
 
 import numpy as np
 
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)           # soundchip/, with the sources
+sys.path.insert(0, HERE)
+# bench.py is the repository's Z80 harness runner, shared by all of its
+# tests. Only the sound routines moved into soundchip/, not the machinery
+# that assembles and times them, so the path to it is spelled out here.
+sys.path.insert(0, os.path.join(os.path.dirname(ROOT), "tests"))
+
 from bench import Bench
 import ensemble as E
 import shaku as K
@@ -15,11 +24,10 @@ import strings as T
 import saa1099 as S
 from test_crow import Chip, spectrogram
 
-ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 
 def main():
-    b = Bench("harness_ensemble.asm", org=0)
+    b = Bench("harness_ensemble.asm", org=0, here=HERE, root=ROOT)
     s = b.syms
     chip = Chip(b)
     model = E.Ensemble()
