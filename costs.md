@@ -89,6 +89,31 @@ T-states** a (register, value) pair from `soundchip/saa.z80s`:
 See `soundchip/chiparr.md`; `soundchip/arrange.md` is the other way of doing it, an order of
 magnitude above this because it rewrites every channel every frame.
 
+## 1c. A compiled sprite that zooms
+
+`mipsprite`, measured on a chain of seven widths from 64x80 down to 8x10.
+Opaque box, moving, clearing the L it leaves, a 22 T-state interrupt window
+every fourth row:
+
+| | T-states | % of a 50 Hz frame | how many fit |
+|---|---|---|---|
+| **64x80** | 28,475 | **23.7%** | 4.2 |
+| 32x40 | 9,753 | 8.1% | 12.3 |
+| 16x20 | 3,789 | 3.2% | 31.7 |
+| **8x10** | 1,749 | **1.5%** | 68.6 |
+| one big, two mid, four small, eight tiny | 77,129 | 64.3% | fifteen sprites |
+
+| and the parts of it | T-states | |
+|---|---|---|
+| 64x80 silhouette, one block a height | 15,486 | 13.4 a covered byte |
+| 64x80 silhouette, a block a row and a row program | 22,599 | +89 a row for a free height |
+| 64x80 opaque box | 22,489 | **8.8 a byte** of arbitrary pixels |
+| the box erased, 2,560 bytes | 18,045 | `5.5·wb·h + 49·h + 50` at every size |
+| the register cache, at the top level | −2,724 | 15%; 7% by 24x30 |
+| the chain compiled, one pose, one x phase | 7,550 bytes | against 7,680 free above the buffers |
+
+See `mipsprite.md`.
+
 ## 2. The rasteriser (`renderlit`), before and after
 
 Measured by timing `rndl_six` on one quad of a known size.
