@@ -11,6 +11,11 @@ shares nothing with it but the Z80 test harness.
 
 `USING.md` is the manual for converting a recording. Start there.
 
+`HANDOVER.md` is where the work stands: what is measured, what is known
+wrong, and which design rules were arrived at the hard way. Read it before
+changing anything — several of the obvious improvements have been tried and
+measured worse.
+
 ## The Z80 routines
 
 | | |
