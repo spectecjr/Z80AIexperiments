@@ -46,11 +46,10 @@ RW = 170                        # the road's half width, world units: 63
 MINW = 2                        # the far end, in pixels
 NSEG = 64                       # segments in the track loop
 SEGSH = 9                       # 512 world units each
-BANDSH = 8                      # the bands, 256 units: twice road.z80s's,
-                                # because a band that flips is a row
-                                # repainted in full and half as many is
-                                # 7,000 T-states
-DASHSH = 7                      # the dashes, half that again
+BANDSH = 7                      # the bands, 256 world units. A band that
+                                # flips is a row repainted in full, so the
+                                # period is what that costs: 256 is about
+                                # one row in six a frame
 
 # The fixed palette. Everything that alternates with distance is a pair
 # of indices rather than one index and a CLUT write, and bit 0 of each
@@ -127,7 +126,7 @@ TRACK = track()
 
 
 def geometry(camx, camz):
-    """Per scanline: the two parities and the road's centre.
+    """Per scanline: the band's parity and the road's centre.
 
     Both come out of one 16-bit add, exactly as in road.z80s. The centre
     is the double integral of the curvature at that row's depth, and the
@@ -143,7 +142,7 @@ def geometry(camx, camz):
         x = (min(max(x >> 8, lo), hi) << 8) | (x & 255)
         cen[y] = x >> 8
         z = (ZTAB[y] + camz) & 0xFFFF
-        par[y] = ((z >> BANDSH) & 1) << 1 | ((z >> DASHSH) & 1)
+        par[y] = (z >> BANDSH) & 1
         dx = (dx + TRACK[(z >> SEGSH) % NSEG]) & 0xFFFF
         x = (x + dx) & 0xFFFF
     return par, cen
@@ -163,13 +162,13 @@ SKY = sky()
 def line(c, w, k, lw, par):
     """One scanline of road, exactly, at centre c.
 
-    The band's parity is bit 1 of par and picks one of each pair of
-    colours; bit 0 says whether there is a dash on this row, and where
-    there is not the centre line is the tarmac's own colour.
+    The parity picks one of each pair of colours, and the dash rides on
+    it too: the centre line shows on one band and is the tarmac's own
+    colour on the next. Which costs nothing - a second bit would double
+    the run bank, because the line is baked into the runs.
     """
-    b = par & 1
-    grass, tarmac, kerb = GRASS0 + b, TARMAC0 + b, KERB0 + b
-    mark = LINE if par & 2 else tarmac
+    grass, tarmac, kerb = GRASS0 + par, TARMAC0 + par, KERB0 + par
+    mark = LINE if par else tarmac
     lx = c - lw // 2
     out = bytearray(STRIDE)
     for x in range(W):

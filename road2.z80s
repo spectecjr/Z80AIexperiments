@@ -1,0 +1,356 @@
+;------------------------------------------------------------------
+; road2.z80s - the Hang On road again, at 50 Hz and no CLUT writes
+;
+;   rd2_init     sky and grass into both buffers, once
+;   rd2_frame    draw from (rd2_camx, rd2_camz) and flip
+;
+; road.z80s puts everything that repeats with distance into the
+; palette - the mown stripes, the tarmac's bands, the kerb's red and
+; white, the dashes - for two bits a scanline, and rides forward for
+; nothing. That wants a CLUT write every scanline. At the ~150
+; T-states a line interrupt costs here that is 28,800 a frame, about a
+; quarter of a 50 Hz one, to save at most 14,000; and it cannot even be
+; had, because the fill holds SP on the screen and an interrupt would
+; push its return address into the middle of the road.
+;
+; So the palette is fixed and all of it is drawn. Two things pay:
+;
+; ONLY WHAT MOVED IS REPAINTED. A row's road is one interval, and at
+; 50 Hz the worst any row's centre moves in a frame is two pixels, so
+; the window is the road plus a fixed margin either side - about twenty
+; PUSHes a row rather than sixty-four. No record of where it was is
+; needed, which also means every entry below is a constant: the window
+; moves with the road, so what the row does never depends on where the
+; road actually is. Only SP does.
+;
+; ONE COMPILED RUN A ROW. A row's road has a shape fixed by the row and
+; only its position moves, so it compiles once and SP places it - which
+; is chequer3's trick with the road's edges in place of the phase. Both
+; kerbs, their inner edges and the centre line all ride inside the run,
+; baked to the pixel, so a row is three dispatches: grass in from the
+; right, the run, grass out to the left.
+;
+; WHICH IS ALSO WHY THE MARKINGS SURVIVE. road.z80s drops a kerb or a
+; centre line below four pixels, because two boundaries inside one PUSH
+; want a byte carrying three colours and its mixed-pair table holds two.
+; A baked run has no such table: a one pixel line is a nibble in a
+; PUSHed constant. The kerbs keep their red and white to the horizon.
+;
+; The exception to the window is a row whose band parity has flipped
+; since this buffer last had it - about one row in six a frame - which
+; wants its whole width back before the road goes on top.
+;
+; The geometry is road.z80s's, unchanged: harrier's camera, the bend
+; integrated twice up the screen, steering as the constant of the first
+; integration, and the centre pinned inside [w, 255-w] so that nothing
+; is ever clipped.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+RD2_BUF0:       EQU 0x80
+RD2_BUF1:       EQU 0x20
+RD2_G0:         EQU 0x2222      ; the grass, one band and the other
+RD2_G1:         EQU 0x3333
+
+;------------------------------------------------------------------
+; rd2_init - the sky into both buffers, and grass under it
+;
+; The sky is drawn once and never again: nothing below the horizon
+; reaches it, not even the run's left hand end, because the window
+; stops well short of the row's start. The road's rows get grass so
+; that a buffer is never read before it is written, and every record's
+; parity marks are set to something no row can match, so the first two
+; frames repaint in full.
+;------------------------------------------------------------------
+
+rd2_init:
+        LD   A,RD2_BUF0
+        LD   (rd2_back),A
+        LD   A,RD2_BUF1
+        LD   (rd2_front),A
+        LD   H,RD2_BUF0
+        CALL rd2_fill
+        LD   H,RD2_BUF1
+        CALL rd2_fill
+        LD   IX,rd2_rec         ; no row has drawn into either buffer yet
+        LD   B,RD2_ROWS
+rd2_i1:
+        LD   (IX+12),255
+        LD   (IX+13),255
+        LD   DE,RD2_REC
+        ADD  IX,DE
+        DJNZ rd2_i1
+        RET
+
+rd2_fill:
+        LD   L,0
+        LD   DE,rd2_sky
+        LD   C,RD2_HZ + 1       ; the sky's own rows, a byte each
+rd2_f1:
+        LD   A,(DE)
+        INC  DE
+        LD   B,128
+rd2_f2:
+        LD   (HL),A
+        INC  HL
+        DJNZ rd2_f2
+        DEC  C
+        JR   NZ,rd2_f1
+        LD   A,RD2_G0 & 255     ; and grass under it, so that a buffer
+        LD   C,192 - RD2_HZ - 1 ; is never read before it is written
+rd2_f3:
+        LD   B,128
+rd2_f4:
+        LD   (HL),A
+        INC  HL
+        DJNZ rd2_f4
+        DEC  C
+        JR   NZ,rd2_f3
+        RET
+
+;------------------------------------------------------------------
+; rd2_frame - one frame
+;------------------------------------------------------------------
+
+rd2_frame:
+        LD   HL,(rd2_camz)      ; the depth goes in as two immediates,
+        LD   A,L                ; so nothing has to carry it
+        LD   (rd2_cl+1),A
+        LD   A,H
+        LD   (rd2_ch+1),A
+        LD   A,(rd2_back)       ; and which of the two parity marks in
+        CP   RD2_BUF0           ; each record is this buffer's
+        LD   A,0xBD             ; CP L
+        LD   HL,-2
+        JR   Z,rd2_fr1
+        LD   A,0xBC             ; CP H
+        LD   HL,-1
+rd2_fr1:
+        LD   (rd2_mk),A
+        LD   (rd2_mw+1),HL
+        CALL rd2_draw
+        LD   A,(rd2_back)
+        LD   B,A
+        LD   A,(rd2_front)
+        LD   (rd2_back),A
+        LD   A,B
+        LD   (rd2_front),A
+        RET
+
+;------------------------------------------------------------------
+; rd2_draw - the road, bottom row upwards
+;
+; IX is the row's first byte on screen, IY the road's centre in 8.8
+; pixels, and SP walks the row's record until the moment it becomes
+; the screen. Bottom upwards because that is the order the bend
+; integrates in.
+;------------------------------------------------------------------
+
+rd2_draw:
+        DI
+        LD   (rd2_sp),SP
+        LD   HL,(rd2_camx)      ; the lateral step a row is the camera's
+        LD   (rd2_dx),HL        ; offset itself, and the bottom row is
+        LD   D,H                ; 95 of them out
+        LD   E,L
+        ADD  HL,HL
+        ADD  HL,DE
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL              ; 96 * camx
+        OR   A
+        SBC  HL,DE              ; 95 * camx
+        EX   DE,HL
+        LD   HL,0x8000          ; the middle of the screen, 8.8
+        OR   A
+        SBC  HL,DE
+        PUSH HL
+        POP  IY                 ; IY = x
+        LD   HL,rd2_rec
+        LD   (rd2_rp),HL
+        LD   A,(rd2_back)
+        LD   IXH,A
+        LD   IXL,0
+        LD   DE,(192 - 1) * 128 ; the last row's first byte
+        ADD  IX,DE
+        EXX
+        LD   B,RD2_ROWS
+        EXX
+
+;------------------------------------------------------------------
+; One row: where the road is, and then the three pieces of it
+;------------------------------------------------------------------
+
+rd2_row:
+        LD   SP,(rd2_rp)
+        POP  HL                 ; this row's depth, kept until the centre
+        POP  DE                 ; is out - the rails the centre is held
+        LD   A,IYH              ; between, and this row's own position,
+        CP   E                  ; come first because the integration is
+        JR   NC,rd2_r1          ; one row ahead of what it draws
+        LD   A,E
+rd2_r1:
+        CP   D
+        JR   C,rd2_r2
+        LD   A,D
+rd2_r2:
+        LD   IYH,A              ; pinned there, not merely reported
+        POP  DE                 ; E = w + margin + 1
+        ADD  A,E
+        LD   E,A                ; the window's right hand end, in pixels
+        AND  1                  ; one pixel of which is the phase
+        LD   (rd2_ph),A
+        SRL  E
+        LD   A,E
+        LD   (rd2_bo),A         ; and the rest of it a byte in the row
+        LD   A,L                ; now the depth, which HL has held
+rd2_cl:
+        ADD  A,0                ; patched: the camera's distance
+        LD   L,A
+        LD   A,H
+rd2_ch:
+        ADC  A,0
+        LD   H,A
+        LD   A,L                ; bit 7 of it is the band's parity, and
+        RLCA                    ; all that riding forward costs
+        AND  1
+        LD   (rd2_pr),A
+        LD   A,H                ; and bits 9 to 14 the track's segment
+        AND  0x7E
+        LD   L,A
+        LD   H,rd2_trk / 256
+        LD   A,(HL)
+        INC  L
+        LD   H,(HL)
+        LD   L,A                ; HL = the curvature there
+        LD   DE,(rd2_dx)
+        ADD  HL,DE
+        LD   (rd2_dx),HL        ; dx += curvature
+        LD   D,H
+        LD   E,L
+        ADD  IY,DE              ; and x += dx, which is the row above's
+        POP  HL                 ; where the two grass runs are entered,
+        POP  DE                 ; for each phase
+        LD   A,(rd2_ph)
+        OR   A
+        JR   Z,rd2_r3
+        EX   DE,HL
+rd2_r3:
+        LD   A,L
+        LD   (rd2_e0+1),A
+        LD   A,H
+        LD   (rd2_ef+1),A
+        POP  DE                 ; which four runs are this row's width's
+        LD   A,(rd2_ph)
+        ADD  A,A
+        ADD  A,E
+        LD   L,A
+        LD   A,(rd2_pr)
+        ADD  A,rd2_rt0 / 256    ; a page a parity, so this is the lookup
+        LD   H,A
+        LD   E,(HL)
+        INC  L
+        LD   D,(HL)             ; DE = this row's compiled road
+        LD   BC,RD2_G0
+        LD   A,(rd2_pr)
+        OR   A
+        JR   Z,rd2_r4
+        LD   BC,RD2_G1
+rd2_r4:
+        POP  HL                 ; the parity each buffer last painted
+        LD   A,(rd2_pr)
+rd2_mk:
+        CP   L                  ; patched: which of the two is ours
+        LD   (rd2_rp),SP
+        JR   Z,rd2_road
+        ; the bands have moved on, so this row's grass is all stale
+rd2_mw:
+        LD   HL,-2              ; patched with it
+        ADD  HL,SP
+        LD   (HL),A
+        LD   A,IXL
+        ADD  A,128
+        LD   L,A
+        LD   A,IXH
+        ADC  A,0
+        LD   H,A
+        LD   SP,HL              ; one past the row's last byte
+        JP   rd2_fill128
+
+rd2_road:
+        LD   A,(rd2_bo)         ; SP to the window's right hand end
+        ADD  A,IXL
+        LD   L,A
+        LD   A,IXH
+        ADC  A,0
+        LD   H,A
+        LD   SP,HL
+rd2_e0:
+        LD   A,0                ; patched: grass in from the right
+        LD   L,A
+        LD   H,rd2_gin / 256
+rd2_ef:
+        LD   A,0                ; and how far out to the left, which
+        JP   (HL)               ; nothing between here and there touches
+
+;------------------------------------------------------------------
+; The three runs. Grass in, the row's own compiled road, grass out -
+; and the road's run ends JP rd2_out, which is the only thing the bank
+; needs to know about this file.
+;------------------------------------------------------------------
+
+        ALIGN 256
+rd2_gin:
+        DEFS 64,0xC5            ; PUSH BC
+        EX   DE,HL              ; DE has carried the road's run this far
+        JP   (HL)
+
+rd2_out:
+        LD   L,A                ; A has carried the left hand entry
+        LD   H,rd2_gout / 256
+        JP   (HL)
+
+        ALIGN 256
+rd2_gout:
+        DEFS 64,0xC5
+        ; fall through into the row loop
+
+rd2_next:
+        LD   DE,-128
+        ADD  IX,DE
+        EXX
+        DEC  B
+        EXX
+        JP   NZ,rd2_row
+        LD   SP,(rd2_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; A whole row of grass, for when the bands have moved on. The road
+; goes over the top of it, so this falls back into the row rather
+; than out of it.
+;------------------------------------------------------------------
+
+        ALIGN 256
+rd2_fill128:
+        DEFS 64,0xC5
+        JP   rd2_road
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+rd2_back:       DEFB RD2_BUF0
+rd2_front:      DEFB RD2_BUF1
+rd2_camx:       DEFW 0          ; the camera's lateral offset, world units
+rd2_camz:       DEFW 0          ; and how far it has come
+rd2_dx:         DEFS 2
+rd2_sp:         DEFS 2
+rd2_rp:         DEFS 2
+rd2_pr:         DEFS 1          ; this row's band parity
+rd2_ph:         DEFS 1          ; and its phase
+rd2_bo:         DEFS 1          ; where the window ends, a byte in the row

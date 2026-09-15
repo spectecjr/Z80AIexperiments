@@ -44,10 +44,9 @@ M = 8                           # the repaint margin, pixels each side:
 
 
 def colours(par):
-    """The five indices this row draws in, given its band parity."""
-    b = par & 1
-    return (A.GRASS0 + b, A.TARMAC0 + b, A.KERB0 + b,
-            A.LINE if par & 2 else A.TARMAC0 + b)
+    """The four indices this row draws in, given its band parity."""
+    return (A.GRASS0 + par, A.TARMAC0 + par, A.KERB0 + par,
+            A.LINE if par else A.TARMAC0 + par)
 
 
 def pixel(dx, w, k, lw, cols):
@@ -126,10 +125,10 @@ def simulate(poses):
         for y in range(A.HZ + 1, A.H):
             c, w, k, lw = cen[y], A.WTAB[y], A.KTAB[y], A.LTAB[y]
             p, row = par[y], y * A.STRIDE
-            grass = (A.GRASS0 + (p & 1)) * 17
-            if mark[y] != (p & 1):              # the bands moved on: this
+            grass = (A.GRASS0 + p) * 17
+            if mark[y] != p:                    # the bands moved on: this
                 dst[row:row + 128] = bytes([grass]) * 128       # row's
-                mark[y] = p & 1                 # grass is all stale
+                mark[y] = p                     # grass is all stale
             phase = (c + w + M + 1) & 1
             e0, ef, np = entries(w, phase)
             br = (c + w + M + 1) >> 1           # SP, as a byte in the row
@@ -187,6 +186,11 @@ def cost():
     return push, dispatch
 
 
+LOWBANK = 3800                  # how much of the run bank fits below the
+                                # screens, once the code and tables have
+                                # had their share; the rest goes above
+
+
 def emit_runs(ws, kw, lw):
     """The compiled runs, and the table of where each one starts.
 
@@ -196,24 +200,27 @@ def emit_runs(ws, kw, lw):
     road is mostly PUSH HL at 11 T-states, and the six places a byte
     carries two colours at once cost 21.
     """
-    body, table, n = [], [], 0
+    body, hi, table, n, split = [], [], [], 0, False
     for w in ws:
         for par in (0, 1):
             for ph in (0, 1):
+                if n > LOWBANK:
+                    split = True
+                out = hi if split else body
                 table.append("rd2_r%d_%d_%d" % (w, ph, par))
-                body.append("rd2_r%d_%d_%d:" % (w, ph, par))
+                out.append("rd2_r%d_%d_%d:" % (w, ph, par))
                 last = None
-                for lo, hi in run(w, kw[w], lw[w], ph, par):
-                    if (lo, hi) != last:
-                        body.append("        LD   HL,%d" % ((hi << 8) | lo))
-                        last = (lo, hi)
+                for a, b in run(w, kw[w], lw[w], ph, par):
+                    if (a, b) != last:
+                        out.append("        LD   HL,%d" % ((b << 8) | a))
+                        last = (a, b)
                         n += 4
                     else:
                         n += 1
-                    body.append("        PUSH HL")
-                body.append("        JP   rd2_out")
+                    out.append("        PUSH HL")
+                out.append("        JP   rd2_out")
                 n += 3
-    return body, table, n
+    return body, hi, table, n
 
 
 def emit(path):
@@ -227,9 +234,9 @@ def emit(path):
         e01, ef1, _ = entries(w, 1)
         rec += [A.ZTAB[y] & 255, A.ZTAB[y] >> 8, lo, hi, w + M + 1, 0,
                 e00, ef0, e01, ef1, wix[w] * 4, 0,
-                255, 255, 0, 0]         # and a band parity per buffer,
+                255, 255]         # and a band parity per buffer,
                                         # which no row can match at first
-    body, table, nrun = emit_runs(ws, kw, lw)
+    body, hibody, table, nrun = emit_runs(ws, kw, lw)
     pal = [0] * 16
     for i, c in ((A.SKY0, (0, 0, 4)), (A.SKY1, (0, 2, 6)), (A.SKY2, (2, 4, 6)),
                  (A.SKY3, (4, 6, 6)), (A.GRASS0, (0, 4, 0)),
@@ -241,14 +248,14 @@ def emit(path):
              "\nRD2_HZ:         EQU %d" % A.HZ,
              "RD2_ROWS:       EQU %d          ; scanlines of road" % (A.H - 1 - A.HZ),
              "RD2_M:          EQU %d           ; the repaint margin, pixels" % M,
-             "RD2_REC:        EQU 16          ; bytes of record a row"]
+             "RD2_REC:        EQU 14          ; bytes of record a row"]
     for nm, v in (("GRASS", A.GRASS0), ("TARMAC", A.TARMAC0),
                   ("KERB", A.KERB0), ("LINE", A.LINE)):
         parts.append("RD2_%-11s EQU 0x%02X%02X" % (nm + ":", v * 17, v * 17))
     parts += ["\n        ALIGN 256\nrd2_trk:\n" + defw(A.TRACK),
               "\nrd2_pal:\n" + defb(pal),
               "\nrd2_sky:\n" + defb([c * 17 for c in A.SKY]),
-              "\n        ALIGN 256\nrd2_rec:\n" + defb(rec, 16),
+              "\n        ALIGN 256\nrd2_rec:\n" + defb(rec, 14),
               # two pages, one a parity, so a run is LD L,offset / LD H,page
               "\n        ALIGN 256\nrd2_rt0:\n"
               + "\n".join("        DEFW " + ",".join(table[i:i + 2])
@@ -258,6 +265,10 @@ def emit(path):
                           for i in range(0, len(table), 4)),
               "\n" + "\n".join(body)]
     open(path, "w").write("\n".join(parts) + "\n")
+    open(path.replace(".z80s", "hi.z80s"), "w").write(
+        "; Generated by tests/mkroad2data.py - do not edit by hand.\n"
+        "; The rest of the run bank, for above the screen buffers.\n"
+        + "\n".join(hibody) + "\n")
     print("  %-44s %d widths, %d bytes of run, %d of record"
           % ("wrote " + os.path.basename(path), len(ws), nrun, len(rec)))
 
