@@ -35,15 +35,26 @@ pixel line is just a nibble in a PUSHed constant.
 import math
 
 W, H, STRIDE = 256, 192, 128
-HZ = 96                         # the horizon, and the last sky row
+HZ = 111                        # the horizon: the road gets the bottom
+                                # 42% of the screen, which is the camera
+                                # Hang On has
 FOCAL = 221                     # harrier's camera exactly
 CAMH = 256                      # a world unit of camx is one row's worth
                                 # of lateral step in 8.8 pixels
-RW = 170                        # the road's half width, world units: 63
-                                # pixels at the bottom of the screen,
-                                # which is what lets the camera reach
-                                # either kerb with none of it clipped
-MINW = 2                        # the far end, in pixels
+RW = 288                        # the road's half width, world units: 90
+                                # pixels at the bottom of the screen, so
+                                # the road is 70% of it. Wider than that
+                                # wants clipping, which a compiled run
+                                # cannot do - see the note in road2.md
+MINW = 4                        # the far end, in pixels: eight across
+                                # where it meets the horizon
+M = 8                           # the repaint margin either side of the
+                                # road, in pixels. It has to cover what
+                                # the road moves in the *two* frames a
+                                # buffer waits its turn, and it is part
+                                # of the geometry because the rails below
+                                # have to keep the window on screen, not
+                                # just the road
 NSEG = 64                       # segments in the track loop
 SEGSH = 9                       # 512 world units each
 BANDSH = 8                      # the bands, 512 world units. A band that
@@ -76,8 +87,15 @@ def ztab():
 
 
 def wtab():
-    """Half the road's width at each scanline, in exact pixels."""
-    return [0] * (HZ + 1) + [max(MINW, (RW * (y - HZ)) // CAMH)
+    """Half the road's width at each scanline, in even pixels.
+
+    Even because a run is compiled per width, and half as many widths is
+    half a bank - 7,000 bytes, which is the difference between fitting
+    either side of the screens and not. What it costs is that the road's
+    edge steps two pixels every two rows instead of one every row, on a
+    diagonal that is already moving a pixel a row.
+    """
+    return [0] * (HZ + 1) + [max(MINW, 2 * ((RW * (y - HZ)) // (2 * CAMH)))
                              for y in range(HZ + 1, H)]
 
 
@@ -98,8 +116,12 @@ def ltab():
 
 
 def clamp():
-    """How far the road's centre may go, so that nothing is clipped."""
-    return [(max(w, 4), min(255 - w, 251)) for w in WTAB]
+    """How far the road's centre may go, so that nothing is clipped.
+
+    The window, not the road: a PUSH that fell off either end would want
+    an entry into a compiled run that does not exist.
+    """
+    return [(max(w + M, 4), min(255 - w - M, 251)) for w in WTAB]
 
 
 ZTAB = ztab()

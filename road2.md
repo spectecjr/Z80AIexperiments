@@ -1,8 +1,13 @@
 # road2.z80s — design notes
 
 **The same road as `road.z80s`, with the palette nailed down, at 50 Hz.**
-108,986 T-states a frame — **91% of a 50 Hz frame, worst frame included** —
+91,051 T-states a frame — **76% of a 50 Hz frame, worst frame included** —
 against `road.z80s`'s 172,141 at 25 Hz.
+
+The camera is flatter than `road.z80s`'s: the horizon is at row 111, so the
+road has the bottom **42%** of the screen, it is **8 pixels across where it
+meets the horizon and 180 at the bottom** — 70% of the screen's width — and
+its edges spread at 62° rather than 33°.
 
 Bit-exact against `tests/road2.py` over 198 frames of a ride. Not a list of
 poses: a frame here depends on the two before it, so the test drives a whole
@@ -15,9 +20,8 @@ routine has to land on however little of it it chose to touch.
 | dispatch and the row loop | 15,390 |
 | grass | 4,180 |
 | the bands moving on | 0 to 9,000 |
-| the geometry, 95 rows | the rest, ~63,000 |
-| **`rd2_frame`** | **min 105,020, mean 108,986, max 114,000** |
-| `rd2_init` | 1,294,796 once |
+| the geometry, 80 rows | the rest |
+| **`rd2_frame`** | **min 86,674, mean 91,051, max 94,829** |
 
 (The first three are derived from the counts, not measured separately; only
 the totals are measurements.)

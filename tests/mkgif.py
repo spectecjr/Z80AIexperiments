@@ -924,7 +924,7 @@ def road(outdir, seconds=8):
 
 
 def road2(outdir, seconds=8):
-    """road2 at its measured rate: 108,986 T-states a frame, 50 Hz.
+    """road2 at its measured rate: 91,051 T-states a frame, 50 Hz.
 
     The same road as demo/road.gif with the palette nailed down: no
     CLUT writes at all, so the bands, the kerb's red and white and the

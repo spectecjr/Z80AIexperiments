@@ -152,17 +152,15 @@ rd2_draw:
         LD   (rd2_sp),SP
         LD   HL,(rd2_camx)      ; the lateral step a row is the camera's
         LD   (rd2_dx),HL        ; offset itself, and the bottom row is
-        LD   D,H                ; 95 of them out
+        LD   D,H                ; RD2_ROWS of them out
         LD   E,L
         ADD  HL,HL
-        ADD  HL,DE
+        ADD  HL,HL
+        ADD  HL,DE              ; 5 * camx
         ADD  HL,HL
         ADD  HL,HL
         ADD  HL,HL
-        ADD  HL,HL
-        ADD  HL,HL              ; 96 * camx
-        OR   A
-        SBC  HL,DE              ; 95 * camx
+        ADD  HL,HL              ; 80 * camx
         EX   DE,HL
         LD   HL,0x8000          ; the middle of the screen, 8.8
         OR   A

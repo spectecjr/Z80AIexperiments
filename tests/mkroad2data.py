@@ -36,11 +36,8 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import road2 as A
 from mkchqdata import defb, defw, sam
 
-M = 8                           # the repaint margin, pixels each side:
-                                # four times the two pixels a row's centre
-                                # can move between frames at 50 Hz, and
-                                # twice that again for the two frames a
-                                # buffer waits its turn
+M = A.M                         # the repaint margin, which the model
+                                # owns because the rails depend on it
 
 
 def colours(par):
