@@ -37,8 +37,11 @@
 ; PUSHed constant. The kerbs keep their red and white to the horizon.
 ;
 ; The exception to the window is a row whose band parity has flipped
-; since this buffer last had it - about one row in six a frame - which
-; wants its whole width back before the road goes on top.
+; since this buffer last had it, which wants its whole width back
+; before the road goes on top. That is what sets the band period: at
+; 256 world units it is one row in six a frame and the routine misses
+; 50 Hz at 121,063; at 512 it is one in twelve, 108,986, and the worst
+; frame fits too. The longer bands also happen to look better.
 ;
 ; The geometry is road.z80s's, unchanged: harrier's camera, the bend
 ; integrated twice up the screen, steering as the constant of the first
@@ -214,9 +217,8 @@ rd2_cl:
 rd2_ch:
         ADC  A,0
         LD   H,A
-        LD   A,L                ; bit 7 of it is the band's parity, and
-        RLCA                    ; all that riding forward costs
-        AND  1
+        LD   A,H                ; bit 8 of it is the band's parity, and
+        AND  1                  ; all that riding forward costs
         LD   (rd2_pr),A
         LD   A,H                ; and bits 9 to 14 the track's segment
         AND  0x7E

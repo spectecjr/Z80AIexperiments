@@ -12,14 +12,14 @@ So here the palette is fixed and all of it is drawn. Two things pay
 for that:
 
   ONLY WHAT MOVED IS REPAINTED. A row's road is one interval, so the
-  part of the row that can have changed is [min(L,Lprev), max(R,Rprev)]
-  - the road, plus the sliver of grass it has just uncovered. That is
-  about twenty PUSHes a row rather than sixty-four, and it needs no new
-  machinery: the same spans, with SP starting at the road's right hand
-  edge instead of the row's, and the last of them stopping early.
+  window is the road plus a fixed margin either side - about twenty
+  PUSHes a row rather than sixty-four. The margin has to cover what the
+  road moves in the *two* frames a buffer waits its turn, which is
+  eight pixels at 20 world units a frame and is what sets M. Ride
+  faster and it wants more: eleven at 30, fourteen at 40.
 
   EXCEPT WHEN THE BAND PARITY FLIPS, which for a given row happens once
-  every 512 world units of travel, so roughly one row in six a frame
+  every 512 world units of travel, so roughly one row in twelve a frame
   wants its whole width back.
 
 The geometry is road.z80s's exactly: harrier's camera, the bend
@@ -27,10 +27,10 @@ integrated twice up the screen, and the centre held inside [w, 255-w]
 so that nothing is ever clipped.
 
 What is new besides the palette is that a marking narrower than four
-pixels is drawn rather than dropped. The centre line is not a span at
-all - it is one to three bytes written over the tarmac afterwards, so a
-one pixel line is just the byte 0x24 - and a kerb under four pixels
-wide is baked into the byte that carries the road's edge.
+pixels is drawn rather than dropped. Nothing inside the road is a span
+any more: the whole of it is one compiled run a row, so both kerbs,
+their inner edges and the centre line are baked to the pixel and a one
+pixel line is just a nibble in a PUSHed constant.
 """
 import math
 
@@ -46,10 +46,13 @@ RW = 170                        # the road's half width, world units: 63
 MINW = 2                        # the far end, in pixels
 NSEG = 64                       # segments in the track loop
 SEGSH = 9                       # 512 world units each
-BANDSH = 7                      # the bands, 256 world units. A band that
+BANDSH = 8                      # the bands, 512 world units. A band that
                                 # flips is a row repainted in full, so the
-                                # period is what that costs: 256 is about
-                                # one row in six a frame
+                                # period is what that costs: 256 units is
+                                # one row in six a frame and 12,000
+                                # T-states dearer, which is the whole
+                                # difference between missing 50 Hz and
+                                # making it
 
 # The fixed palette. Everything that alternates with distance is a pair
 # of indices rather than one index and a CLUT write, and bit 0 of each
