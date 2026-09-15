@@ -41,11 +41,11 @@ HZ = 111                        # the horizon: the road gets the bottom
 FOCAL = 221                     # harrier's camera exactly
 CAMH = 256                      # a world unit of camx is one row's worth
                                 # of lateral step in 8.8 pixels
-RW = 288                        # the road's half width, world units: 90
+RW = 496                        # the road's half width, world units: 154
                                 # pixels at the bottom of the screen, so
-                                # the road is 70% of it. Wider than that
-                                # wants clipping, which a compiled run
-                                # cannot do - see the note in road2.md
+                                # the road is 120% of it and runs off both
+                                # edges down there. Which is why the runs
+                                # are entered through a skip table
 MINW = 4                        # the far end, in pixels: eight across
                                 # where it meets the horizon
 M = 8                           # the repaint margin either side of the
@@ -89,14 +89,18 @@ def ztab():
 def wtab():
     """Half the road's width at each scanline, in even pixels.
 
-    Even because a run is compiled per width, and half as many widths is
-    half a bank - 7,000 bytes, which is the difference between fitting
-    either side of the screens and not. What it costs is that the road's
-    edge steps two pixels every two rows instead of one every row, on a
-    diagonal that is already moving a pixel a row.
+    Quantised, because a run is compiled per width and the bank has to
+    fit either side of the screen buffers. Finely where the road is
+    narrow and the runs are short, coarsely where it is wide and they
+    are not: the edge is moving about a pixel a row either way, so what
+    changes is the tread of the staircase, not its angle.
     """
-    return [0] * (HZ + 1) + [max(MINW, 2 * ((RW * (y - HZ)) // (2 * CAMH)))
-                             for y in range(HZ + 1, H)]
+    out = [0] * (HZ + 1)
+    for y in range(HZ + 1, H):
+        w = (RW * (y - HZ)) // CAMH
+        q = 2 if w <= 40 else 4 if w <= 80 else 8
+        out.append(max(MINW, q * (w // q)))
+    return out
 
 
 def ktab():
@@ -115,13 +119,16 @@ def ltab():
     return [max(1, w // 10) if w else 0 for w in WTAB]
 
 
-def clamp():
-    """How far the road's centre may go, so that nothing is clipped.
+# How far the road's centre may go. It no longer has to keep the road on
+# screen - the skip table handles the right hand end and the left simply
+# spills into the row above, which is drawn next - so these are only
+# rails against the 8.8 accumulator wrapping, and a limit on how far off
+# the road the camera may wander.
+CLO, CHI = 64, 191
 
-    The window, not the road: a PUSH that fell off either end would want
-    an entry into a compiled run that does not exist.
-    """
-    return [(max(w + M, 4), min(255 - w - M, 251)) for w in WTAB]
+
+def clamp():
+    return [(CLO, CHI) for w in WTAB]
 
 
 ZTAB = ztab()

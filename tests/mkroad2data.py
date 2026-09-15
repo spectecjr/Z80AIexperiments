@@ -60,41 +60,47 @@ def pixel(dx, w, k, lw, cols):
 
 
 def grid(w, phase):
-    """Where the pushes fall, relative to the road, for this row.
+    """Where the PUSHes fall, relative to the road, for this row.
 
-    The window is [c-w-M, c+w+M) and SP is the byte just past its right
-    hand end, so the road's right edge sits u0 pixels left of where the
-    first PUSH ends - which is M or M+1, and that one pixel is the whole
-    of the phase. Everything else here follows from it, and none of it
+    The run is the whole window - grass margin, road, grass margin - and
+    SP starts at the byte just past its right hand end, so the first
+    PUSH's four pixels end M+1-phase pixels right of the road's edge.
+    That one pixel is the whole of the phase, and none of the rest
     depends on where the road actually is.
     """
-    u0 = M + 1 - phase                  # right edge, pixels from the top
-    i0 = u0 >> 2                        # the PUSH the road starts in
-    uL = u0 + 2 * w                     # and the one it ends in
-    iL = uL >> 2
-    # the window's left hand end, in PUSHes from the top
-    np = ((M + 1 - phase + 2 * w + M) + 3) >> 2
-    return u0, i0, iL, max(np, iL + 1)
+    u0 = M + 1 - phase
+    np = (2 * w + 2 * M + 1 - phase) // 4 + 1
+    return u0, np
 
 
 def run(w, k, lw, phase, par):
-    """The road, compiled: one PUSHed pair per 4 pixels of it."""
+    """The window, compiled: one PUSHed pair per four pixels of it."""
     cols = colours(par)
-    u0, i0, iL, _ = grid(w, phase)
+    u0, np = grid(w, phase)
     out = []
-    for j in range(i0, iL + 1):
-        # SP starts u0 pixels right of the road's edge, so this PUSH's
-        # four pixels sit here relative to the road's own centre
-        px = [pixel(w + u0 - 4 - 4 * j + i, w, k, lw, cols)
-              for i in range(4)]
+    for j in range(np):
+        px = [pixel(w + u0 - 4 - 4 * j + i, w, k, lw, cols) for i in range(4)]
         out.append(((px[0] << 4) | px[1], (px[2] << 4) | px[3]))
     return out
 
 
-def entries(w, phase):
-    """Where the two grass runs are entered, and how long the row is."""
-    _, i0, iL, np = grid(w, phase)
-    return 64 - i0, 64 - (np - 1 - iL), np
+def maxskip(w):
+    """How many PUSHes of this row's window can be off the right."""
+    return max(0, ((A.CHI + w + M + 1) // 2 - 128 + 1) // 2)
+
+
+def place(c, w):
+    """Where SP goes, how many PUSHes to skip, and the odd byte.
+
+    A window whose right hand end is past the screen's cannot start
+    there, so the run is entered `skip` PUSHes in. The skip is rounded
+    up, which leaves byte 127 unwritten whenever the window's end is on
+    an odd byte - the PUSH that would have covered it was skipped - so
+    that byte is stored on its own, out of a table beside the skips.
+    """
+    bo = (c + w + M + 1) >> 1
+    skip = max(0, (bo - 128 + 1) >> 1)
+    return bo - 2 * skip, skip, bo & 1 and skip > 0
 
 
 def widths():
@@ -106,39 +112,53 @@ def widths():
 def simulate(poses):
     """Drive road2.z80s's procedure over a sequence of camera positions.
 
-    Returns the back buffer after each pose, which is what the Z80 will
-    have left behind and what tests/road2.py has to agree with.
+    Including the spill: the road is wider than the screen down at the
+    bottom, so a window that runs off the left hand end carries on into
+    the *previous* row's right hand end, which is where SP lands next.
+    Rows are drawn bottom upwards, so that row is drawn immediately
+    afterwards and paints over it - but only as far right as its own
+    window reaches, so what it has to do first is put grass back from
+    there to the screen's edge. That is the only thing the spill costs,
+    it is nothing at all when the road is on screen, and it never
+    reaches the sky: a row only spills once it is wider than the rails,
+    which is forty rows below the horizon.
     """
-    ws, wi = widths()
     buf = [bytearray(A.STRIDE * A.H) for _ in range(2)]
-    seen = [[-1] * A.H for _ in range(2)]       # the band parity each
-    for b in buf:                               # buffer last painted
+    seen = [[-1] * A.H for _ in range(2)]
+    for b in buf:
         for y in range(A.HZ + 1):
             b[y * A.STRIDE:(y + 1) * A.STRIDE] = bytes([A.SKY[y] * 17]) * 128
     out, back = [], 0
     for camx, camz in poses:
         par, cen = A.geometry(camx, camz)
         dst, mark = buf[back], seen[back]
-        for y in range(A.HZ + 1, A.H):
+        dirt = 128                      # nothing spilled into the bottom row
+        for y in range(A.H - 1, A.HZ, -1):
             c, w, k, lw = cen[y], A.WTAB[y], A.KTAB[y], A.LTAB[y]
             p, row = par[y], y * A.STRIDE
             grass = (A.GRASS0 + p) * 17
-            if mark[y] != p:                    # the bands moved on: this
-                dst[row:row + 128] = bytes([grass]) * 128       # row's
-                mark[y] = p                     # grass is all stale
+            sp, skip, odd = place(c, w)
+            if mark[y] != p:            # the band has moved on under it
+                f = 0
+                mark[y] = p
+            elif dirt < 128:            # the row below spilled into it
+                f = max(dirt, sp) & ~1
+            else:
+                f = 128
+            if f < 128:
+                dst[row + f:row + 128] = bytes([grass]) * (128 - f)
             phase = (c + w + M + 1) & 1
-            e0, ef, np = entries(w, phase)
-            br = (c + w + M + 1) >> 1           # SP, as a byte in the row
-            sp = row + br
-            for j in range(64 - e0):            # grass in from the right
-                sp -= 2
-                dst[sp] = dst[sp + 1] = grass
-            for lo, hi in run(w, k, lw, phase, p):
-                sp -= 2
-                dst[sp], dst[sp + 1] = lo, hi
-            for _ in range(64 - ef):             # and out to the left
-                sp -= 2
-                dst[sp] = dst[sp + 1] = grass
+            r = run(w, k, lw, phase, p)
+            if odd:                             # the PUSH that would have
+                dst[row + 127] = r[skip - 1][0]         # covered it went
+            a = row + sp
+            for lo, hi in r[skip:]:
+                a -= 2
+                dst[a], dst[a + 1] = lo, hi
+            assert a >= (A.HZ + 1) * A.STRIDE, "spilled into the sky"
+            dirt = a - row + 128        # where that leaves the row above
+            if dirt > 128:
+                dirt = 128
         out.append(bytes(dst))
         back ^= 1
     return out
@@ -172,52 +192,66 @@ def check():
 
 def cost():
     """What the procedure would cost on the Z80, from the counts."""
-    ws, _ = widths()
-    push = dispatch = 0
+    push = 0
     for y in range(A.HZ + 1, A.H):
-        w = A.WTAB[y]
-        _, _, np = entries(w, 0)
-        push += np
-        dispatch += 44 + 42 + 44 + 22          # in, the run, out, the loop
-        dispatch += 10 * 6                     # the run's baked boundaries
-    return push, dispatch
+        push += grid(A.WTAB[y], 0)[1]
+    return push, 95 * (44 + 42 + 44 + 22)
 
 
-LOWBANK = 3800                  # how much of the run bank fits below the
+LOWBANK = 5000                  # how much of the run bank fits below the
                                 # screens, once the code and tables have
                                 # had their share; the rest goes above
 
 
 def emit_runs(ws, kw, lw):
-    """The compiled runs, and the table of where each one starts.
+    """The compiled runs, their skip tables, and the two index tables.
 
-    A run is the whole road: one PUSH per four pixels of it, with the
-    value reloaded only where it changes - which is at the two kerbs,
-    their inner edges and the centre line, and nowhere else. So a wide
-    road is mostly PUSH HL at 11 T-states, and the six places a byte
-    carries two colours at once cost 21.
+    A run is the whole window - grass margin, road, grass margin - one
+    PUSH per four pixels of it, with the value reloaded only where it
+    changes. The skip table is what lets it be entered part way: a run
+    is a mix of one-byte PUSHes and four-byte LD HL,nn / PUSH pairs, so
+    "skip n PUSHes" is not arithmetic, it is a lookup. Beside each
+    offset are two more things the entry needs: the low byte of the
+    PUSH that was stepped over, for the odd byte at the screen's edge
+    that it would have covered, and the value it would have left in HL
+    - because a run reloads HL only where the colour changes, so an
+    entry part way in can land on a PUSH whose LD went with the part
+    that was skipped.
     """
-    body, hi, table, n, split = [], [], [], 0, False
+    body, hi, runs, skips, n, split = [], [], [], [], 0, False
     for w in ws:
         for par in (0, 1):
             for ph in (0, 1):
                 if n > LOWBANK:
                     split = True
                 out = hi if split else body
-                table.append("rd2_r%d_%d_%d" % (w, ph, par))
-                out.append("rd2_r%d_%d_%d:" % (w, ph, par))
+                nm = "rd2_r%d_%d_%d" % (w, ph, par)
+                runs.append(nm)
+                skips.append("rd2_s%d_%d_%d" % (w, ph, par))
+                r = run(w, kw[w], lw[w], ph, par)
+                off, last, pos = [], None, 0
+                for a, b in r:
+                    off.append(pos)
+                    if (a, b) != last:
+                        pos += 4
+                        last = (a, b)
+                    else:
+                        pos += 1
+                tab = []
+                for sk in range(maxskip(w) + 1):
+                    tab += [off[sk], r[sk - 1][0] if sk else 0,
+                            r[sk][0], r[sk][1]]
+                out.append("rd2_s%d_%d_%d:\n" % (w, ph, par) + defb(tab, 16))
+                out.append(nm + ":")
                 last = None
-                for a, b in run(w, kw[w], lw[w], ph, par):
+                for a, b in r:
                     if (a, b) != last:
                         out.append("        LD   HL,%d" % ((b << 8) | a))
                         last = (a, b)
-                        n += 4
-                    else:
-                        n += 1
                     out.append("        PUSH HL")
                 out.append("        JP   rd2_out")
-                n += 3
-    return body, hi, table, n
+                n += pos + 3 + len(tab)
+    return body, hi, runs, skips, n
 
 
 def emit(path):
@@ -226,14 +260,10 @@ def emit(path):
     lw = {A.WTAB[y]: A.LTAB[y] for y in range(A.HZ + 1, A.H)}
     rec = []
     for y in range(A.H - 1, A.HZ, -1):
-        w, (lo, hi) = A.WTAB[y], A.CLAMP[y]
-        e00, ef0, _ = entries(w, 0)
-        e01, ef1, _ = entries(w, 1)
-        rec += [A.ZTAB[y] & 255, A.ZTAB[y] >> 8, lo, hi, w + M + 1, 0,
-                e00, ef0, e01, ef1, wix[w] * 4, 0,
-                255, 255]         # and a band parity per buffer,
-                                        # which no row can match at first
-    body, hibody, table, nrun = emit_runs(ws, kw, lw)
+        w = A.WTAB[y]
+        rec += [A.ZTAB[y] & 255, A.ZTAB[y] >> 8, w + M + 1, wix[w] * 4,
+                255, 255]
+    body, hibody, runs, skips, nrun = emit_runs(ws, kw, lw)
     pal = [0] * 16
     for i, c in ((A.SKY0, (0, 0, 4)), (A.SKY1, (0, 2, 6)), (A.SKY2, (2, 4, 6)),
                  (A.SKY3, (4, 6, 6)), (A.GRASS0, (0, 4, 0)),
@@ -241,33 +271,38 @@ def emit(path):
                  (A.TARMAC1, (4, 4, 4)), (A.KERB0, (6, 0, 0)),
                  (A.KERB1, (6, 6, 6)), (A.LINE, (6, 6, 4))):
         pal[i] = sam(*c)
+
+    def page(names, i):
+        return "\n".join("        DEFW " + ",".join(names[k:k + 2])
+                          for k in range(i, len(names), 4))
+
     parts = ["; Generated by tests/mkroad2data.py - do not edit by hand.",
              "\nRD2_HZ:         EQU %d" % A.HZ,
-             "RD2_ROWS:       EQU %d          ; scanlines of road" % (A.H - 1 - A.HZ),
+             "RD2_ROWS:       EQU %d          ; scanlines of road"
+             % (A.H - 1 - A.HZ),
              "RD2_M:          EQU %d           ; the repaint margin, pixels" % M,
-             "RD2_REC:        EQU 14          ; bytes of record a row"]
+             "RD2_REC:        EQU 6           ; bytes of record a row",
+             "RD2_CLO:        EQU %d          ; and the rails the centre" % A.CLO,
+             "RD2_CHI:        EQU %d         ; is held between" % A.CHI]
     for nm, v in (("GRASS", A.GRASS0), ("TARMAC", A.TARMAC0),
                   ("KERB", A.KERB0), ("LINE", A.LINE)):
         parts.append("RD2_%-11s EQU 0x%02X%02X" % (nm + ":", v * 17, v * 17))
     parts += ["\n        ALIGN 256\nrd2_trk:\n" + defw(A.TRACK),
               "\nrd2_pal:\n" + defb(pal),
               "\nrd2_sky:\n" + defb([c * 17 for c in A.SKY]),
-              "\n        ALIGN 256\nrd2_rec:\n" + defb(rec, 14),
-              # two pages, one a parity, so a run is LD L,offset / LD H,page
-              "\n        ALIGN 256\nrd2_rt0:\n"
-              + "\n".join("        DEFW " + ",".join(table[i:i + 2])
-                          for i in range(0, len(table), 4)),
-              "\n        ALIGN 256\nrd2_rt1:\n"
-              + "\n".join("        DEFW " + ",".join(table[i + 2:i + 4])
-                          for i in range(0, len(table), 4)),
+              "\n        ALIGN 256\nrd2_rec:\n" + defb(rec, 6),
+              "\n        ALIGN 256\nrd2_rt0:\n" + page(runs, 0),
+              "\n        ALIGN 256\nrd2_rt1:\n" + page(runs, 2),
+              "\n        ALIGN 256\nrd2_st0:\n" + page(skips, 0),
+              "\n        ALIGN 256\nrd2_st1:\n" + page(skips, 2),
               "\n" + "\n".join(body)]
     open(path, "w").write("\n".join(parts) + "\n")
     open(path.replace(".z80s", "hi.z80s"), "w").write(
         "; Generated by tests/mkroad2data.py - do not edit by hand.\n"
         "; The rest of the run bank, for above the screen buffers.\n"
         + "\n".join(hibody) + "\n")
-    print("  %-44s %d widths, %d bytes of run, %d of record"
-          % ("wrote " + os.path.basename(path), len(ws), nrun, len(rec)))
+    print("  %-44s %d widths, %d bytes of run and skip table"
+          % ("wrote " + os.path.basename(path), len(ws), nrun))
 
 
 if __name__ == "__main__":

@@ -79,8 +79,8 @@ rd2_init:
         LD   IX,rd2_rec         ; no row has drawn into either buffer yet
         LD   B,RD2_ROWS
 rd2_i1:
-        LD   (IX+12),255
-        LD   (IX+13),255
+        LD   (IX+4),255
+        LD   (IX+5),255
         LD   DE,RD2_REC
         ADD  IX,DE
         DJNZ rd2_i1
@@ -150,6 +150,8 @@ rd2_fr1:
 rd2_draw:
         DI
         LD   (rd2_sp),SP
+        LD   A,128              ; nothing has spilled into the bottom row
+        LD   (rd2_dirt),A
         LD   HL,(rd2_camx)      ; the lateral step a row is the camera's
         LD   (rd2_dx),HL        ; offset itself, and the bottom row is
         LD   D,H                ; RD2_ROWS of them out
@@ -178,8 +180,17 @@ rd2_draw:
         LD   DE,RD2_REC
         EXX
 
+
 ;------------------------------------------------------------------
-; One row: where the road is, and then the three pieces of it
+; One row: where the road is, and then the run that draws it
+;
+; The window is the road plus a margin either side and it is one run,
+; so a row is one dispatch. Where the window runs off the right of the
+; screen the run is entered part way in - which is a lookup, not
+; arithmetic, because a run is a mix of one byte PUSHes and four byte
+; LD HL,nn pairs and there is no skipping n of those by adding. Where
+; it runs off the left it simply spills into the row above, which is
+; drawn next.
 ;------------------------------------------------------------------
 
 rd2_row:
@@ -188,32 +199,43 @@ rd2_row:
         ADD  HL,DE              ; on to the next while SP reads this one
         EXX
         POP  HL                 ; this row's depth, kept until the centre
-        POP  DE                 ; is out - the rails the centre is held
-        LD   A,IYH              ; between, and this row's own position,
-        CP   E                  ; come first because the integration is
-        JR   NC,rd2_r1          ; one row ahead of what it draws
-        LD   A,E
+        LD   A,IYH              ; is out. The rails are constants now:
+        CP   RD2_CLO            ; they no longer keep the road on screen,
+        JR   NC,rd2_r1          ; only the accumulator off its own wrap
+        LD   A,RD2_CLO
 rd2_r1:
-        CP   D
+        CP   RD2_CHI + 1
         JR   C,rd2_r2
-        LD   A,D
+        LD   A,RD2_CHI
 rd2_r2:
-        LD   IYH,A              ; pinned there, not merely reported
-        POP  DE                 ; E = w + margin + 1
-        ADD  A,E
-        LD   E,A                ; the window's right hand end, in pixels
-        AND  1                  ; one pixel of which is the phase
-        LD   B,A                ; which B carries: nothing between here
-                                ; and the dispatch touches BC
-        SRL  E
-        LD   A,E
-        LD   (rd2_bo),A         ; and the rest of it a byte in the row
+        LD   IYH,A
+        POP  DE                 ; E = w + margin + 1, D = the width's index
+        ADD  A,E                ; nine bits, because a road wider than the
+        RRA                     ; screen puts the window's end past 255
+        LD   B,0                ; A = that end as a byte, and the bit that
+        RL   B                  ; falls out of it is the phase
+        LD   C,A                ; keep it: its bottom bit says whether the
+        SUB  128                ; screen's last byte is one the skip below
+        JR   C,rd2_r3           ; steps over
+        INC  A                  ; how far past the screen's right hand edge
+        SRL  A                  ; the window ends, and so how many PUSHes
+        JR   rd2_r4             ; of it are off it
+rd2_r3:
+        XOR  A
+rd2_r4:
+        LD   (rd2_sk),A
+        ADD  A,A
+        NEG
+        ADD  A,C                ; and where SP goes: the window's right hand
+        LD   (rd2_sp0),A        ; end, or the screen's, whichever is left of
+        LD   A,D                ; the other
+        LD   (rd2_wi),A
 rd2_cl:
-        LD   DE,0               ; patched: the camera's distance. DE is
-        ADD  HL,DE              ; dead by here and HL still has the depth
+        LD   DE,0               ; patched: the camera's distance
+        ADD  HL,DE
         LD   A,H                ; bit 8 of it is the band's parity, and
         AND  1                  ; all that riding forward costs
-        LD   C,A                ; and C carries that
+        LD   C,A
         LD   A,H                ; and bits 9 to 14 the track's segment
         AND  0x7E
         LD   L,A
@@ -228,43 +250,85 @@ rd2_cl:
         LD   D,H
         LD   E,L
         ADD  IY,DE              ; and x += dx, which is the row above's
-        POP  HL                 ; where the two grass runs are entered,
-        POP  DE                 ; for each phase
-        LD   A,B
-        OR   A
-        JR   Z,rd2_r3
-        EX   DE,HL
-rd2_r3:
-        LD   A,L
-        LD   (rd2_e0+1),A
-        LD   A,H
-        LD   (rd2_ef+1),A
-        POP  DE                 ; which four runs are this row's width's
-        LD   A,B
+        ; --- which run, and where in it ---
+        LD   A,(rd2_wi)
+        LD   E,A                ; the width's index, with the phase beside
+        LD   A,B                ; it: four entries a width, two a parity
         ADD  A,A
         ADD  A,E
-        LD   L,A
+        LD   E,A
+        LD   L,A                ; first the skip table for this run
         LD   A,C
-        ADD  A,rd2_rt0 / 256    ; a page a parity, so this is the lookup
+        ADD  A,rd2_st0 / 256    ; a page a parity, so this is the lookup
         LD   H,A
-        LD   E,(HL)
+        LD   A,(HL)
         INC  L
-        LD   D,(HL)             ; DE = this row's compiled road
-        LD   A,C                ; the grass, one band or the other. This
-        OR   A                  ; is the last of C, so BC becomes the
-        LD   BC,RD2_G0          ; colour - but A still has the parity
-        JR   Z,rd2_r4           ; for the mark below
-        LD   BC,RD2_G1
-rd2_r4:
+        LD   H,(HL)
+        LD   L,A
+        LD   A,(rd2_sk)
+        ADD  A,A                ; four bytes an entry: how far into the run
+        ADD  A,A                ; that many PUSHes is, the byte the last one
+        ADD  A,L                ; stepped over would have put at the screen's
+        LD   L,A                ; right hand edge, and the value it would
+        JR   NC,rd2_r5          ; have left in HL - which the run needs
+        INC  H                  ; handed to it, because it reloads HL only
+rd2_r5:                         ; where the colour changes and an entry part
+        LD   B,(HL)             ; way in can land on a PUSH whose LD went
+        INC  HL                 ; with the part that was skipped
+        LD   A,(HL)
+        LD   (rd2_fx),A
+        INC  HL
+        LD   A,(HL)
+        LD   (rd2_ld+1),A
+        INC  HL
+        LD   A,(HL)
+        LD   (rd2_ld+2),A
+        LD   L,E                ; then the run itself
+        LD   A,C
+        ADD  A,rd2_rt0 / 256
+        LD   H,A
+        LD   A,(HL)
+        INC  L
+        LD   H,(HL)
+        LD   L,A
+        LD   A,B                ; entered that many bytes in
+        ADD  A,L
+        LD   L,A
+        JR   NC,rd2_r6
+        INC  H
+rd2_r6:
+        LD   (rd2_ent+1),HL
         POP  HL                 ; the parity each buffer last painted
+        LD   A,C
 rd2_mk:
         CP   L                  ; patched: which of the two is ours
-        JR   Z,rd2_road
-        ; the bands have moved on, so this row's grass is all stale
+        JR   Z,rd2_r7
 rd2_mw:
-        LD   HL,-2              ; patched with it
-        ADD  HL,SP
-        LD   (HL),A
+        LD   HL,-2              ; patched with it. The bands have moved on
+        ADD  HL,SP              ; under this row, so all of its grass is
+        LD   (HL),A             ; stale and the whole of it goes back
+        XOR  A
+        JR   rd2_r9
+rd2_r7:
+        LD   A,(rd2_dirt)       ; otherwise only what the row below spilled
+        CP   128                ; into it, and usually nothing did
+        JR   NC,rd2_road
+        LD   HL,rd2_sp0         ; back to the window's end, or to the spill,
+        CP   (HL)               ; whichever is further right - the run puts
+        JR   NC,rd2_r8          ; the rest back itself
+        LD   A,(HL)
+rd2_r8:
+        AND  0xFE               ; even: the odd byte under it is the run's
+rd2_r9:
+        RRA                     ; and a PUSH covers two
+        LD   D,rd2_fill128 / 256
+        LD   E,A
+        LD   A,C                ; the parity, before BC takes C over
+        OR   A
+        LD   BC,RD2_G0
+        JR   Z,rd2_r10
+        LD   BC,RD2_G1
+rd2_r10:
         LD   A,IXL
         ADD  A,128
         LD   L,A
@@ -272,49 +336,45 @@ rd2_mw:
         ADC  A,0
         LD   H,A
         LD   SP,HL              ; one past the row's last byte
-        JP   rd2_fill128
+        EX   DE,HL
+        JP   (HL)
 
 rd2_road:
-        LD   A,(rd2_bo)         ; SP to the window's right hand end
+        LD   A,(rd2_sp0)
         ADD  A,IXL
         LD   L,A
         LD   A,IXH
         ADC  A,0
         LD   H,A
         LD   SP,HL
-rd2_e0:
-        LD   A,0                ; patched: grass in from the right
-        LD   L,A
-        LD   H,rd2_gin / 256
-rd2_ef:
-        LD   A,0                ; and how far out to the left, which
-        JP   (HL)               ; nothing between here and there touches
+        LD   A,(rd2_sk)         ; nothing stepped over, nothing to put back
+        OR   A
+        JR   Z,rd2_ld
+        LD   A,(rd2_sp0)
+        RRA
+        JR   NC,rd2_ld          ; and nothing to put back on an even byte
+        LD   A,(rd2_fx)
+        LD   (IX+127),A
+rd2_ld:
+        LD   HL,0               ; patched: what the run expects to find in
+rd2_ent:                        ; HL where it is being entered
+        JP   0                  ; patched: this row's run, entered where
+                                ; the skip table said
 
 ;------------------------------------------------------------------
-; The three runs. Grass in, the row's own compiled road, grass out -
-; and the road's run ends JP rd2_out, which is the only thing the bank
-; needs to know about this file.
+; The runs all end here, and the row loop with them. SP is where the
+; run ran out, which is the next row's problem if it is off the left
+; hand end of this one.
 ;------------------------------------------------------------------
-
-        ALIGN 256
-rd2_gin:
-        DEFS 64,0xC5            ; PUSH BC
-        EX   DE,HL              ; DE has carried the road's run this far
-        JP   (HL)
 
 rd2_out:
-        LD   L,A                ; A has carried the left hand entry
-        LD   H,rd2_gout / 256
-        JP   (HL)
-
-        ALIGN 256
-rd2_gout:
-        DEFS 64,0xC5
-        ; fall through into the row loop
-
-rd2_next:
+        LD   HL,0
+        ADD  HL,SP              ; where the run ran out
         LD   DE,-128
         ADD  IX,DE
+        LD   A,L
+        SUB  IXL                ; and how far into the row above that is
+        LD   (rd2_dirt),A
         EXX
         DEC  B
         EXX
@@ -324,14 +384,16 @@ rd2_next:
         RET
 
 ;------------------------------------------------------------------
-; A whole row of grass, for when the bands have moved on. The road
-; goes over the top of it, so this falls back into the row rather
-; than out of it.
+; Grass, from a byte in the row to the end of it: the whole row when
+; the bands have moved on under it, and just the right hand end when
+; the row below spilled into it. A uniform run, so unlike the road's
+; one it *can* be entered part way in by arithmetic. The road goes on
+; top of it, so it falls back into the row rather than out of it.
 ;------------------------------------------------------------------
 
         ALIGN 256
 rd2_fill128:
-        DEFS 64,0xC5
+        DEFS 64,0xC5            ; PUSH BC
         JP   rd2_road
 
 ;------------------------------------------------------------------
@@ -344,4 +406,10 @@ rd2_camx:       DEFW 0          ; the camera's lateral offset, world units
 rd2_camz:       DEFW 0          ; and how far it has come
 rd2_dx:         DEFS 2
 rd2_sp:         DEFS 2
-rd2_bo:         DEFS 1          ; where the window ends, a byte in the row
+rd2_sp0:        DEFS 1          ; where the window ends, a byte in the row
+rd2_sk:         DEFS 1          ; and how many PUSHes of it are off screen
+rd2_dirt:       DEFS 1          ; how far into this row the row below
+                                ; spilled, 128 for not at all
+rd2_fx:         DEFS 1          ; the byte the skipped PUSH would have put
+                                ; at the screen's own right hand edge
+rd2_wi:         DEFS 1          ; this row's width, as a table index
