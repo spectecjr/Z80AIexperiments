@@ -923,6 +923,39 @@ def road(outdir, seconds=8):
     report(p, size, n, durs, secs, got, bad)
 
 
+def road2(outdir, seconds=8):
+    """road2 at its measured rate: 108,986 T-states a frame, 50 Hz.
+
+    The same road as demo/road.gif with the palette nailed down: no
+    CLUT writes at all, so the bands, the kerb's red and white and the
+    dashes are drawn rather than flipped, and what pays for drawing
+    them is that only what moved gets repainted. Compare road.gif,
+    which is the same road at 25 Hz with a copper it cannot have.
+    """
+    import math
+    import road2 as R
+    b = Bench("harness_rd2.asm", org=0)
+    s = b.syms
+    b.call_regs(s["rd2_init"])
+    pal = [sam_rgb(v) for v in b.peek(s["rd2_pal"], 16)]
+    n = seconds * 50
+    frames, ts = [], []
+    for t in range(n):
+        camx = int(0.6 * R.RW * math.sin(2 * math.pi * t / 350.0))
+        camz = (t * 20) & 0xFFFF
+        b.poke(s["rd2_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["rd2_camz"], camz.to_bytes(2, "little"))
+        into = b.peek(s["rd2_back"], 1)[0]
+        tt, _ = b.call_regs(s["rd2_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+    p = "%s/road2.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, frames, pal, durs)
+    got, bad, secs = check_gif(p, frames, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 def chequer2(outdir, seconds=8):
     """chequer2 at its measured rate: 104,232 T-states a frame, 50 Hz.
 
@@ -976,6 +1009,7 @@ if __name__ == "__main__":
     chequer6(d)
     zarch(d)
     road(d)
+    road2(d)
     twist(d)
     roto(d)
     vox(d)

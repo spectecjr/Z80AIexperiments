@@ -557,3 +557,43 @@ be one compiled run positioned by `SP` instead of six dispatches.
 
 **And there are 68,000 T-states left for a bike.** `chequer6` put a pilot on
 the chequered floor for 25,528.
+
+---
+
+## 17. The same road at 50 Hz — **BUILT**
+
+`road2.z80s` is `road.z80s` with the palette nailed down and the frame
+halved: **108,986 T-states, 50 Hz**, worst frame included, bit exact over
+198 frames of a ride. See `road2.md`.
+
+**The per-scanline copper had to go, and it was not a close call.** Four
+`OUT`s with an interrupt's entry and exit is ~150 T-states, so 192 lines is
+28,800 a frame — a quarter of a 50 Hz one — and what it buys is only the
+grass stripes, because everything else the palette was carrying is *on the
+road*, which gets repainted anyway. Worse, it cannot be had: the fill holds
+`SP` on the screen, so an interrupt would push its return address into the
+middle of the road. Any routine in this repo that flips the palette per
+scanline has that conflict, `chequer` included.
+
+**What replaces it is not repainting what did not change.** A road's row is
+one interval, so the window is the road plus a margin — twenty `PUSH`es a
+row rather than sixty-four. The margin has to cover *two* frames of
+movement, because that is how long a buffer waits its turn: eight pixels at
+20 world units a frame, which is a speed limit as much as a margin.
+
+**And one compiled run a row**, which is `chequer3`'s trick with the road's
+edges in place of the phase. That is also what let the markings stop
+vanishing: with nothing inside the road drawn as a span, a one pixel centre
+line is a nibble in a `PUSH`ed constant, and the kerbs keep their red and
+white to the vanishing point.
+
+**The surprise was the band period.** A row whose band parity flipped since
+*this* buffer last had it needs its whole width back. At 256 world units
+that is one row in six a frame and the routine misses 50 Hz at 121,063; at
+512 it is one in twelve, 108,986, and the worst frame fits. 12,077
+T-states, decided by a constant, and the longer bands look better anyway.
+
+**The geometry is the routine now**: ~63,000 of the 109,000, and not one
+`PUSH` in it. Anything further comes out of the record, the clamp, the
+curvature lookup and the two integrations, 95 times — not out of the
+drawing, which is down to 46,000.
