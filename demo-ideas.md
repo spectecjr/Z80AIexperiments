@@ -525,3 +525,35 @@ draws four lit cubes at 14.3, which is the neighbourhood.
   (estimated) — worth it, and it is what takes 8 cells across down to 7.
 - **Back to front, and no clipping.** Rows of the mesh drawn far first
   order themselves, which is the one part of this that is free.
+
+---
+
+## 16. A Hang On road — **BUILT**
+
+`road.z80s` draws one that steers and bends, **172,141 T-states a frame,
+25 Hz**, bit for bit against its model over 90 cameras. See `road.md`.
+
+It was costed as a chequer-class routine and came in there. The thing worth
+taking from it is how much of a road turns out to be palette rather than
+pixels: the mown stripes in the grass, the bands in the tarmac, the red and
+white of the kerbs **and the dashes down the middle** are all constant along
+a scanline, so all four are two bits a scanline and riding forward costs
+nothing at all. A dashed centre line for the price of a solid one is the
+sort of thing `chequer.md`'s one idea keeps paying out.
+
+The other thing is that a pseudo-3D road needs no multiply anywhere in the
+frame. The bend is curvature integrated twice up the screen, two adds a row,
+and the camera's own lateral offset is the constant of the first
+integration rather than a per-row scaling — so steering is free, where
+`chq_entry` needed a table and an add a period to do the same job on a
+chequerboard.
+
+**What it costs is the span dispatch**, which is where every routine in this
+family ends up. 66,880 T-states of the frame is the 6,080 `PUSH`es a full
+screen of runs cannot go below, and the other 105,000 is working out, six
+times a row, how many of them to do. The route to 50 Hz is `chequer3`'s: a
+row's *shape* is fixed by the row and only its position moves, so it could
+be one compiled run positioned by `SP` instead of six dispatches.
+
+**And there are 68,000 T-states left for a bike.** `chequer6` put a pilot on
+the chequered floor for 25,528.

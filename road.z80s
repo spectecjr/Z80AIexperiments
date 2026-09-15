@@ -1,0 +1,550 @@
+;------------------------------------------------------------------
+; road.z80s - a Hang On rolling road for the SAM Coupe
+;
+;   rd_init      fill both buffers with sky and grass, once
+;   rd_frame     draw the road from (rd_camx, rd_camz) and flip
+;   rd_out       what the display interrupt would do with the parities
+;
+; A road that steers and bends, in MODE 4's 256x192 with the horizon
+; at row 96. chequer.z80s and harrier.z80s draw a board whose pattern
+; is a function of x, so a scanline there is a square wave and the
+; whole of it is one compiled run. A road is not: a scanline is seven
+; spans - grass, kerb, tarmac, the centre line, tarmac, kerb, grass -
+; around a centre that moves with the bend, so this dispatches a span
+; rather than a scanline, the way harrier dispatches a square.
+;
+; WHAT IT KEEPS FROM THEM is the one idea that matters. The mown
+; stripes in the grass, the tarmac's bands, the kerb's red and white
+; and the dashes down the middle are all constant along a scanline, so
+; none of them are drawn: they are two bits a scanline into the
+; palette. Riding forward costs nothing in pixels at all, exactly as
+; it does on the chequered floor - only steering and the bend move a
+; pixel, and the fade into the horizon comes free with them.
+;
+; THE BEND is the arcade's: curvature integrated twice up the screen.
+; dx += curvature and x += dx a row, with the curvature read from the
+; track at that row's depth, which is one add and one table lookup.
+; The camera's own lateral offset needs no multiply either - it is the
+; constant of the first integration, so steering is the value dx
+; starts the screen with.
+;
+; NOTHING IS EVER CLIPPED. A boundary off the side of the screen would
+; want a PUSH that does not exist, so the centre is held inside
+; [w, 255-w] and the road always fits. That costs nothing, because the
+; road is 126 pixels wide at the bottom of a 256 pixel screen for
+; exactly this reason: the camera can sit over either kerb and still
+; see all of it. Which also means no span is ever empty, so there is
+; no test for one anywhere in the chain.
+;
+; THREE BANDS. A kerb narrower than four pixels would put two
+; boundaries inside one PUSH, which carries a pixel of each colour and
+; so can hold only one, and the same goes for the centre line. Which
+; rows those are is fixed by the row, so the screen comes in three
+; bands - seven spans, five and three - and the chain is patched twice
+; a frame rather than tested six times a row.
+;
+; WHAT IS NOT VERIFIED HERE, as in chequer.z80s: the frame writes two
+; parities a scanline and all of that is checked against the model,
+; but what the display does with them - four CLUT writes in the line
+; interrupt - is not, because the test bench is a plain Z80 with no
+; SAM ASIC in it. rd_out is the loop it would run.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+RD_BUF0:        EQU 0x80
+RD_BUF1:        EQU 0x20
+RD_CLUT:        EQU 248         ; the SAM's palette port
+
+;------------------------------------------------------------------
+; rd_init - sky and grass into both buffers
+;
+; Rows 0 to RD_HZ are the sky and are never drawn again: they are
+; colour index 1, the same index as the grass, and what that index
+; means is set per scanline. The road's own rows are filled too, so
+; that a buffer is never read before it is written.
+;------------------------------------------------------------------
+
+rd_init:
+        LD   A,RD_BUF0
+        LD   (rd_back),A
+        LD   A,RD_BUF1
+        LD   (rd_front),A
+        LD   H,RD_BUF0
+        CALL rd_fill
+        LD   H,RD_BUF1
+        ; fall through
+
+rd_fill:
+        LD   L,0
+        LD   D,0x60
+rd_f1:
+        LD   B,0
+rd_f2:
+        LD   (HL),RD_GRASS & 255
+        INC  HL
+        DJNZ rd_f2
+        DEC  D
+        JR   NZ,rd_f1
+        RET
+
+;------------------------------------------------------------------
+; rd_frame - one frame
+;------------------------------------------------------------------
+
+rd_frame:
+        LD   HL,(rd_camz)
+        LD   (rd_cz+1),HL       ; the depth goes in as an immediate, so
+        CALL rd_draw            ; BC is free to carry it into the add
+        LD   A,(rd_back)
+        LD   B,A
+        LD   A,(rd_front)
+        LD   (rd_back),A
+        LD   A,B
+        LD   (rd_front),A
+        RET
+
+;------------------------------------------------------------------
+; rd_draw - the road, bottom row upwards
+;
+; IX is the road's centre, 8.8 pixels; IY the row's record; SP the
+; screen. D is the PUSH the last boundary fell in and BC whichever
+; colour is being pushed, so the row pointer, its step and the band's
+; row count live in the other register set.
+;
+; Bottom row upwards because that is the order the bend integrates in:
+; the road's shape is the curvature accumulated outwards from where
+; the camera is standing, so the near row has to be worked out first.
+;------------------------------------------------------------------
+
+rd_draw:
+        DI
+        LD   (rd_sp),SP
+        LD   HL,(rd_camx)       ; the lateral step a row is the camera's
+        LD   (rd_dx),HL         ; offset itself, and the bottom row is
+        LD   D,H                ; 95 of them away from the vanishing
+        LD   E,L                ; point
+        ADD  HL,HL
+        ADD  HL,DE
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,HL              ; 96 * camx
+        OR   A
+        SBC  HL,DE              ; 95 * camx
+        EX   DE,HL
+        LD   HL,0x8000          ; the middle of the screen, 8.8
+        OR   A
+        SBC  HL,DE
+        PUSH HL
+        POP  IX                 ; IX = x, the road's centre
+        LD   IY,rd_row
+        LD   A,(rd_back)
+        ADD  A,0x60             ; one past the last byte of the last row
+        EXX
+        LD   H,A
+        LD   L,0
+        LD   DE,-128
+        LD   B,RD_NA
+        EXX
+
+;------------------------------------------------------------------
+; Band A, the rows with a centre line: the whole chain, unpatched.
+;------------------------------------------------------------------
+
+rd_banda:
+        LD   HL,rd_jk + 3       ; the kerb's boundaries are wanted
+        LD   (rd_jk+1),HL
+        LD   HL,rd_jl + 3       ; and the centre line's
+        LD   (rd_jl+1),HL
+        LD   A,0x3A             ; LD A,(nn): every stage runs
+        LD   (rd_s1),A
+        LD   (rd_s2),A
+        LD   HL,rd_e4
+        LD   (rd_s1+1),HL
+        LD   HL,rd_e3
+        LD   (rd_s2+1),HL
+        LD   A,RD_MGK           ; grass meets kerb at either edge
+        LD   (rd_m0+1),A
+        LD   A,RD_MKG
+        LD   (rd_m5+1),A
+        LD   HL,RD_KERB
+        LD   (rd_c5+1),HL
+        LD   HL,rd_bandb
+        LD   (rd_bn+1),HL
+        JP   rd_line
+
+;------------------------------------------------------------------
+; Band B, kerbs but no centre line: stage 2 jumps over the line.
+;------------------------------------------------------------------
+
+rd_bandb:
+        LD   HL,rd_r4           ; no centre line to work out
+        LD   (rd_jl+1),HL
+        LD   A,0xC3             ; JP nn
+        LD   (rd_s2),A
+        LD   HL,rd_s4
+        LD   (rd_s2+1),HL
+        LD   HL,rd_bandc
+        LD   (rd_bn+1),HL
+        EXX
+        LD   B,RD_NB
+        EXX
+        JP   rd_line
+
+;------------------------------------------------------------------
+; Band C, neither: stage 1 jumps to the last one, which becomes the
+; road itself rather than a kerb, and the two boundaries it has are
+; grass against tarmac.
+;------------------------------------------------------------------
+
+rd_bandc:
+        LD   HL,rd_r3           ; nor any kerbs
+        LD   (rd_jk+1),HL
+        LD   A,0xC3
+        LD   (rd_s1),A
+        LD   HL,rd_s5
+        LD   (rd_s1+1),HL
+        LD   A,RD_MGT
+        LD   (rd_m0+1),A
+        LD   A,RD_MTG
+        LD   (rd_m5+1),A
+        LD   HL,RD_TARMAC
+        LD   (rd_c5+1),HL
+        LD   HL,rd_done
+        LD   (rd_bn+1),HL
+        EXX
+        LD   B,RD_NC
+        EXX
+        JP   rd_line
+
+rd_done:
+        LD   SP,(rd_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; One row: where the road is, and then the row itself
+;------------------------------------------------------------------
+
+rd_line:
+        LD   A,IXH              ; the centre, held inside the rails so
+        CP   (IY+2)             ; that no boundary can leave the screen
+        JR   NC,rd_r1
+        LD   A,(IY+2)
+rd_r1:
+        CP   (IY+3)
+        JR   C,rd_r2
+        LD   A,(IY+3)
+rd_r2:
+        LD   IXH,A              ; and pinned there, not merely reported
+        LD   B,A
+        ADD  A,(IY+4)           ; the road's edges
+        LD   (rd_e5),A
+        LD   A,B
+        SUB  (IY+4)
+        LD   (rd_e0),A
+rd_jk:
+        JP   rd_r3              ; patched: has this row a kerb?
+        LD   A,B
+        ADD  A,(IY+5)
+        LD   (rd_e4),A
+        LD   A,B
+        SUB  (IY+5)
+        LD   (rd_e1),A
+rd_r3:
+rd_jl:
+        JP   rd_r4              ; patched: and a centre line?
+        LD   A,B
+        ADD  A,(IY+6)
+        LD   (rd_e3),A
+        LD   A,B
+        SUB  (IY+6)
+        LD   (rd_e2),A
+rd_r4:
+        LD   L,(IY+0)           ; this row's depth
+        LD   H,(IY+1)
+rd_cz:
+        LD   BC,0               ; patched: the camera's distance
+        ADD  HL,BC
+        LD   A,L
+        RLCA                    ; bits 6 and 7 of it are the dashes and
+        RLCA                    ; the bands, which is all that riding
+        AND  3                  ; forward costs
+        LD   (IY+7),A
+        LD   A,H
+        AND  0x7E               ; and bits 9 to 14 the track's segment
+        LD   L,A
+        LD   H,rd_trk / 256
+        LD   A,(HL)
+        INC  L
+        LD   H,(HL)
+        LD   L,A                ; HL = the curvature there
+        LD   DE,(rd_dx)
+        ADD  HL,DE
+        LD   (rd_dx),HL         ; dx += curvature
+        EX   DE,HL
+        ADD  IX,DE              ; x  += dx
+        LD   DE,8
+        ADD  IY,DE
+        EXX
+        LD   SP,HL              ; the spans fill rightwards to leftwards
+        ADD  HL,DE              ; and the row above is 128 lower
+        EXX
+        LD   D,64               ; nothing pushed yet
+        ; fall through into the first span
+
+;------------------------------------------------------------------
+; A span: as many whole PUSHes as reach the boundary, then the one
+; that straddles it. Entering a run of 64 PUSHes n from its end is n
+; of them, so where to enter is 65 - (the last boundary's PUSH) +
+; (this one's), and no span is ever empty, so there is nothing to test.
+;------------------------------------------------------------------
+
+rd_s0:
+        LD   A,(rd_e5)
+        RRCA
+        RRCA
+        AND  63
+        LD   L,A
+        SUB  D
+        ADD  A,65
+        LD   D,L
+        LD   BC,RD_GRASS
+        LD   H,rd_p0 / 256
+        LD   L,A
+        JP   (HL)
+
+;------------------------------------------------------------------
+; The run pages. Each is 64 PUSHes falling out of the bottom into the
+; PUSH that straddles its boundary, and then into the next span's
+; dispatch - which is what the band patching reaches, so that a row
+; with no kerb jumps from the first span to the last.
+;------------------------------------------------------------------
+
+        ALIGN 256
+rd_p0:
+        DEFS 64,0xC5            ; PUSH BC
+        LD   A,(rd_e5)
+        AND  3
+        ADD  A,A
+rd_m0:
+        ADD  A,RD_MGK           ; patched: grass meets kerb, or tarmac
+        LD   L,A
+        LD   H,rd_mx / 256
+        LD   C,(HL)
+        INC  L
+        LD   B,(HL)
+        PUSH BC
+rd_s1:
+        LD   A,(rd_e4)          ; patched to JP rd_s5 on a row with no
+        RRCA                    ; kerb
+        RRCA
+        AND  63
+        LD   L,A
+        SUB  D
+        ADD  A,65
+        LD   D,L
+        LD   BC,RD_KERB
+        LD   H,rd_p1 / 256
+        LD   L,A
+        JP   (HL)
+
+        ALIGN 256
+rd_p1:
+        DEFS 64,0xC5
+        LD   A,(rd_e4)
+        AND  3
+        ADD  A,A
+        ADD  A,RD_MKT
+        LD   L,A
+        LD   H,rd_mx / 256
+        LD   C,(HL)
+        INC  L
+        LD   B,(HL)
+        PUSH BC
+rd_s2:
+        LD   A,(rd_e3)          ; patched to JP rd_s4 on a row with no
+        RRCA                    ; centre line
+        RRCA
+        AND  63
+        LD   L,A
+        SUB  D
+        ADD  A,65
+        LD   D,L
+        LD   BC,RD_TARMAC
+        LD   H,rd_p2 / 256
+        LD   L,A
+        JP   (HL)
+
+        ALIGN 256
+rd_p2:
+        DEFS 64,0xC5
+        LD   A,(rd_e3)
+        AND  3
+        ADD  A,A
+        ADD  A,RD_MTL
+        LD   L,A
+        LD   H,rd_mx / 256
+        LD   C,(HL)
+        INC  L
+        LD   B,(HL)
+        PUSH BC
+rd_s3:
+        LD   A,(rd_e2)
+        RRCA
+        RRCA
+        AND  63
+        LD   L,A
+        SUB  D
+        ADD  A,65
+        LD   D,L
+        LD   BC,RD_LINE
+        LD   H,rd_p3 / 256
+        LD   L,A
+        JP   (HL)
+
+        ALIGN 256
+rd_p3:
+        DEFS 64,0xC5
+        LD   A,(rd_e2)
+        AND  3
+        ADD  A,A
+        ADD  A,RD_MLT
+        LD   L,A
+        LD   H,rd_mx / 256
+        LD   C,(HL)
+        INC  L
+        LD   B,(HL)
+        PUSH BC
+rd_s4:
+        LD   A,(rd_e1)
+        RRCA
+        RRCA
+        AND  63
+        LD   L,A
+        SUB  D
+        ADD  A,65
+        LD   D,L
+        LD   BC,RD_TARMAC
+        LD   H,rd_p4 / 256
+        LD   L,A
+        JP   (HL)
+
+        ALIGN 256
+rd_p4:
+        DEFS 64,0xC5
+        LD   A,(rd_e1)
+        AND  3
+        ADD  A,A
+        ADD  A,RD_MTK
+        LD   L,A
+        LD   H,rd_mx / 256
+        LD   C,(HL)
+        INC  L
+        LD   B,(HL)
+        PUSH BC
+rd_s5:
+        LD   A,(rd_e0)
+        RRCA
+        RRCA
+        AND  63
+        LD   L,A
+        SUB  D
+        ADD  A,65
+        LD   D,L
+rd_c5:
+        LD   BC,RD_KERB         ; patched: the road itself on a row
+        LD   H,rd_p5 / 256      ; with no kerb
+        LD   L,A
+        JP   (HL)
+
+        ALIGN 256
+rd_p5:
+        DEFS 64,0xC5
+        LD   A,(rd_e0)
+        AND  3
+        ADD  A,A
+rd_m5:
+        ADD  A,RD_MKG           ; patched: kerb meets grass, or tarmac
+        LD   L,A
+        LD   H,rd_mx / 256
+        LD   C,(HL)
+        INC  L
+        LD   B,(HL)
+        PUSH BC
+        LD   A,64               ; and grass the rest of the way to the
+        SUB  D                  ; left hand edge
+        LD   BC,RD_GRASS
+        LD   H,rd_pg / 256
+        LD   L,A
+        JP   (HL)
+
+        ALIGN 256
+rd_pg:
+        DEFS 64,0xC5
+        EXX
+        DEC  B
+        EXX
+        JP   NZ,rd_line
+rd_bn:
+        JP   0                  ; patched: the next band, or the end
+
+;------------------------------------------------------------------
+; rd_out - the four palette writes a scanline, for real hardware
+;
+; This is what the line interrupt would run, and it is the one part of
+; this file the test bench cannot check: the emulator has no CLUT and
+; no raster. Entry: IY = this row's record, HL = its six bytes of
+; rd_fog; stepping both down the screen is the caller's business.
+;------------------------------------------------------------------
+
+rd_out:
+        LD   C,RD_CLUT
+        LD   A,(IY+7)
+        AND  2                  ; the band's parity picks one of each pair
+        JR   Z,rd_o1
+        INC  HL
+rd_o1:
+        LD   A,(HL)
+        LD   B,1
+        OUT  (C),A              ; the grass, or the sky above the horizon
+        INC  HL
+        INC  HL
+        LD   A,(HL)
+        LD   B,2
+        OUT  (C),A              ; the tarmac
+        LD   E,A
+        INC  HL
+        INC  HL
+        LD   A,(HL)
+        LD   B,3
+        OUT  (C),A              ; the kerb
+        LD   A,(IY+7)
+        RRCA                    ; carry = is there a dash on this row
+        LD   A,E                ; and where there is not, the centre line
+        JR   NC,rd_o2           ; is the tarmac's own colour
+        LD   A,RD_WHITE
+rd_o2:
+        LD   B,4
+        OUT  (C),A
+        RET
+
+;------------------------------------------------------------------
+; Workspace
+;------------------------------------------------------------------
+
+rd_back:        DEFB RD_BUF0
+rd_front:       DEFB RD_BUF1
+rd_camx:        DEFW 0          ; the camera's lateral offset, world units
+rd_camz:        DEFW 0          ; and how far it has come
+rd_dx:          DEFS 2
+rd_sp:          DEFS 2
+
+rd_e0:          DEFS 1          ; this row's six boundaries, in pixels
+rd_e1:          DEFS 1
+rd_e2:          DEFS 1
+rd_e3:          DEFS 1
+rd_e4:          DEFS 1
+rd_e5:          DEFS 1

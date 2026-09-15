@@ -838,6 +838,91 @@ def vox(outdir, seconds=8):
     report(p, size, n, durs, secs, got, bad)
 
 
+def ride(t, hz=25):
+    """Where the bike is on frame t of the road demo.
+
+    Forward at 40 world units a frame, which at the bottom of the
+    screen is six scanlines of band a frame - half of what would start
+    the stripes running backwards - and a weave from one kerb to the
+    other every seven seconds, so that both the steering and the bends
+    are in the picture at once.
+    """
+    import math
+    import road as R
+    camx = int(0.6 * R.RW * math.sin(2 * math.pi * t / (7.0 * hz)))
+    camz = int(t * 40 * 25 / hz) & 0xFFFF
+    return camx, camz
+
+
+def copper_road(frames, pars, fog, white):
+    """road's four per-scanline palette entries, flattened into one image.
+
+    The grass, the tarmac and the kerb each have two colours a row and
+    swap when the scanline's band parity does; the centre line is white
+    where the dash is and the tarmac's own colour where it is not.
+    """
+    pal, seen = [], {}
+
+    def slot(rgb):
+        if rgb not in seen:
+            seen[rgb] = len(pal)
+            pal.append(rgb)
+        return seen[rgb]
+
+    out = []
+    for f, par in zip(frames, pars):
+        g = np.zeros(f.shape, np.uint8)
+        for y in range(f.shape[0]):
+            o = 1 if par[y] & 2 else 0
+            c = {1: fog[6 * y + o], 2: fog[6 * y + 2 + o],
+                 3: fog[6 * y + 4 + o]}
+            c[4] = white if par[y] & 1 else c[2]
+            for idx, v in c.items():
+                g[y][f[y] == idx] = slot(sam_rgb(v))
+        out.append(g)
+    if len(pal) > 256:
+        raise SystemExit("copper_road: %d colours, more than a GIF holds"
+                         % len(pal))
+    return out, pal
+
+
+def road(outdir, seconds=8):
+    """road at its measured rate: 171,906 T-states a frame, 25 Hz.
+
+    A Hang On road that steers and bends. Everything that repeats with
+    distance - the mown stripes, the tarmac's bands, the kerb's red and
+    white, the dashes - is the palette rather than the pixels, exactly
+    as the chequered floors do it, so riding forward costs nothing.
+    """
+    import road as R
+    b = Bench("harness_rd.asm", org=0)
+    s = b.syms
+    b.call_regs(s["rd_init"])
+    fog = b.peek(s["rd_fog"], 6 * 192)
+    white = b.syms.get("RD_WHITE", 119)
+    n = int(seconds * 25)
+    frames, pars, ts = [], [], []
+    for t in range(n):
+        camx, camz = ride(t, 25)
+        b.poke(s["rd_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["rd_camz"], camz.to_bytes(2, "little"))
+        into = b.peek(s["rd_back"], 1)[0]
+        tt, _ = b.call_regs(s["rd_frame"])
+        ts.append(tt)
+        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+        rec = b.peek(s["rd_row"], 8 * (192 - R.HZ - 1))
+        par = [0] * 192
+        for y in range(R.HZ + 1, 192):
+            par[y] = rec[8 * (191 - y) + 7]
+        pars.append(par)
+    idx, pal = copper_road(frames, pars, fog, white)
+    p = "%s/road.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, idx, pal, durs)
+    got, bad, secs = check_gif(p, idx, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
+
+
 def chequer2(outdir, seconds=8):
     """chequer2 at its measured rate: 104,232 T-states a frame, 50 Hz.
 
@@ -890,6 +975,7 @@ if __name__ == "__main__":
     chequer5(d)
     chequer6(d)
     zarch(d)
+    road(d)
     twist(d)
     roto(d)
     vox(d)
