@@ -119,12 +119,14 @@ def ltab():
     return [max(1, w // 10) if w else 0 for w in WTAB]
 
 
-# How far the road's centre may go. It no longer has to keep the road on
-# screen - the skip table handles the right hand end and the left simply
-# spills into the row above, which is drawn next - so these are only
-# rails against the 8.8 accumulator wrapping, and a limit on how far off
-# the road the camera may wander.
-CLO, CHI = 64, 191
+# How far the road's centre may go: sixty pixels either side of the
+# middle. It no longer has to keep the road on screen - the stubs enter
+# a run past whatever is off the right hand end and the left simply
+# spills into the row above, which is drawn next - so this is a rail
+# against the 8.8 accumulator wrapping, a limit on how far off the road
+# the camera may wander, and what fixes the deepest skip a run needs a
+# stub for, which is what it costs in memory.
+CLO, CHI = 68, 187
 
 
 def clamp():

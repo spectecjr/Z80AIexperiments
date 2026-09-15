@@ -181,16 +181,16 @@ rd2_draw:
         EXX
 
 
+
 ;------------------------------------------------------------------
 ; One row: where the road is, and then the run that draws it
 ;
-; The window is the road plus a margin either side and it is one run,
-; so a row is one dispatch. Where the window runs off the right of the
-; screen the run is entered part way in - which is a lookup, not
-; arithmetic, because a run is a mix of one byte PUSHes and four byte
-; LD HL,nn pairs and there is no skipping n of those by adding. Where
-; it runs off the left it simply spills into the row above, which is
-; drawn next.
+; The window - grass margin, road, grass margin - is one run, so a row
+; is one dispatch. Where its right hand end is off the screen the run
+; is entered through a stub, which hands it the HL it would have had
+; and puts back the odd byte at the screen's edge. Where its left hand
+; end is off, it simply spills into the previous row, which is the
+; next one drawn.
 ;------------------------------------------------------------------
 
 rd2_row:
@@ -214,12 +214,17 @@ rd2_r2:
         RRA                     ; screen puts the window's end past 255
         LD   B,0                ; A = that end as a byte, and the bit that
         RL   B                  ; falls out of it is the phase
-        LD   C,A                ; keep it: its bottom bit says whether the
-        SUB  128                ; screen's last byte is one the skip below
-        JR   C,rd2_r3           ; steps over
-        INC  A                  ; how far past the screen's right hand edge
-        SRL  A                  ; the window ends, and so how many PUSHes
-        JR   rd2_r4             ; of it are off it
+        LD   C,A
+        LD   A,B                ; which run this row wants: four entries a
+        ADD  A,A                ; width and two a phase. B keeps it through
+        ADD  A,D                ; the geometry, which has no use for it
+        LD   B,A
+        LD   A,C                ; back to the window's end
+        SUB  128                ; how far past the screen's right hand edge
+        JR   C,rd2_r3
+        INC  A                  ; it is, and so how many PUSHes of it are
+        SRL  A                  ; off the screen
+        JR   rd2_r4
 rd2_r3:
         XOR  A
 rd2_r4:
@@ -228,16 +233,15 @@ rd2_r4:
         NEG
         ADD  A,C                ; and where SP goes: the window's right hand
         LD   (rd2_sp0),A        ; end, or the screen's, whichever is left of
-        LD   A,D                ; the other
-        LD   (rd2_wi),A
+                                ; the other
 rd2_cl:
         LD   DE,0               ; patched: the camera's distance
         ADD  HL,DE
         LD   A,H                ; bit 8 of it is the band's parity, and
         AND  1                  ; all that riding forward costs
         LD   C,A
-        LD   A,H                ; and bits 9 to 14 the track's segment
-        AND  0x7E
+        LD   A,H
+        AND  0x7E               ; bits 9 to 14 are the track's segment
         LD   L,A
         LD   H,rd2_trk / 256
         LD   A,(HL)
@@ -250,54 +254,7 @@ rd2_cl:
         LD   D,H
         LD   E,L
         ADD  IY,DE              ; and x += dx, which is the row above's
-        ; --- which run, and where in it ---
-        LD   A,(rd2_wi)
-        LD   E,A                ; the width's index, with the phase beside
-        LD   A,B                ; it: four entries a width, two a parity
-        ADD  A,A
-        ADD  A,E
-        LD   E,A
-        LD   L,A                ; first the skip table for this run
-        LD   A,C
-        ADD  A,rd2_st0 / 256    ; a page a parity, so this is the lookup
-        LD   H,A
-        LD   A,(HL)
-        INC  L
-        LD   H,(HL)
-        LD   L,A
-        LD   A,(rd2_sk)
-        ADD  A,A                ; four bytes an entry: how far into the run
-        ADD  A,A                ; that many PUSHes is, the byte the last one
-        ADD  A,L                ; stepped over would have put at the screen's
-        LD   L,A                ; right hand edge, and the value it would
-        JR   NC,rd2_r5          ; have left in HL - which the run needs
-        INC  H                  ; handed to it, because it reloads HL only
-rd2_r5:                         ; where the colour changes and an entry part
-        LD   B,(HL)             ; way in can land on a PUSH whose LD went
-        INC  HL                 ; with the part that was skipped
-        LD   A,(HL)
-        LD   (rd2_fx),A
-        INC  HL
-        LD   A,(HL)
-        LD   (rd2_ld+1),A
-        INC  HL
-        LD   A,(HL)
-        LD   (rd2_ld+2),A
-        LD   L,E                ; then the run itself
-        LD   A,C
-        ADD  A,rd2_rt0 / 256
-        LD   H,A
-        LD   A,(HL)
-        INC  L
-        LD   H,(HL)
-        LD   L,A
-        LD   A,B                ; entered that many bytes in
-        ADD  A,L
-        LD   L,A
-        JR   NC,rd2_r6
-        INC  H
-rd2_r6:
-        LD   (rd2_ent+1),HL
+        LD   E,B                ; the run's index, for rd2_road
         POP  HL                 ; the parity each buffer last painted
         LD   A,C
 rd2_mk:
@@ -321,14 +278,14 @@ rd2_r8:
         AND  0xFE               ; even: the odd byte under it is the run's
 rd2_r9:
         RRA                     ; and a PUSH covers two
-        LD   D,rd2_fill128 / 256
-        LD   E,A
-        LD   A,C                ; the parity, before BC takes C over
-        OR   A
-        LD   BC,RD2_G0
-        JR   Z,rd2_r10
-        LD   BC,RD2_G1
+        LD   (rd2_f),A
+        LD   B,E                ; the run's index, while DE carries the
+        LD   D,RD2_G0 & 255     ; grass - which is the only thing a fill
+        BIT  0,C                ; needs a register pair for, and the only
+        JR   Z,rd2_r10          ; place the parity has to be a colour
+        LD   D,RD2_G1 & 255
 rd2_r10:
+        LD   E,D
         LD   A,IXL
         ADD  A,128
         LD   L,A
@@ -336,8 +293,14 @@ rd2_r10:
         ADC  A,0
         LD   H,A
         LD   SP,HL              ; one past the row's last byte
-        EX   DE,HL
+        LD   A,(rd2_f)
+        LD   L,A
+        LD   H,rd2_fill128 / 256
         JP   (HL)
+
+;------------------------------------------------------------------
+; Into the run: SP first, because the run starts PUSHing at once.
+;------------------------------------------------------------------
 
 rd2_road:
         LD   A,(rd2_sp0)
@@ -347,19 +310,45 @@ rd2_road:
         ADC  A,0
         LD   H,A
         LD   SP,HL
-        LD   A,(rd2_sk)         ; nothing stepped over, nothing to put back
+        LD   A,(rd2_sk)
         OR   A
-        JR   Z,rd2_ld
-        LD   A,(rd2_sp0)
-        RRA
-        JR   NC,rd2_ld          ; and nothing to put back on an even byte
-        LD   A,(rd2_fx)
-        LD   (IX+127),A
-rd2_ld:
-        LD   HL,0               ; patched: what the run expects to find in
-rd2_ent:                        ; HL where it is being entered
-        JP   0                  ; patched: this row's run, entered where
-                                ; the skip table said
+        JR   NZ,rd2_p1
+        LD   L,E                ; nothing off the screen, so straight into
+        LD   A,C                ; the run: it loads HL itself. A page a
+        ADD  A,rd2_rt0 / 256    ; parity, so the parity is the page
+        LD   H,A
+        LD   A,(HL)
+        INC  L
+        LD   H,(HL)
+        LD   L,A
+        JP   (HL)
+
+rd2_p1:
+        DEC  A                  ; else the stub for that many PUSHes in,
+        LD   B,A                ; seven bytes each
+        ADD  A,A
+        ADD  A,A
+        ADD  A,A
+        SUB  B
+        LD   B,A
+        LD   L,E
+        LD   A,C
+        ADD  A,rd2_st0 / 256
+        LD   H,A
+        LD   A,(HL)
+        INC  L
+        LD   H,(HL)
+        LD   L,A
+        LD   A,B
+        ADD  A,L
+        LD   L,A
+        JR   NC,rd2_p2
+        INC  H
+rd2_p2:
+        LD   A,(HL)             ; the byte the last skipped PUSH would have
+        INC  HL                 ; put at the screen's own right hand edge.
+        LD   (IX+127),A         ; Stored always: where it was not wanted the
+        JP   (HL)               ; run's own first PUSH covers it
 
 ;------------------------------------------------------------------
 ; The runs all end here, and the row loop with them. SP is where the
@@ -393,7 +382,8 @@ rd2_out:
 
         ALIGN 256
 rd2_fill128:
-        DEFS 64,0xC5            ; PUSH BC
+        DEFS 64,0xD5            ; PUSH DE
+        LD   E,B                ; and the run's index back
         JP   rd2_road
 
 ;------------------------------------------------------------------
@@ -410,6 +400,4 @@ rd2_sp0:        DEFS 1          ; where the window ends, a byte in the row
 rd2_sk:         DEFS 1          ; and how many PUSHes of it are off screen
 rd2_dirt:       DEFS 1          ; how far into this row the row below
                                 ; spilled, 128 for not at all
-rd2_fx:         DEFS 1          ; the byte the skipped PUSH would have put
-                                ; at the screen's own right hand edge
-rd2_wi:         DEFS 1          ; this row's width, as a table index
+rd2_f:          DEFS 1          ; and where a fill starts, in PUSHes

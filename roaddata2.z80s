@@ -4,8 +4,8 @@ RD2_HZ:         EQU 111
 RD2_ROWS:       EQU 80          ; scanlines of road
 RD2_M:          EQU 8           ; the repaint margin, pixels
 RD2_REC:        EQU 6           ; bytes of record a row
-RD2_CLO:        EQU 64          ; and the rails the centre
-RD2_CHI:        EQU 191         ; is held between
+RD2_CLO:        EQU 68          ; and the rails the centre
+RD2_CHI:        EQU 187         ; is held between
 RD2_GRASS:      EQU 0x2222
 RD2_TARMAC:     EQU 0x4444
 RD2_KERB:       EQU 0x6666
@@ -35,6 +35,381 @@ rd2_sky:
         DEFB 255,255,255,255,255,255,255,255,255,255,255,255,255,255,255,255
 
         ALIGN 256
+rd2_rt0:
+        DEFW rd2_r4_0_0,rd2_r4_1_0
+        DEFW rd2_r6_0_0,rd2_r6_1_0
+        DEFW rd2_r8_0_0,rd2_r8_1_0
+        DEFW rd2_r10_0_0,rd2_r10_1_0
+        DEFW rd2_r12_0_0,rd2_r12_1_0
+        DEFW rd2_r14_0_0,rd2_r14_1_0
+        DEFW rd2_r16_0_0,rd2_r16_1_0
+        DEFW rd2_r18_0_0,rd2_r18_1_0
+        DEFW rd2_r20_0_0,rd2_r20_1_0
+        DEFW rd2_r22_0_0,rd2_r22_1_0
+        DEFW rd2_r24_0_0,rd2_r24_1_0
+        DEFW rd2_r26_0_0,rd2_r26_1_0
+        DEFW rd2_r28_0_0,rd2_r28_1_0
+        DEFW rd2_r30_0_0,rd2_r30_1_0
+        DEFW rd2_r32_0_0,rd2_r32_1_0
+        DEFW rd2_r34_0_0,rd2_r34_1_0
+        DEFW rd2_r36_0_0,rd2_r36_1_0
+        DEFW rd2_r38_0_0,rd2_r38_1_0
+        DEFW rd2_r40_0_0,rd2_r40_1_0
+        DEFW rd2_r44_0_0,rd2_r44_1_0
+        DEFW rd2_r48_0_0,rd2_r48_1_0
+        DEFW rd2_r52_0_0,rd2_r52_1_0
+        DEFW rd2_r56_0_0,rd2_r56_1_0
+        DEFW rd2_r60_0_0,rd2_r60_1_0
+        DEFW rd2_r64_0_0,rd2_r64_1_0
+        DEFW rd2_r68_0_0,rd2_r68_1_0
+        DEFW rd2_r72_0_0,rd2_r72_1_0
+        DEFW rd2_r76_0_0,rd2_r76_1_0
+        DEFW rd2_r80_0_0,rd2_r80_1_0
+        DEFW rd2_r88_0_0,rd2_r88_1_0
+        DEFW rd2_r96_0_0,rd2_r96_1_0
+        DEFW rd2_r104_0_0,rd2_r104_1_0
+        DEFW rd2_r112_0_0,rd2_r112_1_0
+        DEFW rd2_r120_0_0,rd2_r120_1_0
+        DEFW rd2_r128_0_0,rd2_r128_1_0
+        DEFW rd2_r136_0_0,rd2_r136_1_0
+        DEFW rd2_r144_0_0,rd2_r144_1_0
+        DEFW rd2_r152_0_0,rd2_r152_1_0
+rd2_s4_0_0:
+rd2_r4_0_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,25156
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        LD   HL,9762
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s4_1_0:
+rd2_r4_1_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,17988
+        PUSH HL
+        LD   HL,17508
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s4_0_1:
+rd2_r4_0_1:
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        LD   HL,29525
+        PUSH HL
+        LD   HL,22613
+        PUSH HL
+        LD   HL,14131
+        PUSH HL
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s4_1_1:
+rd2_r4_1_1:
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        LD   HL,22405
+        PUSH HL
+        LD   HL,21877
+        PUSH HL
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+
+        ALIGN 256
+rd2_rt1:
+        DEFW rd2_r4_0_1,rd2_r4_1_1
+        DEFW rd2_r6_0_1,rd2_r6_1_1
+        DEFW rd2_r8_0_1,rd2_r8_1_1
+        DEFW rd2_r10_0_1,rd2_r10_1_1
+        DEFW rd2_r12_0_1,rd2_r12_1_1
+        DEFW rd2_r14_0_1,rd2_r14_1_1
+        DEFW rd2_r16_0_1,rd2_r16_1_1
+        DEFW rd2_r18_0_1,rd2_r18_1_1
+        DEFW rd2_r20_0_1,rd2_r20_1_1
+        DEFW rd2_r22_0_1,rd2_r22_1_1
+        DEFW rd2_r24_0_1,rd2_r24_1_1
+        DEFW rd2_r26_0_1,rd2_r26_1_1
+        DEFW rd2_r28_0_1,rd2_r28_1_1
+        DEFW rd2_r30_0_1,rd2_r30_1_1
+        DEFW rd2_r32_0_1,rd2_r32_1_1
+        DEFW rd2_r34_0_1,rd2_r34_1_1
+        DEFW rd2_r36_0_1,rd2_r36_1_1
+        DEFW rd2_r38_0_1,rd2_r38_1_1
+        DEFW rd2_r40_0_1,rd2_r40_1_1
+        DEFW rd2_r44_0_1,rd2_r44_1_1
+        DEFW rd2_r48_0_1,rd2_r48_1_1
+        DEFW rd2_r52_0_1,rd2_r52_1_1
+        DEFW rd2_r56_0_1,rd2_r56_1_1
+        DEFW rd2_r60_0_1,rd2_r60_1_1
+        DEFW rd2_r64_0_1,rd2_r64_1_1
+        DEFW rd2_r68_0_1,rd2_r68_1_1
+        DEFW rd2_r72_0_1,rd2_r72_1_1
+        DEFW rd2_r76_0_1,rd2_r76_1_1
+        DEFW rd2_r80_0_1,rd2_r80_1_1
+        DEFW rd2_r88_0_1,rd2_r88_1_1
+        DEFW rd2_r96_0_1,rd2_r96_1_1
+        DEFW rd2_r104_0_1,rd2_r104_1_1
+        DEFW rd2_r112_0_1,rd2_r112_1_1
+        DEFW rd2_r120_0_1,rd2_r120_1_1
+        DEFW rd2_r128_0_1,rd2_r128_1_1
+        DEFW rd2_r136_0_1,rd2_r136_1_1
+        DEFW rd2_r144_0_1,rd2_r144_1_1
+        DEFW rd2_r152_0_1,rd2_r152_1_1
+rd2_s6_0_0:
+rd2_r6_0_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,25156
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        PUSH HL
+        LD   HL,9762
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s6_1_0:
+rd2_r6_1_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,17988
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        LD   HL,17508
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s6_0_1:
+rd2_r6_0_1:
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        LD   HL,29525
+        PUSH HL
+        LD   HL,21848
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        LD   HL,14131
+        PUSH HL
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+
+        ALIGN 256
+rd2_st0:
+        DEFW rd2_s4_0_0,rd2_s4_1_0
+        DEFW rd2_s6_0_0,rd2_s6_1_0
+        DEFW rd2_s8_0_0,rd2_s8_1_0
+        DEFW rd2_s10_0_0,rd2_s10_1_0
+        DEFW rd2_s12_0_0,rd2_s12_1_0
+        DEFW rd2_s14_0_0,rd2_s14_1_0
+        DEFW rd2_s16_0_0,rd2_s16_1_0
+        DEFW rd2_s18_0_0,rd2_s18_1_0
+        DEFW rd2_s20_0_0,rd2_s20_1_0
+        DEFW rd2_s22_0_0,rd2_s22_1_0
+        DEFW rd2_s24_0_0,rd2_s24_1_0
+        DEFW rd2_s26_0_0,rd2_s26_1_0
+        DEFW rd2_s28_0_0,rd2_s28_1_0
+        DEFW rd2_s30_0_0,rd2_s30_1_0
+        DEFW rd2_s32_0_0,rd2_s32_1_0
+        DEFW rd2_s34_0_0,rd2_s34_1_0
+        DEFW rd2_s36_0_0,rd2_s36_1_0
+        DEFW rd2_s38_0_0,rd2_s38_1_0
+        DEFW rd2_s40_0_0,rd2_s40_1_0
+        DEFW rd2_s44_0_0,rd2_s44_1_0
+        DEFW rd2_s48_0_0,rd2_s48_1_0
+        DEFW rd2_s52_0_0,rd2_s52_1_0
+        DEFW rd2_s56_0_0,rd2_s56_1_0
+        DEFW rd2_s60_0_0,rd2_s60_1_0
+        DEFW rd2_s64_0_0,rd2_s64_1_0
+        DEFW rd2_s68_0_0,rd2_s68_1_0
+        DEFW rd2_s72_0_0,rd2_s72_1_0
+        DEFW rd2_s76_0_0,rd2_s76_1_0
+        DEFW rd2_s80_0_0,rd2_s80_1_0
+        DEFW rd2_s88_0_0,rd2_s88_1_0
+        DEFW rd2_s96_0_0,rd2_s96_1_0
+        DEFW rd2_s104_0_0,rd2_s104_1_0
+        DEFW rd2_s112_0_0,rd2_s112_1_0
+        DEFW rd2_s120_0_0,rd2_s120_1_0
+        DEFW rd2_s128_0_0,rd2_s128_1_0
+        DEFW rd2_s136_0_0,rd2_s136_1_0
+        DEFW rd2_s144_0_0,rd2_s144_1_0
+        DEFW rd2_s152_0_0,rd2_s152_1_0
+rd2_s6_1_1:
+rd2_r6_1_1:
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        LD   HL,22357
+        PUSH HL
+        LD   HL,34133
+        PUSH HL
+        LD   HL,21877
+        PUSH HL
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s8_0_0:
+rd2_r8_0_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,25156
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,9762
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s8_1_0:
+rd2_r8_1_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,17988
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        PUSH HL
+        LD   HL,17508
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+
+        ALIGN 256
+rd2_st1:
+        DEFW rd2_s4_0_1,rd2_s4_1_1
+        DEFW rd2_s6_0_1,rd2_s6_1_1
+        DEFW rd2_s8_0_1,rd2_s8_1_1
+        DEFW rd2_s10_0_1,rd2_s10_1_1
+        DEFW rd2_s12_0_1,rd2_s12_1_1
+        DEFW rd2_s14_0_1,rd2_s14_1_1
+        DEFW rd2_s16_0_1,rd2_s16_1_1
+        DEFW rd2_s18_0_1,rd2_s18_1_1
+        DEFW rd2_s20_0_1,rd2_s20_1_1
+        DEFW rd2_s22_0_1,rd2_s22_1_1
+        DEFW rd2_s24_0_1,rd2_s24_1_1
+        DEFW rd2_s26_0_1,rd2_s26_1_1
+        DEFW rd2_s28_0_1,rd2_s28_1_1
+        DEFW rd2_s30_0_1,rd2_s30_1_1
+        DEFW rd2_s32_0_1,rd2_s32_1_1
+        DEFW rd2_s34_0_1,rd2_s34_1_1
+        DEFW rd2_s36_0_1,rd2_s36_1_1
+        DEFW rd2_s38_0_1,rd2_s38_1_1
+        DEFW rd2_s40_0_1,rd2_s40_1_1
+        DEFW rd2_s44_0_1,rd2_s44_1_1
+        DEFW rd2_s48_0_1,rd2_s48_1_1
+        DEFW rd2_s52_0_1,rd2_s52_1_1
+        DEFW rd2_s56_0_1,rd2_s56_1_1
+        DEFW rd2_s60_0_1,rd2_s60_1_1
+        DEFW rd2_s64_0_1,rd2_s64_1_1
+        DEFW rd2_s68_0_1,rd2_s68_1_1
+        DEFW rd2_s72_0_1,rd2_s72_1_1
+        DEFW rd2_s76_0_1,rd2_s76_1_1
+        DEFW rd2_s80_0_1,rd2_s80_1_1
+        DEFW rd2_s88_0_1,rd2_s88_1_1
+        DEFW rd2_s96_0_1,rd2_s96_1_1
+        DEFW rd2_s104_0_1,rd2_s104_1_1
+        DEFW rd2_s112_0_1,rd2_s112_1_1
+        DEFW rd2_s120_0_1,rd2_s120_1_1
+        DEFW rd2_s128_0_1,rd2_s128_1_1
+        DEFW rd2_s136_0_1,rd2_s136_1_1
+        DEFW rd2_s144_0_1,rd2_s144_1_1
+        DEFW rd2_s152_0_1,rd2_s152_1_1
+rd2_s8_0_1:
+rd2_r8_0_1:
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        LD   HL,29525
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        LD   HL,22613
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        LD   HL,14131
+        PUSH HL
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s8_1_1:
+rd2_r8_1_1:
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        LD   HL,22357
+        PUSH HL
+        LD   HL,21893
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        LD   HL,21877
+        PUSH HL
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s10_0_0:
+rd2_r10_0_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,25156
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,9762
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+
 rd2_rec:
         DEFB 195,2,161,148,255,255
         DEFB 204,2,161,148,255,255
@@ -116,398 +491,7 @@ rd2_rec:
         DEFB 170,73,13,0,255,255
         DEFB 128,110,13,0,255,255
         DEFB 0,221,13,0,255,255
-
-        ALIGN 256
-rd2_rt0:
-        DEFW rd2_r4_0_0,rd2_r4_1_0
-        DEFW rd2_r6_0_0,rd2_r6_1_0
-        DEFW rd2_r8_0_0,rd2_r8_1_0
-        DEFW rd2_r10_0_0,rd2_r10_1_0
-        DEFW rd2_r12_0_0,rd2_r12_1_0
-        DEFW rd2_r14_0_0,rd2_r14_1_0
-        DEFW rd2_r16_0_0,rd2_r16_1_0
-        DEFW rd2_r18_0_0,rd2_r18_1_0
-        DEFW rd2_r20_0_0,rd2_r20_1_0
-        DEFW rd2_r22_0_0,rd2_r22_1_0
-        DEFW rd2_r24_0_0,rd2_r24_1_0
-        DEFW rd2_r26_0_0,rd2_r26_1_0
-        DEFW rd2_r28_0_0,rd2_r28_1_0
-        DEFW rd2_r30_0_0,rd2_r30_1_0
-        DEFW rd2_r32_0_0,rd2_r32_1_0
-        DEFW rd2_r34_0_0,rd2_r34_1_0
-        DEFW rd2_r36_0_0,rd2_r36_1_0
-        DEFW rd2_r38_0_0,rd2_r38_1_0
-        DEFW rd2_r40_0_0,rd2_r40_1_0
-        DEFW rd2_r44_0_0,rd2_r44_1_0
-        DEFW rd2_r48_0_0,rd2_r48_1_0
-        DEFW rd2_r52_0_0,rd2_r52_1_0
-        DEFW rd2_r56_0_0,rd2_r56_1_0
-        DEFW rd2_r60_0_0,rd2_r60_1_0
-        DEFW rd2_r64_0_0,rd2_r64_1_0
-        DEFW rd2_r68_0_0,rd2_r68_1_0
-        DEFW rd2_r72_0_0,rd2_r72_1_0
-        DEFW rd2_r76_0_0,rd2_r76_1_0
-        DEFW rd2_r80_0_0,rd2_r80_1_0
-        DEFW rd2_r88_0_0,rd2_r88_1_0
-        DEFW rd2_r96_0_0,rd2_r96_1_0
-        DEFW rd2_r104_0_0,rd2_r104_1_0
-        DEFW rd2_r112_0_0,rd2_r112_1_0
-        DEFW rd2_r120_0_0,rd2_r120_1_0
-        DEFW rd2_r128_0_0,rd2_r128_1_0
-        DEFW rd2_r136_0_0,rd2_r136_1_0
-        DEFW rd2_r144_0_0,rd2_r144_1_0
-        DEFW rd2_r152_0_0,rd2_r152_1_0
-
-        ALIGN 256
-rd2_rt1:
-        DEFW rd2_r4_0_1,rd2_r4_1_1
-        DEFW rd2_r6_0_1,rd2_r6_1_1
-        DEFW rd2_r8_0_1,rd2_r8_1_1
-        DEFW rd2_r10_0_1,rd2_r10_1_1
-        DEFW rd2_r12_0_1,rd2_r12_1_1
-        DEFW rd2_r14_0_1,rd2_r14_1_1
-        DEFW rd2_r16_0_1,rd2_r16_1_1
-        DEFW rd2_r18_0_1,rd2_r18_1_1
-        DEFW rd2_r20_0_1,rd2_r20_1_1
-        DEFW rd2_r22_0_1,rd2_r22_1_1
-        DEFW rd2_r24_0_1,rd2_r24_1_1
-        DEFW rd2_r26_0_1,rd2_r26_1_1
-        DEFW rd2_r28_0_1,rd2_r28_1_1
-        DEFW rd2_r30_0_1,rd2_r30_1_1
-        DEFW rd2_r32_0_1,rd2_r32_1_1
-        DEFW rd2_r34_0_1,rd2_r34_1_1
-        DEFW rd2_r36_0_1,rd2_r36_1_1
-        DEFW rd2_r38_0_1,rd2_r38_1_1
-        DEFW rd2_r40_0_1,rd2_r40_1_1
-        DEFW rd2_r44_0_1,rd2_r44_1_1
-        DEFW rd2_r48_0_1,rd2_r48_1_1
-        DEFW rd2_r52_0_1,rd2_r52_1_1
-        DEFW rd2_r56_0_1,rd2_r56_1_1
-        DEFW rd2_r60_0_1,rd2_r60_1_1
-        DEFW rd2_r64_0_1,rd2_r64_1_1
-        DEFW rd2_r68_0_1,rd2_r68_1_1
-        DEFW rd2_r72_0_1,rd2_r72_1_1
-        DEFW rd2_r76_0_1,rd2_r76_1_1
-        DEFW rd2_r80_0_1,rd2_r80_1_1
-        DEFW rd2_r88_0_1,rd2_r88_1_1
-        DEFW rd2_r96_0_1,rd2_r96_1_1
-        DEFW rd2_r104_0_1,rd2_r104_1_1
-        DEFW rd2_r112_0_1,rd2_r112_1_1
-        DEFW rd2_r120_0_1,rd2_r120_1_1
-        DEFW rd2_r128_0_1,rd2_r128_1_1
-        DEFW rd2_r136_0_1,rd2_r136_1_1
-        DEFW rd2_r144_0_1,rd2_r144_1_1
-        DEFW rd2_r152_0_1,rd2_r152_1_1
-
-        ALIGN 256
-rd2_st0:
-        DEFW rd2_s4_0_0,rd2_s4_1_0
-        DEFW rd2_s6_0_0,rd2_s6_1_0
-        DEFW rd2_s8_0_0,rd2_s8_1_0
-        DEFW rd2_s10_0_0,rd2_s10_1_0
-        DEFW rd2_s12_0_0,rd2_s12_1_0
-        DEFW rd2_s14_0_0,rd2_s14_1_0
-        DEFW rd2_s16_0_0,rd2_s16_1_0
-        DEFW rd2_s18_0_0,rd2_s18_1_0
-        DEFW rd2_s20_0_0,rd2_s20_1_0
-        DEFW rd2_s22_0_0,rd2_s22_1_0
-        DEFW rd2_s24_0_0,rd2_s24_1_0
-        DEFW rd2_s26_0_0,rd2_s26_1_0
-        DEFW rd2_s28_0_0,rd2_s28_1_0
-        DEFW rd2_s30_0_0,rd2_s30_1_0
-        DEFW rd2_s32_0_0,rd2_s32_1_0
-        DEFW rd2_s34_0_0,rd2_s34_1_0
-        DEFW rd2_s36_0_0,rd2_s36_1_0
-        DEFW rd2_s38_0_0,rd2_s38_1_0
-        DEFW rd2_s40_0_0,rd2_s40_1_0
-        DEFW rd2_s44_0_0,rd2_s44_1_0
-        DEFW rd2_s48_0_0,rd2_s48_1_0
-        DEFW rd2_s52_0_0,rd2_s52_1_0
-        DEFW rd2_s56_0_0,rd2_s56_1_0
-        DEFW rd2_s60_0_0,rd2_s60_1_0
-        DEFW rd2_s64_0_0,rd2_s64_1_0
-        DEFW rd2_s68_0_0,rd2_s68_1_0
-        DEFW rd2_s72_0_0,rd2_s72_1_0
-        DEFW rd2_s76_0_0,rd2_s76_1_0
-        DEFW rd2_s80_0_0,rd2_s80_1_0
-        DEFW rd2_s88_0_0,rd2_s88_1_0
-        DEFW rd2_s96_0_0,rd2_s96_1_0
-        DEFW rd2_s104_0_0,rd2_s104_1_0
-        DEFW rd2_s112_0_0,rd2_s112_1_0
-        DEFW rd2_s120_0_0,rd2_s120_1_0
-        DEFW rd2_s128_0_0,rd2_s128_1_0
-        DEFW rd2_s136_0_0,rd2_s136_1_0
-        DEFW rd2_s144_0_0,rd2_s144_1_0
-        DEFW rd2_s152_0_0,rd2_s152_1_0
-
-        ALIGN 256
-rd2_st1:
-        DEFW rd2_s4_0_1,rd2_s4_1_1
-        DEFW rd2_s6_0_1,rd2_s6_1_1
-        DEFW rd2_s8_0_1,rd2_s8_1_1
-        DEFW rd2_s10_0_1,rd2_s10_1_1
-        DEFW rd2_s12_0_1,rd2_s12_1_1
-        DEFW rd2_s14_0_1,rd2_s14_1_1
-        DEFW rd2_s16_0_1,rd2_s16_1_1
-        DEFW rd2_s18_0_1,rd2_s18_1_1
-        DEFW rd2_s20_0_1,rd2_s20_1_1
-        DEFW rd2_s22_0_1,rd2_s22_1_1
-        DEFW rd2_s24_0_1,rd2_s24_1_1
-        DEFW rd2_s26_0_1,rd2_s26_1_1
-        DEFW rd2_s28_0_1,rd2_s28_1_1
-        DEFW rd2_s30_0_1,rd2_s30_1_1
-        DEFW rd2_s32_0_1,rd2_s32_1_1
-        DEFW rd2_s34_0_1,rd2_s34_1_1
-        DEFW rd2_s36_0_1,rd2_s36_1_1
-        DEFW rd2_s38_0_1,rd2_s38_1_1
-        DEFW rd2_s40_0_1,rd2_s40_1_1
-        DEFW rd2_s44_0_1,rd2_s44_1_1
-        DEFW rd2_s48_0_1,rd2_s48_1_1
-        DEFW rd2_s52_0_1,rd2_s52_1_1
-        DEFW rd2_s56_0_1,rd2_s56_1_1
-        DEFW rd2_s60_0_1,rd2_s60_1_1
-        DEFW rd2_s64_0_1,rd2_s64_1_1
-        DEFW rd2_s68_0_1,rd2_s68_1_1
-        DEFW rd2_s72_0_1,rd2_s72_1_1
-        DEFW rd2_s76_0_1,rd2_s76_1_1
-        DEFW rd2_s80_0_1,rd2_s80_1_1
-        DEFW rd2_s88_0_1,rd2_s88_1_1
-        DEFW rd2_s96_0_1,rd2_s96_1_1
-        DEFW rd2_s104_0_1,rd2_s104_1_1
-        DEFW rd2_s112_0_1,rd2_s112_1_1
-        DEFW rd2_s120_0_1,rd2_s120_1_1
-        DEFW rd2_s128_0_1,rd2_s128_1_1
-        DEFW rd2_s136_0_1,rd2_s136_1_1
-        DEFW rd2_s144_0_1,rd2_s144_1_1
-        DEFW rd2_s152_0_1,rd2_s152_1_1
-
-rd2_s4_0_0:
-        DEFB 0,0,34,34
-rd2_r4_0_0:
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        LD   HL,25156
-        PUSH HL
-        LD   HL,17476
-        PUSH HL
-        LD   HL,9762
-        PUSH HL
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
-rd2_s4_1_0:
-        DEFB 0,0,34,34
-rd2_r4_1_0:
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        LD   HL,17988
-        PUSH HL
-        LD   HL,17508
-        PUSH HL
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
-rd2_s4_0_1:
-        DEFB 0,0,51,51
-rd2_r4_0_1:
-        LD   HL,13107
-        PUSH HL
-        PUSH HL
-        LD   HL,29525
-        PUSH HL
-        LD   HL,22613
-        PUSH HL
-        LD   HL,14131
-        PUSH HL
-        LD   HL,13107
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
-rd2_s4_1_1:
-        DEFB 0,0,51,51
-rd2_r4_1_1:
-        LD   HL,13107
-        PUSH HL
-        PUSH HL
-        LD   HL,22405
-        PUSH HL
-        LD   HL,21877
-        PUSH HL
-        LD   HL,13107
-        PUSH HL
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
-rd2_s6_0_0:
-        DEFB 0,0,34,34
-rd2_r6_0_0:
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        LD   HL,25156
-        PUSH HL
-        LD   HL,17476
-        PUSH HL
-        PUSH HL
-        LD   HL,9762
-        PUSH HL
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
-rd2_s6_1_0:
-        DEFB 0,0,34,34
-rd2_r6_1_0:
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        LD   HL,17988
-        PUSH HL
-        LD   HL,17476
-        PUSH HL
-        LD   HL,17508
-        PUSH HL
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
-rd2_s6_0_1:
-        DEFB 0,0,51,51
-rd2_r6_0_1:
-        LD   HL,13107
-        PUSH HL
-        PUSH HL
-        LD   HL,29525
-        PUSH HL
-        LD   HL,21848
-        PUSH HL
-        LD   HL,21845
-        PUSH HL
-        LD   HL,14131
-        PUSH HL
-        LD   HL,13107
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
-rd2_s6_1_1:
-        DEFB 0,0,51,51
-rd2_r6_1_1:
-        LD   HL,13107
-        PUSH HL
-        PUSH HL
-        LD   HL,22357
-        PUSH HL
-        LD   HL,34133
-        PUSH HL
-        LD   HL,21877
-        PUSH HL
-        LD   HL,13107
-        PUSH HL
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
-rd2_s8_0_0:
-        DEFB 0,0,34,34
-rd2_r8_0_0:
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        LD   HL,25156
-        PUSH HL
-        LD   HL,17476
-        PUSH HL
-        PUSH HL
-        PUSH HL
-        LD   HL,9762
-        PUSH HL
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
-rd2_s8_1_0:
-        DEFB 0,0,34,34
-rd2_r8_1_0:
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        LD   HL,17988
-        PUSH HL
-        LD   HL,17476
-        PUSH HL
-        PUSH HL
-        LD   HL,17508
-        PUSH HL
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
-rd2_s8_0_1:
-        DEFB 0,0,51,51
-rd2_r8_0_1:
-        LD   HL,13107
-        PUSH HL
-        PUSH HL
-        LD   HL,29525
-        PUSH HL
-        LD   HL,21845
-        PUSH HL
-        LD   HL,22613
-        PUSH HL
-        LD   HL,21845
-        PUSH HL
-        LD   HL,14131
-        PUSH HL
-        LD   HL,13107
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
-rd2_s8_1_1:
-        DEFB 0,0,51,51
-rd2_r8_1_1:
-        LD   HL,13107
-        PUSH HL
-        PUSH HL
-        LD   HL,22357
-        PUSH HL
-        LD   HL,21893
-        PUSH HL
-        LD   HL,21845
-        PUSH HL
-        LD   HL,21877
-        PUSH HL
-        LD   HL,13107
-        PUSH HL
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
-rd2_s10_0_0:
-        DEFB 0,0,34,34
-rd2_r10_0_0:
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        LD   HL,25156
-        PUSH HL
-        LD   HL,17476
-        PUSH HL
-        PUSH HL
-        PUSH HL
-        PUSH HL
-        LD   HL,9762
-        PUSH HL
-        LD   HL,8738
-        PUSH HL
-        PUSH HL
-        JP   rd2_out
 rd2_s10_1_0:
-        DEFB 0,0,34,34
 rd2_r10_1_0:
         LD   HL,8738
         PUSH HL
@@ -526,7 +510,6 @@ rd2_r10_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s10_0_1:
-        DEFB 0,0,51,51
 rd2_r10_0_1:
         LD   HL,13107
         PUSH HL
@@ -547,7 +530,6 @@ rd2_r10_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s10_1_1:
-        DEFB 0,0,51,51
 rd2_r10_1_1:
         LD   HL,13107
         PUSH HL
@@ -568,7 +550,6 @@ rd2_r10_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s12_0_0:
-        DEFB 0,0,34,34
 rd2_r12_0_0:
         LD   HL,8738
         PUSH HL
@@ -589,7 +570,6 @@ rd2_r12_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s12_1_0:
-        DEFB 0,0,34,34
 rd2_r12_1_0:
         LD   HL,8738
         PUSH HL
@@ -609,7 +589,6 @@ rd2_r12_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s12_0_1:
-        DEFB 0,0,51,51
 rd2_r12_0_1:
         LD   HL,13107
         PUSH HL
@@ -632,7 +611,6 @@ rd2_r12_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s12_1_1:
-        DEFB 0,0,51,51
 rd2_r12_1_1:
         LD   HL,13107
         PUSH HL
@@ -654,7 +632,6 @@ rd2_r12_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s14_0_0:
-        DEFB 0,0,34,34
 rd2_r14_0_0:
         LD   HL,8738
         PUSH HL
@@ -676,7 +653,6 @@ rd2_r14_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s14_1_0:
-        DEFB 0,0,34,34
 rd2_r14_1_0:
         LD   HL,8738
         PUSH HL
@@ -697,7 +673,6 @@ rd2_r14_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s14_0_1:
-        DEFB 0,0,51,51
 rd2_r14_0_1:
         LD   HL,13107
         PUSH HL
@@ -721,7 +696,6 @@ rd2_r14_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s14_1_1:
-        DEFB 0,0,51,51
 rd2_r14_1_1:
         LD   HL,13107
         PUSH HL
@@ -744,7 +718,6 @@ rd2_r14_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s16_0_0:
-        DEFB 0,0,34,34
 rd2_r16_0_0:
         LD   HL,8738
         PUSH HL
@@ -767,7 +740,6 @@ rd2_r16_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s16_1_0:
-        DEFB 0,0,34,34
 rd2_r16_1_0:
         LD   HL,8738
         PUSH HL
@@ -789,7 +761,6 @@ rd2_r16_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s16_0_1:
-        DEFB 0,0,51,51
 rd2_r16_0_1:
         LD   HL,13107
         PUSH HL
@@ -814,7 +785,6 @@ rd2_r16_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s16_1_1:
-        DEFB 0,0,51,51
 rd2_r16_1_1:
         LD   HL,13107
         PUSH HL
@@ -838,7 +808,6 @@ rd2_r16_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s18_0_0:
-        DEFB 0,0,34,34
 rd2_r18_0_0:
         LD   HL,8738
         PUSH HL
@@ -862,7 +831,6 @@ rd2_r18_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s18_1_0:
-        DEFB 0,0,34,34
 rd2_r18_1_0:
         LD   HL,8738
         PUSH HL
@@ -885,7 +853,6 @@ rd2_r18_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s18_0_1:
-        DEFB 0,0,51,51
 rd2_r18_0_1:
         LD   HL,13107
         PUSH HL
@@ -911,7 +878,6 @@ rd2_r18_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s18_1_1:
-        DEFB 0,0,51,51
 rd2_r18_1_1:
         LD   HL,13107
         PUSH HL
@@ -936,7 +902,6 @@ rd2_r18_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s20_0_0:
-        DEFB 0,0,34,34
 rd2_r20_0_0:
         LD   HL,8738
         PUSH HL
@@ -961,7 +926,6 @@ rd2_r20_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s20_1_0:
-        DEFB 0,0,34,34
 rd2_r20_1_0:
         LD   HL,8738
         PUSH HL
@@ -985,7 +949,6 @@ rd2_r20_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s20_0_1:
-        DEFB 0,0,51,51
 rd2_r20_0_1:
         LD   HL,13107
         PUSH HL
@@ -1012,7 +975,6 @@ rd2_r20_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s20_1_1:
-        DEFB 0,0,51,51
 rd2_r20_1_1:
         LD   HL,13107
         PUSH HL
@@ -1039,7 +1001,6 @@ rd2_r20_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s22_0_0:
-        DEFB 0,0,34,34
 rd2_r22_0_0:
         LD   HL,8738
         PUSH HL
@@ -1065,7 +1026,6 @@ rd2_r22_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s22_1_0:
-        DEFB 0,0,34,34
 rd2_r22_1_0:
         LD   HL,8738
         PUSH HL
@@ -1090,7 +1050,6 @@ rd2_r22_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s22_0_1:
-        DEFB 0,0,51,51
 rd2_r22_0_1:
         LD   HL,13107
         PUSH HL
@@ -1118,7 +1077,6 @@ rd2_r22_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s22_1_1:
-        DEFB 0,0,51,51
 rd2_r22_1_1:
         LD   HL,13107
         PUSH HL
@@ -1145,7 +1103,6 @@ rd2_r22_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s24_0_0:
-        DEFB 0,0,34,34
 rd2_r24_0_0:
         LD   HL,8738
         PUSH HL
@@ -1173,7 +1130,6 @@ rd2_r24_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s24_1_0:
-        DEFB 0,0,34,34
 rd2_r24_1_0:
         LD   HL,8738
         PUSH HL
@@ -1199,7 +1155,6 @@ rd2_r24_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s24_0_1:
-        DEFB 0,0,51,51
 rd2_r24_0_1:
         LD   HL,13107
         PUSH HL
@@ -1229,7 +1184,6 @@ rd2_r24_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s24_1_1:
-        DEFB 0,0,51,51
 rd2_r24_1_1:
         LD   HL,13107
         PUSH HL
@@ -1258,7 +1212,6 @@ rd2_r24_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s26_0_0:
-        DEFB 0,0,34,34
 rd2_r26_0_0:
         LD   HL,8738
         PUSH HL
@@ -1287,7 +1240,6 @@ rd2_r26_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s26_1_0:
-        DEFB 0,0,34,34
 rd2_r26_1_0:
         LD   HL,8738
         PUSH HL
@@ -1314,7 +1266,6 @@ rd2_r26_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s26_0_1:
-        DEFB 0,0,51,51
 rd2_r26_0_1:
         LD   HL,13107
         PUSH HL
@@ -1345,7 +1296,6 @@ rd2_r26_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s26_1_1:
-        DEFB 0,0,51,51
 rd2_r26_1_1:
         LD   HL,13107
         PUSH HL
@@ -1374,7 +1324,6 @@ rd2_r26_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s28_0_0:
-        DEFB 0,0,34,34
 rd2_r28_0_0:
         LD   HL,8738
         PUSH HL
@@ -1404,7 +1353,6 @@ rd2_r28_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s28_1_0:
-        DEFB 0,0,34,34
 rd2_r28_1_0:
         LD   HL,8738
         PUSH HL
@@ -1432,7 +1380,6 @@ rd2_r28_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s28_0_1:
-        DEFB 0,0,51,51
 rd2_r28_0_1:
         LD   HL,13107
         PUSH HL
@@ -1464,7 +1411,6 @@ rd2_r28_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s28_1_1:
-        DEFB 0,0,51,51
 rd2_r28_1_1:
         LD   HL,13107
         PUSH HL
@@ -1495,7 +1441,6 @@ rd2_r28_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s30_0_0:
-        DEFB 0,0,34,34
 rd2_r30_0_0:
         LD   HL,8738
         PUSH HL
@@ -1526,7 +1471,6 @@ rd2_r30_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s30_1_0:
-        DEFB 0,0,34,34
 rd2_r30_1_0:
         LD   HL,8738
         PUSH HL
@@ -1557,7 +1501,6 @@ rd2_r30_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s30_0_1:
-        DEFB 0,0,51,51
 rd2_r30_0_1:
         LD   HL,13107
         PUSH HL
@@ -1590,7 +1533,6 @@ rd2_r30_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s30_1_1:
-        DEFB 0,0,51,51
 rd2_r30_1_1:
         LD   HL,13107
         PUSH HL
@@ -1623,7 +1565,6 @@ rd2_r30_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s32_0_0:
-        DEFB 0,0,34,34
 rd2_r32_0_0:
         LD   HL,8738
         PUSH HL
@@ -1655,7 +1596,6 @@ rd2_r32_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s32_1_0:
-        DEFB 0,0,34,34
 rd2_r32_1_0:
         LD   HL,8738
         PUSH HL
@@ -1687,7 +1627,6 @@ rd2_r32_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s32_0_1:
-        DEFB 0,0,51,51
 rd2_r32_0_1:
         LD   HL,13107
         PUSH HL
@@ -1722,7 +1661,6 @@ rd2_r32_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s32_1_1:
-        DEFB 0,0,51,51
 rd2_r32_1_1:
         LD   HL,13107
         PUSH HL
@@ -1757,7 +1695,6 @@ rd2_r32_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s34_0_0:
-        DEFB 0,0,34,34
 rd2_r34_0_0:
         LD   HL,8738
         PUSH HL
@@ -1790,7 +1727,6 @@ rd2_r34_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s34_1_0:
-        DEFB 0,0,34,34
 rd2_r34_1_0:
         LD   HL,8738
         PUSH HL
@@ -1823,7 +1759,6 @@ rd2_r34_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s34_0_1:
-        DEFB 0,0,51,51
 rd2_r34_0_1:
         LD   HL,13107
         PUSH HL
@@ -1858,7 +1793,6 @@ rd2_r34_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s34_1_1:
-        DEFB 0,0,51,51
 rd2_r34_1_1:
         LD   HL,13107
         PUSH HL
@@ -1893,7 +1827,6 @@ rd2_r34_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s36_0_0:
-        DEFB 0,0,34,34
 rd2_r36_0_0:
         LD   HL,8738
         PUSH HL
@@ -1928,7 +1861,6 @@ rd2_r36_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s36_1_0:
-        DEFB 0,0,34,34
 rd2_r36_1_0:
         LD   HL,8738
         PUSH HL
@@ -1962,7 +1894,6 @@ rd2_r36_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s36_0_1:
-        DEFB 0,0,51,51
 rd2_r36_0_1:
         LD   HL,13107
         PUSH HL
@@ -2000,7 +1931,6 @@ rd2_r36_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s36_1_1:
-        DEFB 0,0,51,51
 rd2_r36_1_1:
         LD   HL,13107
         PUSH HL
@@ -2037,7 +1967,6 @@ rd2_r36_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s38_0_0:
-        DEFB 0,0,34,34
 rd2_r38_0_0:
         LD   HL,8738
         PUSH HL
@@ -2073,7 +2002,6 @@ rd2_r38_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s38_1_0:
-        DEFB 0,0,34,34
 rd2_r38_1_0:
         LD   HL,8738
         PUSH HL
@@ -2108,7 +2036,6 @@ rd2_r38_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s38_0_1:
-        DEFB 0,0,51,51
 rd2_r38_0_1:
         LD   HL,13107
         PUSH HL
@@ -2146,7 +2073,6 @@ rd2_r38_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s38_1_1:
-        DEFB 0,0,51,51
 rd2_r38_1_1:
         LD   HL,13107
         PUSH HL
@@ -2183,7 +2109,6 @@ rd2_r38_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s40_0_0:
-        DEFB 0,0,34,34
 rd2_r40_0_0:
         LD   HL,8738
         PUSH HL
@@ -2220,7 +2145,6 @@ rd2_r40_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s40_1_0:
-        DEFB 0,0,34,34
 rd2_r40_1_0:
         LD   HL,8738
         PUSH HL
@@ -2256,7 +2180,6 @@ rd2_r40_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s40_0_1:
-        DEFB 0,0,51,51
 rd2_r40_0_1:
         LD   HL,13107
         PUSH HL
@@ -2296,7 +2219,6 @@ rd2_r40_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s40_1_1:
-        DEFB 0,0,51,51
 rd2_r40_1_1:
         LD   HL,13107
         PUSH HL
@@ -2335,7 +2257,6 @@ rd2_r40_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s44_0_0:
-        DEFB 0,0,34,34
 rd2_r44_0_0:
         LD   HL,8738
         PUSH HL
@@ -2374,7 +2295,6 @@ rd2_r44_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s44_1_0:
-        DEFB 0,0,34,34
 rd2_r44_1_0:
         LD   HL,8738
         PUSH HL
@@ -2412,7 +2332,6 @@ rd2_r44_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s44_0_1:
-        DEFB 0,0,51,51
 rd2_r44_0_1:
         LD   HL,13107
         PUSH HL
@@ -2454,7 +2373,6 @@ rd2_r44_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s44_1_1:
-        DEFB 0,0,51,51
 rd2_r44_1_1:
         LD   HL,13107
         PUSH HL
@@ -2495,7 +2413,6 @@ rd2_r44_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s48_0_0:
-        DEFB 0,0,34,34
 rd2_r48_0_0:
         LD   HL,8738
         PUSH HL
@@ -2537,7 +2454,6 @@ rd2_r48_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s48_1_0:
-        DEFB 0,0,34,34
 rd2_r48_1_0:
         LD   HL,8738
         PUSH HL
@@ -2575,7 +2491,6 @@ rd2_r48_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s48_0_1:
-        DEFB 0,0,51,51
 rd2_r48_0_1:
         LD   HL,13107
         PUSH HL
@@ -2620,7 +2535,6 @@ rd2_r48_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s48_1_1:
-        DEFB 0,0,51,51
 rd2_r48_1_1:
         LD   HL,13107
         PUSH HL
@@ -2661,7 +2575,6 @@ rd2_r48_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s52_0_0:
-        DEFB 0,0,34,34
 rd2_r52_0_0:
         LD   HL,8738
         PUSH HL
@@ -2705,7 +2618,6 @@ rd2_r52_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s52_1_0:
-        DEFB 0,0,34,34
 rd2_r52_1_0:
         LD   HL,8738
         PUSH HL
@@ -2745,7 +2657,6 @@ rd2_r52_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s52_0_1:
-        DEFB 0,0,51,51
 rd2_r52_0_1:
         LD   HL,13107
         PUSH HL
@@ -2792,7 +2703,6 @@ rd2_r52_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s52_1_1:
-        DEFB 0,0,51,51
 rd2_r52_1_1:
         LD   HL,13107
         PUSH HL
@@ -2835,7 +2745,6 @@ rd2_r52_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s56_0_0:
-        DEFB 0,0,34,34
 rd2_r56_0_0:
         LD   HL,8738
         PUSH HL
@@ -2880,7 +2789,6 @@ rd2_r56_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s56_1_0:
-        DEFB 0,0,34,34
 rd2_r56_1_0:
         LD   HL,8738
         PUSH HL
@@ -2924,7 +2832,6 @@ rd2_r56_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s56_0_1:
-        DEFB 0,0,51,51
 rd2_r56_0_1:
         LD   HL,13107
         PUSH HL
@@ -2972,7 +2879,6 @@ rd2_r56_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s56_1_1:
-        DEFB 0,0,51,51
 rd2_r56_1_1:
         LD   HL,13107
         PUSH HL
@@ -3019,7 +2925,6 @@ rd2_r56_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s60_0_0:
-        DEFB 0,0,34,34,4,34,34,34
 rd2_r60_0_0:
         LD   HL,8738
         PUSH HL
@@ -3067,7 +2972,6 @@ rd2_r60_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s60_1_0:
-        DEFB 0,0,34,34,4,34,34,34
 rd2_r60_1_0:
         LD   HL,8738
         PUSH HL
@@ -3113,7 +3017,6 @@ rd2_r60_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s60_0_1:
-        DEFB 0,0,51,51,4,51,51,51
 rd2_r60_0_1:
         LD   HL,13107
         PUSH HL
@@ -3164,7 +3067,6 @@ rd2_r60_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s60_1_1:
-        DEFB 0,0,51,51,4,51,51,51
 rd2_r60_1_1:
         LD   HL,13107
         PUSH HL
@@ -3213,7 +3115,9 @@ rd2_r60_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s64_0_0:
-        DEFB 0,0,34,34,4,34,34,34,5,34,102,98
+        DEFB 34
+        LD   HL,8738
+        JP   rd2_r64_0_0 + 4
 rd2_r64_0_0:
         LD   HL,8738
         PUSH HL
@@ -3263,7 +3167,9 @@ rd2_r64_0_0:
         PUSH HL
         JP   rd2_out
 rd2_s64_1_0:
-        DEFB 0,0,34,34,4,34,34,34,5,34,102,102
+        DEFB 34
+        LD   HL,8738
+        JP   rd2_r64_1_0 + 4
 rd2_r64_1_0:
         LD   HL,8738
         PUSH HL
@@ -3311,7 +3217,9 @@ rd2_r64_1_0:
         PUSH HL
         JP   rd2_out
 rd2_s64_0_1:
-        DEFB 0,0,51,51,4,51,51,51,5,51,119,115
+        DEFB 51
+        LD   HL,13107
+        JP   rd2_r64_0_1 + 4
 rd2_r64_0_1:
         LD   HL,13107
         PUSH HL
@@ -3364,7 +3272,9 @@ rd2_r64_0_1:
         PUSH HL
         JP   rd2_out
 rd2_s64_1_1:
-        DEFB 0,0,51,51,4,51,51,51,5,51,119,119
+        DEFB 51
+        LD   HL,13107
+        JP   rd2_r64_1_1 + 4
 rd2_r64_1_1:
         LD   HL,13107
         PUSH HL
@@ -3415,7 +3325,12 @@ rd2_r64_1_1:
         PUSH HL
         JP   rd2_out
 rd2_s68_0_0:
-        DEFB 0,0,34,34,4,34,34,34,5,34,102,98,9,102,102,102
+        DEFB 34
+        LD   HL,8738
+        JP   rd2_r68_0_0 + 4
+        DEFB 34
+        LD   HL,25190
+        JP   rd2_r68_0_0 + 5
 rd2_r68_0_0:
         LD   HL,8738
         PUSH HL
@@ -3462,6 +3377,831 @@ rd2_r68_0_0:
         LD   HL,9762
         PUSH HL
         LD   HL,8738
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s68_1_0:
+        DEFB 34
+        LD   HL,8738
+        JP   rd2_r68_1_0 + 4
+        DEFB 34
+        LD   HL,26214
+        JP   rd2_r68_1_0 + 5
+rd2_r68_1_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        LD   HL,26182
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,25702
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s68_0_1:
+        DEFB 51
+        LD   HL,13107
+        JP   rd2_r68_0_1 + 4
+        DEFB 51
+        LD   HL,29559
+        JP   rd2_r68_0_1 + 5
+rd2_r68_0_1:
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        LD   HL,29559
+        PUSH HL
+        LD   HL,30583
+        PUSH HL
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,21896
+        PUSH HL
+        LD   HL,34952
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,21879
+        PUSH HL
+        LD   HL,30583
+        PUSH HL
+        PUSH HL
+        LD   HL,14131
+        PUSH HL
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s68_1_1:
+        DEFB 51
+        LD   HL,13107
+        JP   rd2_r68_1_1 + 4
+        DEFB 51
+        LD   HL,30583
+        JP   rd2_r68_1_1 + 5
+rd2_r68_1_1:
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        LD   HL,30583
+        PUSH HL
+        PUSH HL
+        LD   HL,30551
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,34184
+        PUSH HL
+        LD   HL,34904
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,30071
+        PUSH HL
+        LD   HL,30583
+        PUSH HL
+        PUSH HL
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s72_0_0:
+        DEFB 34
+        LD   HL,8738
+        JP   rd2_r72_0_0 + 4
+        DEFB 34
+        LD   HL,25190
+        JP   rd2_r72_0_0 + 5
+        DEFB 102
+        LD   HL,26214
+        JP   rd2_r72_0_0 + 9
+rd2_r72_0_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,25190
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        LD   HL,17988
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,25702
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        LD   HL,9762
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s72_1_0:
+        DEFB 34
+        LD   HL,8738
+        JP   rd2_r72_1_0 + 4
+        DEFB 34
+        LD   HL,26214
+        JP   rd2_r72_1_0 + 5
+        DEFB 102
+        LD   HL,26214
+        JP   rd2_r72_1_0 + 9
+rd2_r72_1_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s72_0_1:
+        DEFB 51
+        LD   HL,13107
+        JP   rd2_r72_0_1 + 4
+        DEFB 51
+        LD   HL,29559
+        JP   rd2_r72_0_1 + 5
+        DEFB 119
+        LD   HL,30583
+        JP   rd2_r72_0_1 + 9
+rd2_r72_0_1:
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        LD   HL,29559
+        PUSH HL
+        LD   HL,30583
+        PUSH HL
+        PUSH HL
+        LD   HL,22357
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,34184
+        PUSH HL
+        LD   HL,34952
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,30071
+        PUSH HL
+        LD   HL,30583
+        PUSH HL
+        PUSH HL
+        LD   HL,14131
+        PUSH HL
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s72_1_1:
+        DEFB 51
+        LD   HL,13107
+        JP   rd2_r72_1_1 + 4
+        DEFB 51
+        LD   HL,30583
+        JP   rd2_r72_1_1 + 5
+        DEFB 119
+        LD   HL,30583
+        JP   rd2_r72_1_1 + 9
+rd2_r72_1_1:
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        LD   HL,30583
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,34952
+        PUSH HL
+        LD   HL,34904
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,30583
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s76_0_0:
+        DEFB 34
+        LD   HL,8738
+        JP   rd2_r76_0_0 + 4
+        DEFB 34
+        LD   HL,25190
+        JP   rd2_r76_0_0 + 5
+        DEFB 102
+        LD   HL,26214
+        JP   rd2_r76_0_0 + 9
+        DEFB 102
+        LD   HL,26214
+        JP   rd2_r76_0_0 + 13
+rd2_r76_0_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,25190
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        LD   HL,17988
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,25702
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        LD   HL,9762
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s76_1_0:
+        DEFB 34
+        LD   HL,8738
+        JP   rd2_r76_1_0 + 4
+        DEFB 34
+        LD   HL,26214
+        JP   rd2_r76_1_0 + 5
+        DEFB 102
+        LD   HL,26214
+        JP   rd2_r76_1_0 + 9
+        DEFB 102
+        LD   HL,26214
+        JP   rd2_r76_1_0 + 10
+rd2_r76_1_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s76_0_1:
+        DEFB 51
+        LD   HL,13107
+        JP   rd2_r76_0_1 + 4
+        DEFB 51
+        LD   HL,29559
+        JP   rd2_r76_0_1 + 5
+        DEFB 119
+        LD   HL,30583
+        JP   rd2_r76_0_1 + 9
+        DEFB 119
+        LD   HL,30583
+        JP   rd2_r76_0_1 + 13
+rd2_r76_0_1:
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        LD   HL,29559
+        PUSH HL
+        LD   HL,30583
+        PUSH HL
+        PUSH HL
+        LD   HL,22357
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,34184
+        PUSH HL
+        LD   HL,34952
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,30071
+        PUSH HL
+        LD   HL,30583
+        PUSH HL
+        PUSH HL
+        LD   HL,14131
+        PUSH HL
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s76_1_1:
+        DEFB 51
+        LD   HL,13107
+        JP   rd2_r76_1_1 + 4
+        DEFB 51
+        LD   HL,30583
+        JP   rd2_r76_1_1 + 5
+        DEFB 119
+        LD   HL,30583
+        JP   rd2_r76_1_1 + 9
+        DEFB 119
+        LD   HL,30583
+        JP   rd2_r76_1_1 + 10
+rd2_r76_1_1:
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        LD   HL,30583
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,34952
+        PUSH HL
+        LD   HL,34904
+        PUSH HL
+        LD   HL,21845
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,30583
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,13107
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s80_0_0:
+        DEFB 34
+        LD   HL,8738
+        JP   rd2_r80_0_0 + 4
+        DEFB 34
+        LD   HL,25190
+        JP   rd2_r80_0_0 + 5
+        DEFB 102
+        LD   HL,26214
+        JP   rd2_r80_0_0 + 9
+        DEFB 102
+        LD   HL,26214
+        JP   rd2_r80_0_0 + 13
+        DEFB 102
+        LD   HL,26180
+        JP   rd2_r80_0_0 + 14
+rd2_r80_0_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,25190
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        LD   HL,26180
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,9762
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        JP   rd2_out
+rd2_s80_1_0:
+        DEFB 34
+        LD   HL,8738
+        JP   rd2_r80_1_0 + 4
+        DEFB 34
+        LD   HL,26214
+        JP   rd2_r80_1_0 + 5
+        DEFB 102
+        LD   HL,26214
+        JP   rd2_r80_1_0 + 9
+        DEFB 102
+        LD   HL,26214
+        JP   rd2_r80_1_0 + 10
+        DEFB 102
+        LD   HL,17988
+        JP   rd2_r80_1_0 + 11
+rd2_r80_1_0:
+        LD   HL,8738
+        PUSH HL
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,17988
+        PUSH HL
+        LD   HL,17476
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,17508
+        PUSH HL
+        LD   HL,26214
+        PUSH HL
+        PUSH HL
+        PUSH HL
+        LD   HL,8738
+        PUSH HL
         PUSH HL
         PUSH HL
         JP   rd2_out

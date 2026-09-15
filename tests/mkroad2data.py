@@ -149,8 +149,11 @@ def simulate(poses):
                 dst[row + f:row + 128] = bytes([grass]) * (128 - f)
             phase = (c + w + M + 1) & 1
             r = run(w, k, lw, phase, p)
-            if odd:                             # the PUSH that would have
-                dst[row + 127] = r[skip - 1][0]         # covered it went
+            if skip:                        # what the last skipped PUSH
+                dst[row + 127] = r[skip - 1][0]         # would have put at
+                                        # the screen's own right hand edge.
+                                        # Unconditional: where it was not
+                                        # wanted the run covers it again
             a = row + sp
             for lo, hi in r[skip:]:
                 a -= 2
@@ -198,36 +201,42 @@ def cost():
     return push, 95 * (44 + 42 + 44 + 22)
 
 
-LOWBANK = 5000                  # how much of the run bank fits below the
+LOWBANK = 5500                  # how much of the run bank fits below the
                                 # screens, once the code and tables have
                                 # had their share; the rest goes above
 
 
 def emit_runs(ws, kw, lw):
-    """The compiled runs, their skip tables, and the two index tables.
+    """The compiled runs, the stubs that enter them part way, and the
+    two index tables.
 
     A run is the whole window - grass margin, road, grass margin - one
     PUSH per four pixels of it, with the value reloaded only where it
-    changes. The skip table is what lets it be entered part way: a run
-    is a mix of one-byte PUSHes and four-byte LD HL,nn / PUSH pairs, so
-    "skip n PUSHes" is not arithmetic, it is a lookup. Beside each
-    offset are two more things the entry needs: the low byte of the
-    PUSH that was stepped over, for the odd byte at the screen's edge
-    that it would have covered, and the value it would have left in HL
-    - because a run reloads HL only where the colour changes, so an
-    entry part way in can land on a PUSH whose LD went with the part
-    that was skipped.
+    changes. Entering one part way in is not arithmetic: it is a mix of
+    one-byte PUSHes and four-byte LD HL,nn / PUSH pairs, and the PUSH
+    that `skip` lands on may be one whose LD went with the part that
+    was skipped. So each run carries a stub per skip, seven bytes:
+
+        DEFB  the byte the last skipped PUSH would have put at the
+              screen's own right hand edge
+        LD    HL,what it would have left there
+        JP    into the run
+
+    which is one lookup and a JP (HL) at run time, and no offset
+    arithmetic at all. The odd byte is stored unconditionally, because
+    where it was not wanted the run's own first PUSH covers it.
+
+    Skipping nothing needs no stub: a run starts by loading HL itself.
     """
-    body, hi, runs, skips, n, split = [], [], [], [], 0, False
+    chunks, runs, stubs, n = [], [], [], 0
     for w in ws:
         for par in (0, 1):
             for ph in (0, 1):
-                if n > LOWBANK:
-                    split = True
-                out = hi if split else body
+                out = []
                 nm = "rd2_r%d_%d_%d" % (w, ph, par)
+                sm = "rd2_s%d_%d_%d" % (w, ph, par)
                 runs.append(nm)
-                skips.append("rd2_s%d_%d_%d" % (w, ph, par))
+                stubs.append(sm)
                 r = run(w, kw[w], lw[w], ph, par)
                 off, last, pos = [], None, 0
                 for a, b in r:
@@ -237,11 +246,12 @@ def emit_runs(ws, kw, lw):
                         last = (a, b)
                     else:
                         pos += 1
-                tab = []
-                for sk in range(maxskip(w) + 1):
-                    tab += [off[sk], r[sk - 1][0] if sk else 0,
-                            r[sk][0], r[sk][1]]
-                out.append("rd2_s%d_%d_%d:\n" % (w, ph, par) + defb(tab, 16))
+                out.append(sm + ":")
+                for sk in range(1, maxskip(w) + 1):
+                    out.append("        DEFB %d" % r[sk - 1][0])
+                    out.append("        LD   HL,%d"
+                               % ((r[sk][1] << 8) | r[sk][0]))
+                    out.append("        JP   %s + %d" % (nm, off[sk]))
                 out.append(nm + ":")
                 last = None
                 for a, b in r:
@@ -250,8 +260,10 @@ def emit_runs(ws, kw, lw):
                         last = (a, b)
                     out.append("        PUSH HL")
                 out.append("        JP   rd2_out")
-                n += pos + 3 + len(tab)
-    return body, hi, runs, skips, n
+                size = pos + 3 + 7 * maxskip(w)
+                chunks.append((size, "\n".join(out)))
+                n += size
+    return chunks, runs, stubs, n
 
 
 def emit(path):
@@ -263,7 +275,7 @@ def emit(path):
         w = A.WTAB[y]
         rec += [A.ZTAB[y] & 255, A.ZTAB[y] >> 8, w + M + 1, wix[w] * 4,
                 255, 255]
-    body, hibody, runs, skips, nrun = emit_runs(ws, kw, lw)
+    chunks, runs, stubs, nrun = emit_runs(ws, kw, lw)
     pal = [0] * 16
     for i, c in ((A.SKY0, (0, 0, 4)), (A.SKY1, (0, 2, 6)), (A.SKY2, (2, 4, 6)),
                  (A.SKY3, (4, 6, 6)), (A.GRASS0, (0, 4, 0)),
@@ -276,6 +288,25 @@ def emit(path):
         return "\n".join("        DEFW " + ",".join(names[k:k + 2])
                           for k in range(i, len(names), 4))
 
+    def fill(space):
+        """Runs to sit in what an index table leaves of its own page.
+
+        Four tables of four bytes a width, each wanting a page of its
+        own so that the parity can be the page and the width the offset
+        - which is four hundred odd bytes of padding if nothing goes in
+        behind them, and the bank is tight enough to want them.
+        """
+        out = []
+        while True:
+            for i, (size, text) in enumerate(chunks):
+                if size <= space:
+                    out.append(text)
+                    space -= size
+                    chunks.pop(i)
+                    break
+            else:
+                return "\n".join(out)
+
     parts = ["; Generated by tests/mkroad2data.py - do not edit by hand.",
              "\nRD2_HZ:         EQU %d" % A.HZ,
              "RD2_ROWS:       EQU %d          ; scanlines of road"
@@ -287,21 +318,31 @@ def emit(path):
     for nm, v in (("GRASS", A.GRASS0), ("TARMAC", A.TARMAC0),
                   ("KERB", A.KERB0), ("LINE", A.LINE)):
         parts.append("RD2_%-11s EQU 0x%02X%02X" % (nm + ":", v * 17, v * 17))
+    gap = 256 - 4 * len(ws)
     parts += ["\n        ALIGN 256\nrd2_trk:\n" + defw(A.TRACK),
               "\nrd2_pal:\n" + defb(pal),
               "\nrd2_sky:\n" + defb([c * 17 for c in A.SKY]),
-              "\n        ALIGN 256\nrd2_rec:\n" + defb(rec, 6),
               "\n        ALIGN 256\nrd2_rt0:\n" + page(runs, 0),
+              fill(gap),
               "\n        ALIGN 256\nrd2_rt1:\n" + page(runs, 2),
-              "\n        ALIGN 256\nrd2_st0:\n" + page(skips, 0),
-              "\n        ALIGN 256\nrd2_st1:\n" + page(skips, 2),
-              "\n" + "\n".join(body)]
+              fill(gap),
+              "\n        ALIGN 256\nrd2_st0:\n" + page(stubs, 0),
+              fill(gap),
+              "\n        ALIGN 256\nrd2_st1:\n" + page(stubs, 2),
+              fill(gap),
+              "\nrd2_rec:\n" + defb(rec, 6)]
+    low = 0
+    while chunks and low < LOWBANK:
+        size, text = chunks.pop(0)
+        parts.append(text)
+        low += size
+    hibody = [text for _, text in chunks]
     open(path, "w").write("\n".join(parts) + "\n")
     open(path.replace(".z80s", "hi.z80s"), "w").write(
         "; Generated by tests/mkroad2data.py - do not edit by hand.\n"
         "; The rest of the run bank, for above the screen buffers.\n"
         + "\n".join(hibody) + "\n")
-    print("  %-44s %d widths, %d bytes of run and skip table"
+    print("  %-44s %d widths, %d bytes of run and stub"
           % ("wrote " + os.path.basename(path), len(ws), nrun))
 
 
