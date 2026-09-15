@@ -345,9 +345,14 @@ class Bench:
 
 
 class Box:
-    """A bare rectangle of background - what an erase has to put back."""
+    """A bare rectangle of background - what an erase has to put back.
+
+    Rounded out to a whole pair, because a PUSH writes two bytes; the
+    extra byte is backdrop over backdrop and costs nothing but itself.
+    """
 
     def __init__(self, wb, h):
+        wb += wb & 1
         self.wb = wb
         self.wpx = wb * 2
         self.hpx = h

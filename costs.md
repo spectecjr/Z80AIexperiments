@@ -114,6 +114,24 @@ every fourth row:
 
 See `mipsprite.md`.
 
+And the other way round — six variants on a z-bucket, nothing scaled per
+sprite, so every variant is one straight-line block with no row program
+and no dispatcher (`mipsprite.md` §6):
+
+| z | size | a frame, with the L it leaves | % of a 50 Hz frame | how many fit |
+|---|---|---|---|---|
+| 0 | 64x80 | 28,475 | 23.7% | 4.2 |
+| 2 | 28x35 | 7,397 | 6.2% | 16.2 |
+| 5 | 8x10 | 1,428 | 1.2% | 84.0 |
+| | fifteen, spread over the six | 87,192 | 72.7% | |
+
+| | |
+|---|---|
+| six variants compiled, against the seven-level chain | **7,867 bytes** against 9,001 |
+| a bucket crossing, shrinking: the ring, in both buffers | 1.5 to 1.7x a steady frame |
+| the same crossing as a padded form instead | −1,000 T-states for 222 bytes at the bottom, −1,871 for 3,373 at the top |
+| smooth height on bucket 0 alone (dispatch, opaque) | +6,698 T-states and +414 bytes |
+
 ## 2. The rasteriser (`renderlit`), before and after
 
 Measured by timing `rndl_six` on one quad of a known size.

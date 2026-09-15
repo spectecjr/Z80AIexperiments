@@ -62,7 +62,8 @@ So the sprite grows smoothly in y and steps in x, one level at a time. The
 steps between levels are 1.33x and 1.5x, which is **an aspect error of up
 to 16% at the 1.33 steps and 22% at the 1.5 ones** if the height is taken
 as exact. Halving that means doubling the
-number of widths, and §6 is what that costs in memory.
+number of widths, and §7 is what that costs in memory. §6 is the
+other answer: six variants and no scaling at all.
 
 ## 2. The sprite is code, and the code is `PUSH`
 
@@ -209,7 +210,137 @@ A scene with a depth range in it, which is what a chain is for:
 Raw T-states throughout: SAM screen contention is on top of all of it, as
 everywhere else in this repo.
 
-## 6. Memory, which is the real limit
+## 6. Six variants on a z-bucket, and nothing scaled at all
+
+The other way round from §1: quantise the size completely. Six variants
+exist, geometric over the same 8:1 range, each sprite is snapped to
+whichever bucket its z falls in, and nothing is scaled per instance. That
+is `demo-ideas.md` §11's "two or three sizes rather than continuously",
+taken as far as it goes.
+
+**It removes three things at once.** Every variant is one straight-line
+block, so the row program and the dispatcher are gone — the 89 T-states a
+row of §3, everywhere. The per-sprite height decision goes with them. And
+it is *smaller*: six opaque variants are **7,867 bytes against 9,001** for
+the seven-level chain in the same shape, because six boxes are fewer than
+seven and there is no program.
+
+| z | size | box | T-states | a byte | % of a 50 Hz frame | code |
+|---|---|---|---|---|---|---|
+| 0 | 64x80 | 2,560 | 22,489 | 8.8 | 18.7% | 3,384 |
+| 1 | 44x55 | 1,210 | 11,837 | 9.8 | 9.9% | 1,904 |
+| 2 | 28x35 | 490 | 5,341 | 10.9 | 4.5% | 890 |
+| 3 | 20x25 | 250 | 2,979 | 11.9 | 2.5% | 501 |
+| 4 | 12x15 | 90 | 1,373 | 15.3 | 1.1% | 247 |
+| 5 | 8x10 | 40 | 799 | 20.0 | 0.7% | 151 |
+
+With the L a moving sprite leaves — motion scaled with the bucket, four
+bytes and eight rows a frame at the top — that is the steady state:
+
+| z | size | draw | the L | a frame | % | how many fit |
+|---|---|---|---|---|---|---|
+| 0 | 64x80 | 22,489 | 5,986 | **28,475** | 23.7% | 4.2 |
+| 1 | 44x55 | 11,837 | 4,003 | 15,840 | 13.2% | 7.6 |
+| 2 | 28x35 | 5,341 | 2,056 | 7,397 | 6.2% | 16.2 |
+| 3 | 20x25 | 2,979 | 1,402 | 4,381 | 3.7% | 27.4 |
+| 4 | 12x15 | 1,373 | 934 | 2,307 | 1.9% | 52.0 |
+| 5 | 8x10 | 799 | 629 | **1,428** | 1.2% | 84.0 |
+
+Fifteen of them spread 1/1/2/3/4/4 over the six buckets is **87,192
+T-states, 73% of the frame**.
+
+### What a sprite costs before it draws anything
+
+Four steps, none of them the drawing:
+
+1. **z to bucket.** A 256-byte table indexed by the high byte of z is
+   three instructions. But a sprite sitting on a boundary would change
+   size every frame, so the bucket needs **hysteresis**: keep it per
+   sprite, and compare z against two boundaries — the one that grows and
+   the one that shrinks, a few percent apart in z. *~40 T-states,
+   reasoned.*
+2. **Anchor.** The box is centred on the sprite's point, so its top left
+   is the point less a half width in bytes and a half height in rows, both
+   per-bucket constants. Nothing else keeps the sprite still when the
+   bucket changes.
+3. **Screen address.** A MODE 4 line is 128 bytes, so `row*128 + col` is a
+   rotate and not a multiply. *~40 T-states, reasoned.*
+4. **Dispatch.** A six-entry jump table, or a self-modified `JP`. *~30
+   T-states, reasoned.*
+
+About 110 T-states of bookkeeping, which is 0.5% of bucket 0 and **14% of
+bucket 5**. At the small end the sprite costs less than deciding what it is.
+
+### The boundary is not free in either direction
+
+**Growing costs nothing.** The bigger box lands on top of the smaller one
+and swallows it.
+
+**Shrinking leaves a ring** — the old box minus the new one — and with two
+buffers it has to be cleared in both, so it is paid on the crossing frame
+*and the one after it*:
+
+| boundary | ring | clearing it | ring + draw | of steady |
+|---|---|---|---|---|
+| 64x80 → 44x55 | 1,350 bytes | 12,691 | 24,528 | 1.5x |
+| 44x55 → 28x35 | 720 | 7,186 | 12,527 | 1.7x |
+| 28x35 → 20x25 | 240 | 3,516 | 6,495 | 1.5x |
+| 20x25 → 12x15 | 160 | 2,448 | 3,821 | 1.7x |
+| 12x15 → 8x10 | 50 | 1,504 | 2,303 | 1.6x |
+
+**A crossing frame costs about 1.6x a steady one**, in both buffers, and
+four thin rectangles is why: 12,691 T-states to put back 1,350 bytes is
+9.4 a byte, because a five-byte-wide column 55 rows tall pays the row step
+55 times for two `PUSH`es.
+
+**The cheaper crossing is a padded form**: compile the smaller picture
+*inside the box it is leaving*, and draw that for the two frames. There is
+then no ring at all, because the box never shrinks until both buffers have
+been through it:
+
+| boundary | ring + draw | padded | saved | the extra form |
+|---|---|---|---|---|
+| 64x80 → 44x55 | 24,528 | 22,657 | 1,871 | 3,373 bytes |
+| 44x55 → 28x35 | 12,527 | 11,391 | 1,136 | 1,735 |
+| 28x35 → 20x25 | 6,495 | 5,115 | 1,380 | 806 |
+| 20x25 → 12x15 | 3,821 | 2,887 | 934 | 467 |
+| 12x15 → 8x10 | 2,303 | 1,303 | **1,000** | **222** |
+
+At the top of the chain 1,871 T-states for 3,373 bytes is not a trade
+worth making; at the bottom, 1,000 for 222 is, and the bottom is where the
+sprites are many. **Pad the last two or three boundaries and clear the ring
+at the first two** — 1,495 bytes for most of the saving.
+
+### What it costs to look at
+
+Six variants over 8:1 is **a step of 1.5x** — the sprite's width jumps by
+half again at every boundary, 20 pixels at once at the top. There is no
+hiding that on a sprite crossing the middle of the screen; `chequer6`'s
+pilot would look like it had been swapped for a different pilot.
+
+Three things make it liveable, in order of how much they cost:
+
+- **Put the buckets where the eye is not.** A step is relative, so
+  geometric spacing is right for perception, but the *absolute* jump is
+  what a viewer catches: 1.5x of 64 pixels is 20 and 1.5x of 8 is 4. Buy
+  the near end more buckets at the far end's expense — 32, 26, 20, 14, 8,
+  4 bytes is 1.23x at the top and 2x at the bottom, and the bottom happens
+  where the sprite is 8 pixels wide and moving fastest in z.
+- **Cross where the sprite is busy.** The crossing is invisible if it
+  happens while the sprite is turning, firing or behind something, and
+  the bucket boundaries are yours to place in z.
+- **Keep the row program for bucket 0 alone.** Measured on the same
+  opaque box: `dispatch` is **29,187 T-states and 3,798 bytes** (3,636 of
+  code and 162 of program) against `whole`'s **22,489 and 3,384**. So
+  smooth height on the nearest sprite costs **6,698 T-states — 5.6% of the
+  frame — and 414 bytes**, and buys all 71 heights where whole buys one.
+  The nearest sprite then grows smoothly and everything behind it pops.
+  That is the hybrid worth building: one sprite is what the eye tracks,
+  and the other fourteen are not. (The window is every row in the dispatch
+  figure and every fourth in the whole one — §2 — because a shared
+  dispatcher has nowhere to put the choice.)
+
+## 7. Memory, which is the real limit
 
 | | bytes |
 |---|---|
@@ -241,7 +372,7 @@ it does mean the 5,290 can be thrown away afterwards and the generator can
 be `chequer`'s: 1.5 million T-states once, for something that is then free
 every frame.
 
-## 7. Where the pictures come from
+## 8. Where the pictures come from
 
 `tests/mipsprite.py` builds the master, downscales it, packs it and rounds
 the silhouette; `tests/test_mipsprite.py` turns the result into Z80 machine
@@ -258,7 +389,7 @@ going in Python.
     python3 tests/mipsprite.py art.png      # look at the chain, 4x
     python3 tests/test_mipsprite.py         # verify and time every level
 
-## 8. What this does not do
+## 9. What this does not do
 
 - **It cannot clip.** A compiled sprite writes fixed offsets from `SP`; a
   sprite half off the left edge would wrap into the row above. The cheap
@@ -269,13 +400,14 @@ going in Python.
 - **It cannot recolour.** Every value is an immediate in the code. A
   palette flip is free on a SAM and costs nothing here, but a per-sprite
   tint is a second chain.
-- **The x position quantises to two pixels** without a second phase (§6).
-- **The aspect is quantised to the chain**, ±14% at seven widths (§1).
+- **The x position quantises to two pixels** without a second phase (§7).
+- **The aspect is quantised to the chain**, 16 to 22% at seven widths
+  (§1), and the size itself is on six buckets if §6 is taken instead.
 - **The interrupt latency is 187 µs** at a window every fourth row, which
   is fine for a frame interrupt and not fine for a line interrupt in the
   middle of the sprite. Every row brings it to 47 µs for 7.9%.
 
-## 9. What was tried and dropped
+## 10. What was tried and dropped
 
 | | measured | |
 |---|---|---|

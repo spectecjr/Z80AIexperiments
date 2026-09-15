@@ -184,6 +184,9 @@ def runs(cov, by):
 
 class Level:
     def __init__(self, master, wb):
+        # A PUSH writes a pair, so a run that covers a whole row has to
+        # be an even number of bytes long or it spills into the backdrop.
+        assert wb % 2 == 0, "a level's box must be an even number of bytes"
         self.wb = wb
         self.wpx = wb * 2
         self.hpx = nominal(wb)
@@ -207,6 +210,25 @@ class Level:
         other.area = self.wb * self.hpx
         return other
 
+    def padded(self, wb, h):
+        """This level's picture, opaque, centred in a bigger box.
+
+        What a sprite draws on the frame it drops a bucket: the box it
+        is leaving, with the smaller picture inside it, so the ring
+        between the two never has to be cleared separately.
+        """
+        assert wb % 2 == 0 and wb >= self.wb and h >= self.hpx
+        dx, dy = (wb * 2 - self.wpx) // 2, (h - self.hpx) // 2
+        px = blank(wb * 2, h)
+        for y, line in enumerate(self.px):
+            px[y + dy][dx:dx + self.wpx] = line
+        other = object.__new__(Level)
+        other.wb, other.wpx, other.hpx, other.px = wb, wb * 2, h, px
+        other.rows = pack(px, wb)
+        other.runs = [runs(c, b) for b, c in other.rows]
+        other.area = sum(e - s for r in other.runs for s, e in r)
+        return other.opaque()
+
     def pairs(self):
         """Every PUSH value the level holds, as (row, value)."""
         out = []
@@ -217,9 +239,14 @@ class Level:
         return out
 
 
-def chain(master=None):
+# six variants instead of a chain: geometric over the same 8:1 range, so
+# a sprite is snapped to the nearest and never scaled per instance.
+BUCKETS = [32, 22, 14, 10, 6, 4]
+
+
+def chain(master=None, widths=None):
     master = master or gunship()
-    return [Level(master, wb) for wb in LEVELS]
+    return [Level(master, wb) for wb in (widths or LEVELS)]
 
 
 # ------------------------------------------------------------------ report
