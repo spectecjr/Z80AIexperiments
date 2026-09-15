@@ -1,13 +1,15 @@
 # road2.z80s — design notes
 
-**The same road as `road.z80s`, with the palette nailed down, at 50 Hz.**
-91,051 T-states a frame — **76% of a 50 Hz frame, worst frame included** —
+**The same road as `road.z80s`, with the palette nailed down, at 50 Hz, and
+wider than the screen.**
+113,313 T-states a frame — **94% of a 50 Hz frame, worst frame included** —
 against `road.z80s`'s 172,141 at 25 Hz.
 
-The camera is flatter than `road.z80s`'s: the horizon is at row 111, so the
-road has the bottom **42%** of the screen, it is **8 pixels across where it
-meets the horizon and 180 at the bottom** — 70% of the screen's width — and
-its edges spread at 62° rather than 33°.
+The camera is flatter than `road.z80s`'s and the road much wider: the
+horizon is at row 111, so the road has the bottom **42%** of the screen; it
+is **8 pixels across where it meets the horizon and 304 at the bottom**,
+which is **118% of the screen**, so it runs off both edges down there. The
+centre steers sixty pixels either side of the middle.
 
 Bit-exact against `tests/road2.py` over 198 frames of a ride. Not a list of
 poses: a frame here depends on the two before it, so the test drives a whole
@@ -16,15 +18,14 @@ routine has to land on however little of it it chose to touch.
 
 | | T-states a frame |
 |---|---|
-| the compiled runs — the road itself | 21,625 |
-| dispatch and the row loop | 15,390 |
-| grass | 4,180 |
-| the bands moving on | 0 to 9,000 |
-| the geometry, 80 rows | the rest |
-| **`rd2_frame`** | **min 86,674, mean 91,051, max 94,829** |
+| the compiled runs — the road itself | 50,059 |
+| the fills — stale bands and the spill | 14,217 |
+| the geometry — the curvature and the two integrations | 5,106 |
+| the row loop and the dispatch, 80 rows | 43,931 |
+| **`rd2_frame`** | **min 106,089, mean 113,313, max 118,282** |
 
-(The first three are derived from the counts, not measured separately; only
-the totals are measurements.)
+(The four are differences between measurements of the whole routine with
+each piece disabled, not estimates; they sum to the mean.)
 
 ## Why the palette had to go
 
@@ -38,9 +39,7 @@ with its entry and exit is ~150 T-states; over 192 lines that is **28,800 a
 frame**, a quarter of a 50 Hz one. What it buys is only the grass stripes —
 the other three are *on the road*, which is repainted every frame anyway, so
 in pixels they cost a different colour constant and nothing else. And the
-grass is worth 14,300 at most. Break-even needs 63% of rows flipping band
-per frame, which is a speed at which the bands have already aliased into
-mush.
+grass is worth 11,762, measured (below).
 
 **And it cannot be had at all.** The 5.5 T-states a byte comes from `SP`
 pointing at the screen. An interrupt pushes `PC` — into the middle of the
@@ -57,34 +56,63 @@ A row's road is **one interval**, which is what makes this work on a road and
 not on a chequerboard. The window is the road plus a margin either side, and
 everything outside it is already right.
 
-That is about **twenty `PUSH`es a row rather than sixty-four**, and it needs
-no record of where the road was — which is the part worth keeping. Because
-the window moves *with* the road, the geometry of a row relative to its own
-window never changes: **every entry in the tables is a constant**, and the
-only runtime value a whole row needs is where to put `SP`.
+It needs no record of where the road was, which is the part worth keeping:
+because the window moves *with* the road, the geometry of a row relative to
+its own window never changes, so **every entry in the tables is a constant**
+and the only runtime value a whole row needs is where to put `SP`.
 
 **The margin is not slack, it is a speed limit.** It has to cover what the
 road moves in the *two* frames a buffer waits its turn — 8 pixels at 20
 world units a frame, which is exactly `M`. At 30 it wants 11, at 40 it wants
 14. Get this wrong and the road leaves a trail.
 
-## One compiled run a row
+## One compiled run a row, and both its ends off the screen
 
 A row's road has a shape fixed by the row — the kerbs are `w/6`, the centre
 line `w/10` — and only its *position* moves. So it compiles once and `SP`
 places it: `chequer3`'s trick with the road's edges in place of the phase.
+At 118% of the screen, though, the window is wider than the row, and a
+`PUSH` run cannot be started late or stopped early. The two ends want
+different answers:
 
-A row is then **three dispatches**: grass in from the right, the run, grass
-out to the left. The run is one byte a `PUSH` where the colour holds and
-four where it changes, which is at six places and nowhere else, so a wide
-road is mostly `PUSH HL` at 11 T-states.
+**The right hand end is entered past.** A run is a mix of one-byte `PUSH
+HL`es and four-byte `LD HL,nn / PUSH` pairs, so "skip *n* `PUSH`es" is not
+arithmetic — it is a lookup. Each run carries a **stub** per skip, seven
+bytes:
 
-The bank is indexed by (half width, phase, band parity). 62 widths cover 95
-rows because consecutive rows share one; **phase is one pixel**, because
-`SP` is a byte address and places the road to two pixels on its own; parity
-doubles it, because the solid colours could come from registers but the
-baked boundary bytes could not. 248 runs, 9,367 bytes, split across the two
-blocks either side of the screen buffers the way `chequer3`'s bank is.
+    DEFB  the byte the last skipped PUSH would have put at the screen's
+          own right hand edge
+    LD    HL,what it would have left there
+    JP    into the run
+
+so a row is one lookup and a `JP (HL)`. The `LD HL` is the part that is easy
+to miss: a run reloads `HL` only where the colour changes, so an entry part
+way in can land on a `PUSH` whose `LD` went with the part that was skipped.
+Skipping nothing — most rows — needs no stub at all, because a run starts by
+loading `HL` itself. The odd byte is stored unconditionally, because where
+it was not wanted the run's own first `PUSH` covers it again.
+
+**The left hand end just spills.** `SP` carries on into the previous row,
+which is the next one drawn — and lands at *its* right hand end, which its
+own window may not reach. So a row puts grass back from there to the
+screen's edge before drawing, through the same uniform `PUSH` block a stale
+band uses, which unlike the road's run *can* be entered part way in by
+arithmetic. That repair is the whole cost of the spill: **3,586 T-states in
+the worst frame** of the ride, nothing at all when the road is on screen,
+and it never reaches the sky — a row only spills once it is wider than the
+rails, which is forty rows below the horizon.
+
+The bank is indexed by (half width, phase, band parity). 38 widths cover 80
+rows, because the width is quantised — finely where the road is narrow and
+the runs are short, coarsely where it is wide and they are not, so what
+changes is the tread of the staircase and not its angle. **Phase is one
+pixel**, because `SP` is a byte address and places the road to two pixels on
+its own; parity doubles it, because the solid colours could come from
+registers but the baked boundary bytes could not. 152 runs and their stubs
+are **13,321 bytes**, which is most of the 15,800 either side of the screen
+buffers — so the four index tables, which want a page each so that the
+parity can be the page and the width the offset, have runs packed in behind
+them rather than padding.
 
 ## Which is why the markings survive
 
@@ -111,13 +139,15 @@ A row whose band parity has flipped since **this buffer** last had it needs
 its full width back before the road goes over it. How often that happens is
 the band period, and it decided the routine:
 
-| bands | flips | `rd2_frame` | |
+| bands | flips | `rd2_frame` then | |
 |---|---|---|---|
-| 256 world units | one row in six a frame | 121,063 | misses 50 Hz |
-| **512 world units** | **one in twelve** | **108,986** | **and the worst frame fits** |
+| 256 world units | one row in six a frame | 121,063 | missed 50 Hz |
+| **512 world units** | **one in twelve** | **108,986** | **and the worst frame fit** |
 
-12,077 T-states, and the spread between best and worst frame with it. The
-longer bands also read more like Out Run's, so this one cost nothing at all.
+12,077 T-states, and the spread between best and worst frame with it. Those
+two numbers are from when the road was narrower and the dispatch three times
+dearer; what has not changed is which way the constant goes. The longer
+bands also read more like Out Run's, so this one cost nothing at all.
 
 ## Invariants
 
@@ -126,36 +156,42 @@ longer bands also read more like Out Run's, so this one cost nothing at all.
   road is a row's worth of `dx` out of place — about a pixel at the far end,
   which is one phase, which is the wrong run.
 - The margin must exceed the **two**-frame movement, not the one-frame.
-- `A` carries the left hand grass entry through the whole run — nothing
-  between `rd2_road` and `rd2_out` may touch it, and the compiled runs
-  use only `HL`.
-- `BC` is the grass pair for the whole row, both ends of it.
-- Rows are drawn bottom upwards, because that is the order the bend
-  integrates in.
-- The record is 14 bytes and the row loop `POP`s exactly 14. It reads them
+- Rows are drawn **bottom upwards**, because that is the order the bend
+  integrates in — and because that is what makes the left hand spill
+  repairable: it lands in the row that is drawn next.
+- `C` is the band's parity for the whole row: it is the page of both index
+  tables and the colour of a fill. The fill uses `DE` for the grass and
+  hands `E` back afterwards, because `E` is the run's index.
+- The record is 6 bytes and the row loop `POP`s exactly 6. It reads them
   where each is wanted rather than all at once, which is the only reason
   `SP` can be the record pointer and then the screen.
+- `tests/harness_rd2.asm` asserts both blocks — under `0x2000` and clear of
+  the stack at the top. The bank grew into the bench's own stack once, and
+  what that looks like is a run jumping into the return address.
 
 ## What is left
 
-**The geometry is now the routine.** ~63,000 of 109,000, and none of it is
-`PUSH`: it is the record, the clamp, the curvature lookup, the two
-integrations and the phase, 95 times. The drawing that used to be the whole
-problem is 46,000.
+All measured, none applied:
 
-Measured or costed, and none of them needed yet:
+- **Drop the mown stripes** — one grass colour, and a band that moves on
+  under a row no longer makes its grass stale, so the full-width repaints go
+  and the mark in each record with them. **11,762 T-states**, 101,551 a
+  frame, and 9,400 of the 12,193 spread between best and worst frame:
+  verified bit-exact against a model with the same change. It is the whole
+  of what the copper was ever going to buy, for nothing.
+- **Paired far rows** — ~11,000 by estimate, not measurement: two rows a
+  geometry step above the middle of the road, at the cost of two-row stairs
+  on the far road edges. Everything the pair needs is already shared; what
+  is not is `SP`.
+- **The row loop's memory parks** — ~6,000. Six bytes round-trip through
+  memory at 13 T-states each way because nothing is free to hold them; a
+  second look at the register allocation should pay for one or two.
+- **A margin per row** — ~1,000, and free: the margin is baked per row
+  already, and the far rows do not need eight pixels of it.
 
-- **Drop the grass stripes** — ~5,500, and more usefully the entire 9,000
-  spread between best and worst frame. The cost is flat after it.
-- **A margin per row** — ~2,000, and free: the far rows move 8 pixels and
-  the near ones barely move, and the margin is baked per row already.
-- **The geometry's register parks** — ~3,000. Six values round-trip through
-  memory at 13 T-states each way.
-- **Paired far rows** — ~8,000, at the cost of two-row stairs on the far
-  road edges.
-
-And the thing this still has not got: **a bike**. There are 11,000 T-states
-inside 50 Hz for one, or 131,000 if it drops to 25.
+And the thing this still has not got: **a bike**. There are 6,700 T-states
+inside 50 Hz for one as it stands, 18,000 with the stripes dropped, and
+125,000 if it drops to 25.
 
     python3 tests/mkroad2data.py    # regenerate, and self-check the procedure
     python3 tests/test_road2.py     # verify against the model and time

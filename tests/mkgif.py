@@ -924,13 +924,15 @@ def road(outdir, seconds=8):
 
 
 def road2(outdir, seconds=8):
-    """road2 at its measured rate: 91,051 T-states a frame, 50 Hz.
+    """road2 at its measured rate: 113,313 T-states a frame, 50 Hz.
 
-    The same road as demo/road.gif with the palette nailed down: no
+    The same road as demo/road.gif with the palette nailed down - no
     CLUT writes at all, so the bands, the kerb's red and white and the
-    dashes are drawn rather than flipped, and what pays for drawing
-    them is that only what moved gets repainted. Compare road.gif,
-    which is the same road at 25 Hz with a copper it cannot have.
+    dashes are drawn rather than flipped - on a flatter camera, and 118%
+    of the screen wide at the bottom, which is a road that runs off both
+    edges. What pays for drawing it is that only what moved gets
+    repainted. Compare road.gif, which is the same road at 25 Hz with a
+    copper it cannot have.
     """
     import math
     import road2 as R

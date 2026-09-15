@@ -15,20 +15,18 @@
 ;
 ; So the palette is fixed and all of it is drawn. Two things pay:
 ;
-; ONLY WHAT MOVED IS REPAINTED. A row's road is one interval, and at
-; 50 Hz the worst any row's centre moves in a frame is two pixels, so
-; the window is the road plus a fixed margin either side - about twenty
-; PUSHes a row rather than sixty-four. No record of where it was is
-; needed, which also means every entry below is a constant: the window
-; moves with the road, so what the row does never depends on where the
-; road actually is. Only SP does.
+; ONLY WHAT MOVED IS REPAINTED. A row's road is one interval, so the
+; window is the road plus a fixed margin either side - which has to
+; cover what it moves in the *two* frames a buffer waits its turn. No
+; record of where it was is needed, which also means every entry below
+; is a constant: the window moves with the road, so what the row does
+; never depends on where the road actually is. Only SP does.
 ;
 ; ONE COMPILED RUN A ROW. A row's road has a shape fixed by the row and
 ; only its position moves, so it compiles once and SP places it - which
 ; is chequer3's trick with the road's edges in place of the phase. Both
 ; kerbs, their inner edges and the centre line all ride inside the run,
-; baked to the pixel, so a row is three dispatches: grass in from the
-; right, the run, grass out to the left.
+; baked to the pixel, so a row is one dispatch.
 ;
 ; WHICH IS ALSO WHY THE MARKINGS SURVIVE. road.z80s drops a kerb or a
 ; centre line below four pixels, because two boundaries inside one PUSH
@@ -36,17 +34,28 @@
 ; A baked run has no such table: a one pixel line is a nibble in a
 ; PUSHed constant. The kerbs keep their red and white to the horizon.
 ;
+; AND THE ROAD IS WIDER THAN THE SCREEN - 118% of it at the bottom - so
+; both ends of that run are off the row, and they want opposite
+; answers. A PUSH run cannot be started late, so the right hand end is
+; entered through a STUB: seven bytes a skip that hand the run the HL
+; it would have had and put back the odd byte at the screen's edge,
+; because a run is a mix of one byte PUSHes and four byte LD HL,nn
+; pairs and skipping n of those is a lookup, not arithmetic. And it
+; cannot be stopped early, so the left hand end simply SPILLS into the
+; previous row - which is the next one drawn, and which puts grass back
+; over it first, through the same uniform PUSH block a stale band uses.
+;
 ; The exception to the window is a row whose band parity has flipped
 ; since this buffer last had it, which wants its whole width back
 ; before the road goes on top. That is what sets the band period: at
 ; 256 world units it is one row in six a frame and the routine misses
-; 50 Hz at 121,063; at 512 it is one in twelve, 108,986, and the worst
-; frame fits too. The longer bands also happen to look better.
+; 50 Hz; at 512 it is one in twelve and the worst frame fits too. The
+; longer bands also happen to look better.
 ;
-; The geometry is road.z80s's, unchanged: harrier's camera, the bend
-; integrated twice up the screen, steering as the constant of the first
-; integration, and the centre pinned inside [w, 255-w] so that nothing
-; is ever clipped.
+; The geometry is road.z80s's, with a flatter camera: harrier's focal
+; length, the bend integrated twice up the screen, steering as the
+; constant of the first integration, and the centre held between rails
+; that are now only there to keep the accumulator off its own wrap.
 ;
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
