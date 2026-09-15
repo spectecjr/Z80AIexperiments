@@ -117,11 +117,8 @@ rd2_f4:
 ;------------------------------------------------------------------
 
 rd2_frame:
-        LD   HL,(rd2_camz)      ; the depth goes in as two immediates,
-        LD   A,L                ; so nothing has to carry it
-        LD   (rd2_cl+1),A
-        LD   A,H
-        LD   (rd2_ch+1),A
+        LD   HL,(rd2_camz)      ; the depth goes in as an immediate, so
+        LD   (rd2_cl+1),HL      ; nothing has to carry it down the rows
         LD   A,(rd2_back)       ; and which of the two parity marks in
         CP   RD2_BUF0           ; each record is this buffer's
         LD   A,0xBD             ; CP L
@@ -172,8 +169,6 @@ rd2_draw:
         SBC  HL,DE
         PUSH HL
         POP  IY                 ; IY = x
-        LD   HL,rd2_rec
-        LD   (rd2_rp),HL
         LD   A,(rd2_back)
         LD   IXH,A
         LD   IXL,0
@@ -181,6 +176,8 @@ rd2_draw:
         ADD  IX,DE
         EXX
         LD   B,RD2_ROWS
+        LD   HL,rd2_rec         ; the records, and the stride to the next
+        LD   DE,RD2_REC
         EXX
 
 ;------------------------------------------------------------------
@@ -188,7 +185,10 @@ rd2_draw:
 ;------------------------------------------------------------------
 
 rd2_row:
-        LD   SP,(rd2_rp)
+        EXX
+        LD   SP,HL              ; the record, which the other set walks
+        ADD  HL,DE              ; on to the next while SP reads this one
+        EXX
         POP  HL                 ; this row's depth, kept until the centre
         POP  DE                 ; is out - the rails the centre is held
         LD   A,IYH              ; between, and this row's own position,
@@ -205,21 +205,17 @@ rd2_r2:
         ADD  A,E
         LD   E,A                ; the window's right hand end, in pixels
         AND  1                  ; one pixel of which is the phase
-        LD   (rd2_ph),A
+        LD   B,A                ; which B carries: nothing between here
+                                ; and the dispatch touches BC
         SRL  E
         LD   A,E
         LD   (rd2_bo),A         ; and the rest of it a byte in the row
-        LD   A,L                ; now the depth, which HL has held
 rd2_cl:
-        ADD  A,0                ; patched: the camera's distance
-        LD   L,A
-        LD   A,H
-rd2_ch:
-        ADC  A,0
-        LD   H,A
+        LD   DE,0               ; patched: the camera's distance. DE is
+        ADD  HL,DE              ; dead by here and HL still has the depth
         LD   A,H                ; bit 8 of it is the band's parity, and
         AND  1                  ; all that riding forward costs
-        LD   (rd2_pr),A
+        LD   C,A                ; and C carries that
         LD   A,H                ; and bits 9 to 14 the track's segment
         AND  0x7E
         LD   L,A
@@ -236,7 +232,7 @@ rd2_ch:
         ADD  IY,DE              ; and x += dx, which is the row above's
         POP  HL                 ; where the two grass runs are entered,
         POP  DE                 ; for each phase
-        LD   A,(rd2_ph)
+        LD   A,B
         OR   A
         JR   Z,rd2_r3
         EX   DE,HL
@@ -246,27 +242,25 @@ rd2_r3:
         LD   A,H
         LD   (rd2_ef+1),A
         POP  DE                 ; which four runs are this row's width's
-        LD   A,(rd2_ph)
+        LD   A,B
         ADD  A,A
         ADD  A,E
         LD   L,A
-        LD   A,(rd2_pr)
+        LD   A,C
         ADD  A,rd2_rt0 / 256    ; a page a parity, so this is the lookup
         LD   H,A
         LD   E,(HL)
         INC  L
         LD   D,(HL)             ; DE = this row's compiled road
-        LD   BC,RD2_G0
-        LD   A,(rd2_pr)
-        OR   A
-        JR   Z,rd2_r4
+        LD   A,C                ; the grass, one band or the other. This
+        OR   A                  ; is the last of C, so BC becomes the
+        LD   BC,RD2_G0          ; colour - but A still has the parity
+        JR   Z,rd2_r4           ; for the mark below
         LD   BC,RD2_G1
 rd2_r4:
         POP  HL                 ; the parity each buffer last painted
-        LD   A,(rd2_pr)
 rd2_mk:
         CP   L                  ; patched: which of the two is ours
-        LD   (rd2_rp),SP
         JR   Z,rd2_road
         ; the bands have moved on, so this row's grass is all stale
 rd2_mw:
@@ -352,7 +346,4 @@ rd2_camx:       DEFW 0          ; the camera's lateral offset, world units
 rd2_camz:       DEFW 0          ; and how far it has come
 rd2_dx:         DEFS 2
 rd2_sp:         DEFS 2
-rd2_rp:         DEFS 2
-rd2_pr:         DEFS 1          ; this row's band parity
-rd2_ph:         DEFS 1          ; and its phase
 rd2_bo:         DEFS 1          ; where the window ends, a byte in the row
