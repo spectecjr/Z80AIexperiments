@@ -563,7 +563,7 @@ the chequered floor for 25,528.
 ## 17. The same road at 50 Hz, and wider than the screen — **BUILT**
 
 `road2.z80s` is `road.z80s` with the palette nailed down, a flatter camera
-and a road **118% of the screen wide** at the bottom: **113,313 T-states,
+and a road **121% of the screen wide** at the bottom: **112,736 T-states,
 50 Hz**, worst frame included, bit exact over 198 frames of a ride. See
 `road2.md`.
 
@@ -594,23 +594,25 @@ opposite answers. A `PUSH` run cannot be started late, so the right hand end
 gets a **stub per skip** — seven bytes that hand the run the `HL` it would
 have had and put back the odd byte at the screen's edge — and it cannot be
 stopped early, so the left hand end simply **spills into the previous row**,
-which is the next one drawn and puts grass back over it. The spill costs
-3,586 T-states in the worst frame and nothing at all when the road is on
-screen.
+which is the next one drawn and puts grass back over it.
 
 **The dispatch was the routine, not the drawing.** It was 786 T-states a
 row, 63,000 of the frame, in table lookups and index arithmetic to find
 where in a run to start. Stubs turned that into one lookup and a `JP (HL)`
-and took **19,800 T-states** out in a single change — more than the whole
-geometry costs.
+and took **19,800 T-states** out in a single change.
 
-**The surprise before that was the band period.** A row whose band parity
-flipped since *this* buffer last had it needs its whole width back. At 256
-world units that is one row in six a frame and the routine missed 50 Hz; at
-512 it is one in twelve and the worst frame fits. 12,077 T-states, decided
-by a constant, and the longer bands look better anyway.
+**And then the 64K address space turned out not to be the memory.** The
+road's edge was stepping two rows at a time in the middle distance and four
+or five at the bottom, because 38 quantised widths were shared between 80
+rows to fit the bank into the 15,800 bytes either side of the screens. Exact
+widths are 41,297 bytes — but a SAM has 256K in 16K pages, `VMPR` displays a
+page the CPU need not map at all, and the rows are drawn widest first, so
+the bank is walked forwards: **two `OUT`s a frame, 22 T-states, for a bank
+of any size.** Paging it made the routine *simpler* — per-buffer state is
+duplicated correctly by construction — and the frame slightly cheaper.
+`.claude/skills/sam-coupe-hardware` is what came out of reading the manual.
 
 **What is left is measured and unspent**: 11,762 for the mown stripes (and
-9,400 of the frame-to-frame spread with them), ~11,000 for pairing the far
-rows, ~6,000 in the row loop's memory parks. Which is where a bike comes
-from.
+most of the spread between best and worst frame with them), ~6,000 in the
+row loop's memory parks, ~1,000 for a margin per row. Which is where a bike
+comes from.

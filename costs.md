@@ -8,7 +8,11 @@ Where a routine was changed, the before and after are both kept, because the
 useful part is usually the size of the step rather than the final figure.
 
 `tricks.md` is the other half of this file: the techniques these numbers
-came out of, what each one costs, and where it does not pay.
+came out of, what each one costs, and where it does not pay. The one piece
+of hardware these budgets *do* now take account of is paging: a SAM has
+256K in 16K pages and the 64K address space is only a window onto it, which
+`road2` uses for a 41,297-byte run bank at a cost of two `OUT`s a frame.
+`.claude/skills/sam-coupe-hardware` has the registers.
 
 ---
 
@@ -21,6 +25,8 @@ came out of, what each one costs, and where it does not pay.
 | `chequer6` | 150,767 / **154,607** / 158,575 | 25 | and a pilot in a jetpack over the top of it |
 | `zarch` | 195,482 / **208,206** / 215,619 | 25 | Zarch's ground: a chequered plane, turning |
 | `chequer3` | 106,970 / **110,806** / 114,736 | **50** | the same picture, stripes in the palette |
+| `road2` | 104,750 / **112,736** / 118,270 | **50** | the Hang On road, 121% of the screen wide, bank paged |
+| `road` | 171,906 / **172,141** / 173,236 | 25 | the same road, with a copper it cannot have |
 | `prismpre` | 121,498 / **205,008** / 255,774 | **29.3** | the provisional logo, frame precomputed |
 | `entropypre` | 118,994 / **220,823** / 292,156 | **27.2** | the traced artwork, nine pieces |
 | `democube` + `renderlit` | 102,854 mean | 50 (86% of the budget) | one lit cube |

@@ -2,14 +2,15 @@
 
 **The same road as `road.z80s`, with the palette nailed down, at 50 Hz, and
 wider than the screen.**
-113,313 T-states a frame — **94% of a 50 Hz frame, worst frame included** —
+112,736 T-states a frame — **94% of a 50 Hz frame, worst frame included** —
 against `road.z80s`'s 172,141 at 25 Hz.
 
 The camera is flatter than `road.z80s`'s and the road much wider: the
 horizon is at row 111, so the road has the bottom **42%** of the screen; it
-is **8 pixels across where it meets the horizon and 304 at the bottom**,
-which is **118% of the screen**, so it runs off both edges down there. The
-centre steers sixty pixels either side of the middle.
+is **8 pixels across where it meets the horizon and 310 at the bottom**,
+which is **121% of the screen**, so it runs off both edges down there. The
+centre steers sixty-three pixels either side of the middle, and every row
+has a width of its own, so the road's edge steps once a row.
 
 Bit-exact against `tests/road2.py` over 198 frames of a ride. Not a list of
 poses: a frame here depends on the two before it, so the test drives a whole
@@ -18,14 +19,19 @@ routine has to land on however little of it it chose to touch.
 
 | | T-states a frame |
 |---|---|
-| the compiled runs — the road itself | 50,059 |
-| the fills — stale bands and the spill | 14,217 |
-| the geometry — the curvature and the two integrations | 5,106 |
-| the row loop and the dispatch, 80 rows | 43,931 |
-| **`rd2_frame`** | **min 106,089, mean 113,313, max 118,282** |
+| the compiled runs — the road itself | 45,726 |
+| the fills — stale bands, the spill, and the checks for both | 16,795 |
+| the geometry — the curvature and the two integrations | 4,415 |
+| the row loop and the dispatch, 80 rows | 45,800 |
+| the paging | 22 |
+| **`rd2_frame`** | **min 104,750, mean 112,736, max 118,270** |
 
-(The four are differences between measurements of the whole routine with
-each piece disabled, not estimates; they sum to the mean.)
+(Differences between measurements of the whole routine with each piece
+disabled, not estimates; they sum to the mean. An earlier version of this
+table read the runs 5,000 too dear and the fills too cheap, because the
+variant it measured had the runs disabled *and* the fills live — and with
+no run to move `SP`, the spill repair fires on rows that never spilled.
+Disable the fills in both variants and the numbers add up.)
 
 ## Why the palette had to go
 
@@ -102,17 +108,54 @@ the worst frame** of the ride, nothing at all when the road is on screen,
 and it never reaches the sky — a row only spills once it is wider than the
 rails, which is forty rows below the horizon.
 
-The bank is indexed by (half width, phase, band parity). 38 widths cover 80
-rows, because the width is quantised — finely where the road is narrow and
-the runs are short, coarsely where it is wide and they are not, so what
-changes is the tread of the staircase and not its angle. **Phase is one
+The bank is indexed by (half width, phase, band parity). **Phase is one
 pixel**, because `SP` is a byte address and places the road to two pixels on
 its own; parity doubles it, because the solid colours could come from
-registers but the baked boundary bytes could not. 152 runs and their stubs
-are **13,321 bytes**, which is most of the 15,800 either side of the screen
-buffers — so the four index tables, which want a page each so that the
-parity can be the page and the width the offset, have runs packed in behind
-them rather than padding.
+registers but the baked boundary bytes could not. 79 widths — one a row —
+make 316 runs and their stubs, **41,297 bytes**.
+
+## Which is why the bank is paged
+
+That 41,297 does not fit in the 15,800 bytes either side of the screen
+buffers, and the first version of this squeezed 38 quantised widths into
+them instead. Sharing a width between rows is exactly what a staircase is:
+the road's edge held its place for two rows in the middle distance and four
+or five at the bottom. Quantising more cleverly does not help — the best
+schedule that fits is visibly worse, because it buys the middle distance by
+spending the bottom.
+
+**The 64K address space is not the memory.** A SAM has 256K in 16K pages,
+and `VMPR` points the video hardware at a page directly, so the *displayed*
+buffer need not be mapped at all. That leaves:
+
+    0000-7FFF  LMPR: a chunk of the bank, its index tables at the foot
+    8000-DFFF  HMPR: the back buffer
+    E000-FFFF  this code and its tables, in the 8K a MODE 4 screen leaves
+               spare at the end of its odd page, with a copy behind each
+               buffer
+
+Rows are drawn widest first and the bank is cut in the same order, so a
+frame walks it forwards: **two `OUT`s, 22 T-states, for a bank of any
+size.** `.claude/skills/sam-coupe-hardware` has the registers.
+
+The pair rule — the second section of a block is always the page above the
+first — means nothing in the address space is permanently mapped once you
+page a bank *and* double buffer, so the code is duplicated behind both
+buffers. That turned out to **simplify** the routine rather than complicate
+it:
+
+- a record's parity mark is *per buffer*, and now there is one copy of the
+  records behind each buffer, so the mark is one byte instead of two and
+  `rd2_frame` no longer patches the row loop to choose between them;
+- `rd2_back` and `rd2_front` went entirely: `HMPR` maps the buffer being
+  drawn and `VMPR` says which is shown, so the hardware holds that state
+  and the code reads it back;
+- the screen is at `0x8000` whichever buffer it is, so the row address is
+  a constant.
+
+The caller's stack has to be in the low 32K with chunk 0 paged in, because
+the flip swaps this code for its copy — that is the one thing the caller
+has to know.
 
 ## Which is why the markings survive
 
@@ -132,6 +175,15 @@ four pixels anywhere.
 The dash rides on the band parity rather than a bit of its own: the line
 shows on one band and is the tarmac's own colour on the next. A second bit
 would have doubled the bank.
+
+## The stale band puts back two ends, not a row
+
+A row whose band parity has flipped since **this buffer** last had it has
+stale grass — but only grass. The window is about to have the road drawn
+over it, so what goes back is the screen's left edge to the window's, and
+the window's right edge to the screen's: on a wide row that is a handful of
+`PUSH`es rather than sixty-four. **2,350 T-states a frame**, and rather
+more off the worst frame, which is where it matters.
 
 ## The band period is the whole margin
 
@@ -165,6 +217,11 @@ bands also read more like Out Run's, so this one cost nothing at all.
 - The record is 6 bytes and the row loop `POP`s exactly 6. It reads them
   where each is wanted rather than all at once, which is the only reason
   `SP` can be the record pointer and then the screen.
+- Nothing in the resident block may carry state from one frame to the next,
+  because there is a copy of it behind each buffer and they alternate. The
+  exception is each record's parity mark, which is per buffer and wants to
+  be. The camera goes in from the caller each frame, which writes whichever
+  copy is mapped — the right one, because the flip has already happened.
 - `tests/harness_rd2.asm` asserts both blocks — under `0x2000` and clear of
   the stack at the top. The bank grew into the bench's own stack once, and
   what that looks like is a run jumping into the return address.
@@ -174,24 +231,27 @@ bands also read more like Out Run's, so this one cost nothing at all.
 All measured, none applied:
 
 - **Drop the mown stripes** — one grass colour, and a band that moves on
-  under a row no longer makes its grass stale, so the full-width repaints go
-  and the mark in each record with them. **11,762 T-states**, 101,551 a
-  frame, and 9,400 of the 12,193 spread between best and worst frame:
-  verified bit-exact against a model with the same change. It is the whole
-  of what the copper was ever going to buy, for nothing.
-- **Paired far rows** — ~11,000 by estimate, not measurement: two rows a
-  geometry step above the middle of the road, at the cost of two-row stairs
-  on the far road edges. Everything the pair needs is already shared; what
-  is not is `SP`.
+  under a row no longer makes its grass stale, so the repaints go and the
+  mark in each record with them. **11,762 T-states** when it was measured,
+  against the quantised bank and the whole-row fill, with 9,400 of the
+  12,193 spread between best and worst frame; verified bit-exact against a
+  model with the same change. It will be worth less now that the fill puts
+  back two ends rather than a row, and it is still most of the 13,500 the
+  best and worst frame are apart. It is also the whole of what the copper
+  was ever going to buy, for nothing.
 - **The row loop's memory parks** — ~6,000. Six bytes round-trip through
   memory at 13 T-states each way because nothing is free to hold them; a
   second look at the register allocation should pay for one or two.
-- **A margin per row** — ~1,000, and free: the margin is baked per row
-  already, and the far rows do not need eight pixels of it.
+- **A margin per row** — ~1,000, and now free in memory too: the margin is
+  baked per row already, and the far rows do not need eight pixels of it.
 
-And the thing this still has not got: **a bike**. There are 6,700 T-states
-inside 50 Hz for one as it stands, 18,000 with the stripes dropped, and
-125,000 if it drops to 25.
+Paired far rows are off the list: they are the staircase again, in the one
+place the paged bank has just removed it.
+
+And the thing this still has not got: **a bike**. There are 1,700 T-states
+inside 50 Hz at the worst frame as it stands, about 10,000 with the stripes
+dropped, and 127,000 if it drops to 25. Memory for its frames is no longer
+a question: the bank uses four pages of a machine that has sixteen.
 
     python3 tests/mkroad2data.py    # regenerate, and self-check the procedure
     python3 tests/test_road2.py     # verify against the model and time

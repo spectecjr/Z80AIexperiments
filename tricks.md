@@ -577,3 +577,38 @@ once the runs and the list shared a page.
 **Write the number down even when it says no.** `costs.md` has the table;
 `demo-ideas.md` has the estimates, marked as estimates, and what they
 measured when they were built.
+
+---
+
+## Paging is nearly free, and the address space is not the budget
+
+`road2` compiles a run per road width and wanted 41,297 bytes of them.
+Either side of two MODE 4 screens there are 15,800, so the first version
+shared 38 quantised widths between 80 rows — and a shared width is a
+staircase: the road's edge held its place for two rows in the middle
+distance and four or five at the bottom.
+
+A SAM has **256K in 16K pages**, and three facts make a bank of any size
+cost almost nothing:
+
+- **`VMPR` displays a page the CPU need not map.** Double buffering costs
+  24K of address space, not 48K, which frees the whole low 32K.
+- **A block's second section is always the page above the first** (`LMPR`
+  gives page *n* at `0000` and *n+1* at `4000`), so you cannot hold half a
+  block still. Page the bank with one register and the screens with the
+  other, and duplicate the small resident part behind each screen — in the
+  8K a 24K screen leaves at the end of its odd page.
+- **`OUT (250),A` is 11 T-states.** If the drawing order walks the bank
+  monotonically — `road2` draws rows widest first and cuts the bank in the
+  same order — a bank of any size is two `OUT`s a frame.
+
+What was surprising is that it *simplified* the routine. Per-buffer state —
+which band each buffer last painted into each row — is duplicated correctly
+by construction when the records sit behind the buffer they describe, so a
+two-byte mark became one byte and the code that patched the row loop to
+choose between them went. `rd2_back`/`rd2_front` went too: `HMPR` and
+`VMPR` already know which buffer is which.
+
+The rule that comes with it: **nothing in the duplicated block may carry
+state from one frame to the next**, and the caller's stack must be in the
+block that does not move.
