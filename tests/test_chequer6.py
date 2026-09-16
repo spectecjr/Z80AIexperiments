@@ -1,50 +1,60 @@
 #!/usr/bin/env python3
-"""Verify and time chequer5 - chequer4's routine, board to the horizon.
+"""Verify and time chequer6 - chequer5's board with a pilot over it.
 
     pip install z80
-    python3 tests/test_chequer5.py
+    python3 tests/test_chequer6.py
 
-Same code as chequer4.z80s, byte for byte: only the viewport changes.
-Where chequer4 stops at eight-pixel squares and lets a haze meet the sky,
-this draws every row down to squares one pixel wide, which is eleven more
-scanlines and seven more widths - and puts the frame over a 50 Hz budget.
+The board is chequer5's, paged bank and all. What is checked here is the
+pilot: three poses, each drawn over the board in both halves, with the
+bytes where only one of its two pixels is covered keeping the board's
+other pixel.
+
+The top half of a pose is drawn once per buffer, so a pose change takes
+two frames to appear everywhere - which the sweep below drives on
+purpose, a pose at a time, checking every frame.
 """
 import os
 import sys
 
 os.environ["HARRIER_MINP"] = "1"        # before the model reads the geometry
 
-from bench import Bench
 import chequer6 as C
+from sam import Sam
 
-BUF = {0x80: 0x8000, 0x20: 0x2000}
+CHUNKS = ("harness_chq5c0.asm", "harness_chq5c1.asm",   # the board's bank,
+          "harness_chq5c2.asm",                         # cut by band
+          "harness_chq5msk0.asm", "harness_chq5msk1.asm")
 
 
 def main():
-    b = Bench("harness_chq6.asm", org=0)
+    b = Sam("harness_chq6.asm", CHUNKS, screens=(10, 12),
+            chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"]})
     s = b.syms
-    it, _ = b.call_regs(s["chq6_init"])
+    it = b.call(s["chq6_init"])
     print("  chq6_init %d T-states once, the sky into both buffers" % it)
     # camx runs past one square and goes negative, because the square
     # the camera is standing in is a parity of its own
-    poses = [(x, z) for x in range(-640, 641, 47) for z in (0, 100, 900, 4321)]
+    poses = [(x, z, (i // 7) % 3)
+             for i, (x, z) in enumerate((x, z)
+                                        for x in range(-640, 641, 47)
+                                        for z in (0, 100, 900, 4321))]
     bad = 0
     times = []
-    for camx, camz in poses:
+    for camx, camz, pose in poses:
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], (camz & 0xFFFF).to_bytes(2, "little"))
-        into = b.peek(s["chq4_back"], 1)[0]
-        t, _ = b.call_regs(s["chq6_frame"])
+        b.poke(s["chq6_pose"], bytes([pose]))
+        t = b.call(s["chq6_frame"])
         times.append(t)
-        want = C.frame(camx, camz)
-        got = b.peek(BUF[into], C.STRIDE * C.H)
+        want = C.frame(camx, camz, pose)
+        got = b.screen(b.shown())
         if got != bytes(want):
             bad += 1
             if bad <= 3:
                 d = [i for i in range(len(want)) if got[i] != want[i]]
-                print("  PIXEL MISMATCH x=%d z=%d: %d bytes, first at %d "
-                      "(y=%d x=%d p=%d) got %02X want %02X"
-                      % (camx, camz, len(d), d[0], d[0] // C.STRIDE,
+                print("  PIXEL MISMATCH x=%d z=%d pose=%d: %d bytes, first "
+                      "at %d (y=%d x=%d p=%d) got %02X want %02X"
+                      % (camx, camz, pose, len(d), d[0], d[0] // C.STRIDE,
                          (d[0] % C.STRIDE) * 2, C.PTAB[d[0] // C.STRIDE],
                          got[d[0]], want[d[0]]))
     n = len(poses)
@@ -53,9 +63,11 @@ def main():
     print("  %-40s %d, the narrowest square drawn"
           % ("squares as small as", min(p for p in C.PTAB if p)))
     print()
-    ft, _ = b.call_regs(s["chq4_floor"])
-    mt, _ = b.call_regs(s["chq4_msk8"])
-    pt, _ = b.call_regs(s["chq6_frame"])
+    ft = b.call(s["chq4_floor"])
+    mt = b.call(s["chq4_msk8"])
+    b.call(s["chq6_frame"])             # the pose is settled in both
+    b.call(s["chq6_frame"])             # buffers by the second of these
+    pt = b.call(s["chq6_frame"])
     mean = sum(times) / n
     print("  chq4_floor   %7d T-states, %d scanlines of board"
           % (ft, 192 - C.TOP))

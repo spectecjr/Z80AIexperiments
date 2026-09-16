@@ -11,39 +11,37 @@
 ;
 ; TWO HALVES, DRAWN AT DIFFERENT RATES. The pilot stands on rows 48 to
 ; 143 and the board only redraws from row 97 down, so the top half is
-; drawn once into both buffers at init and never touched again, and
-; only the 47 rows the board draws over are redrawn a frame. That is
-; the whole reason it is affordable: 183 bytes of stream a frame rather
-; than 565.
+; drawn once per buffer and only the 47 rows the board draws over are
+; redrawn a frame. That is the whole reason it is affordable: 183 bytes
+; of stream a frame rather than 565.
 ;
-; NO MASK. A sprite byte is two pixels, and a byte with only one of
-; them covered would need a read, a mask and a write - three times the
-; work. So the pilot's silhouette is rounded out to whole bytes with
-; its own black outline (tests/jetpack.py), and every byte it draws is
-; a whole byte. What is left is a run-length stream, one entry a row,
-; with the rows that repeat the one above collapsed - which is two
-; thirds of them.
+; THREE POSES, and the top half follows them. Each buffer's copy of
+; this code remembers which pose its top half has - which is free,
+; because the paged map keeps a copy of the resident block behind each
+; buffer - so changing pose costs one top half in each buffer and
+; nothing at all after that.
 ;
-; WHERE IT LIVES. The board's run bank has taken all but 250-odd bytes
-; either side of the screen, so this player sits in the gap under 0x100
-; that the harness leaves, and the stream sits below the buffers with
-; the rest of the board's tables. The stream can be cut in two with a
-; jump op if even that does not fit in one piece.
+; A MASK, now that there is room for one. A byte with one pixel covered
+; is read, masked and written rather than stored: three times the work
+; of a byte, 110 bytes of the pilot, and what it buys is an outline
+; that stays one pixel wide where the silhouette does not land on a
+; byte. The first version gave the odd pixel to the outline instead,
+; because the board's bank had taken all but 250-odd bytes of the
+; address space and there was nothing to spend.
+;
+; WHERE IT LIVES. In the 8K a MODE 4 screen leaves spare at the end of
+; its odd page, with the board's code and both copies of the tables -
+; and the board's bank is in pages of its own. See chequer5.md.
 ;
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
 
 chq6_init:
-        CALL chq4_init          ; the sky and the haze into both buffers
-        LD   A,(chq4_back)      ; then the pilot's top half into both,
-        CALL chq6_top           ; because nothing else ever draws there
-        LD   A,(chq4_front)
-        ; fall through
-
-chq6_top:
-        LD   HL,jet_sky
-        LD   DE,JET_Y * 128 + JET_X / 2
-        JR   chq6_draw
+        JP   chq4_init          ; the sky and the haze into both buffers.
+                                ; The pilot's top half waits for a frame:
+                                ; each buffer draws it the first time it
+                                ; is drawn into, and again if the pose
+                                ; changes
 
 ;------------------------------------------------------------------
 ; chq6_frame - one frame: the board, then the pilot over it
@@ -52,32 +50,94 @@ chq6_top:
 chq6_frame:
         CALL chq4_msk8
         CALL chq4_floor
-        LD   A,(chq4_back)
-        LD   HL,jet_floor
+        LD   A,(chq6_pose)      ; this pose's pair of streams
+        ADD  A,A
+        ADD  A,A
+        LD   E,A
+        LD   D,0
+        LD   HL,jet_pose
+        ADD  HL,DE
+        LD   A,(chq6_seen)      ; which pose this buffer's top half has -
+        LD   B,A                ; its own copy of this byte, because the
+        LD   A,(chq6_pose)      ; resident block is duplicated behind each
+        CP   B                  ; buffer
+        JR   Z,chq6_f1
+        LD   (chq6_seen),A
+        PUSH HL
+        CALL chq6_clear         ; the pose that was there is not this one,
+        POP  HL                 ; and nothing else ever paints over it
+        PUSH HL
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        EX   DE,HL
+        LD   DE,JET_Y * 128 + JET_X / 2
+        CALL chq6_draw          ; the rows above the board, which nothing
+        POP  HL                 ; else ever touches
+chq6_f1:
+        INC  HL
+        INC  HL
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        EX   DE,HL
         LD   DE,JET_SPLIT * 128 + JET_X / 2
-        CALL chq6_draw
-        LD   A,(chq4_back)
-        LD   B,A
-        LD   A,(chq4_front)
-        LD   (chq4_back),A
-        LD   A,B
-        LD   (chq4_front),A
+        CALL chq6_draw          ; and the rows the board drew over
+
+        IN   A,(CHQ4_HMPR)      ; the flip, which is the hardware's own
+        AND  31                 ; record of which buffer is which
+        LD   C,A
+        OR   CHQ4_MODE4
+        OUT  (CHQ4_VMPR),A
+        LD   A,C
+        XOR  CHQ4_SCR0 ^ CHQ4_SCR1
+        OUT  (CHQ4_HMPR),A
+        RET
+
+;------------------------------------------------------------------
+; chq6_clear - the pilot's top half back to sky
+;
+; Only for a pose change, and only the top half: the rows the board
+; draws over get a fresh board every frame. The box is the pilot's own,
+; 16 bytes by 49 rows, and everything above the board is sky - this
+; viewport has no haze.
+;------------------------------------------------------------------
+
+chq6_clear:
+        DI                      ; PUSH is 5.5 T-states a byte where
+        LD   (chq6_sp),SP       ; LD (HL),n and a DJNZ are 29
+        LD   HL,CHQ4_SCREEN + JET_Y * 128 + JET_X / 2 + JET_W
+        LD   BC,CHQ4_C1
+        LD   DE,128
+        LD   A,JET_SPLIT - JET_Y
+chq6_c1:
+        LD   SP,HL
+        DUP  JET_W / 2
+        PUSH BC
+        EDUP
+        ADD  HL,DE
+        DEC  A
+        JR   NZ,chq6_c1
+        LD   SP,(chq6_sp)
+        EI
         RET
 
 ;------------------------------------------------------------------
 ; chq6_draw - play a stream of rows into a buffer
 ;
-;   A  = the buffer, high byte      HL = the stream
-;   DE = the first row's offset into it
+;   HL = the stream    DE = the first row's offset into the buffer
 ;
 ; ops:  0x01..0x10  skip n bytes        0x40+n  fill n with what follows
 ;       0x20+n      copy the n that follow      0x00  end of row
+;       0x60        one pixel, the pilot's on the left, the screen keeps
+;                   its right one; 0x61 the other way round
 ; and where a row's repeat count would be, 0 ends the stream and 0xFF
 ; says the stream goes on somewhere else.
 ;------------------------------------------------------------------
 
 chq6_draw:
-        ADD  A,D                ; the buffer, plus the row inside it
+        LD   A,CHQ4_SCREEN / 256        ; the back buffer is always here
+        ADD  A,D
         LD   D,A
         LD   (chq6_dst),DE
 
@@ -99,6 +159,8 @@ chq6_op:
         INC  HL
         OR   A
         JR   Z,chq6_eor
+        CP   0x60
+        JR   NC,chq6_mask
         CP   0x40
         JR   NC,chq6_fill
         CP   0x20
@@ -119,10 +181,10 @@ chq6_fill:
         LD   B,A
         LD   A,(HL)
         INC  HL
-chq6_f1:
+chq6_fl1:
         LD   (DE),A
         INC  DE
-        DJNZ chq6_f1
+        DJNZ chq6_fl1
         JR   chq6_op
 
 chq6_eor:
@@ -139,6 +201,21 @@ chq6_eor:
         LD   HL,(chq6_ops)
         JR   chq6_again
 
+chq6_mask:                      ; one pixel of this byte is the pilot's
+        RRA                     ; and the board keeps the other
+        LD   A,(DE)
+        JR   C,chq6_m1
+        AND  0x0F
+        JR   chq6_m2
+chq6_m1:
+        AND  0xF0
+chq6_m2:
+        OR   (HL)
+        INC  HL
+        LD   (DE),A
+        INC  DE
+        JR   chq6_op
+
 chq6_jump:
         LD   E,(HL)             ; the stream goes on somewhere else
         INC  HL
@@ -149,3 +226,8 @@ chq6_jump:
 chq6_dst:       DEFS 2
 chq6_ops:       DEFS 2
 chq6_rep:       DEFS 1
+chq6_sp:        DEFS 2
+chq6_pose:      DEFB 1          ; 0 banking left, 1 level, 2 right
+chq6_seen:      DEFB 255        ; and which pose this buffer's top half
+                                ; has. One copy a buffer, and no pose is
+                                ; 255, so each draws it once to start

@@ -517,19 +517,25 @@ def chequer5(outdir, seconds=8):
 
 
 def chequer6(outdir, seconds=8):
-    """chequer6 at its measured rate: 154,607 T-states a frame, 25 Hz.
+    """chequer6 at its measured rate: 143,643 T-states a frame, 25 Hz.
 
     chequer5's board with a pilot in front of it - 32x96 pixels of
-    person in a jetpack, played back from a run-length stream. The
-    board's two colours are still the only thing the palette moves; the
-    pilot's eleven are fixed, which is what the copper below does.
+    person in a jetpack, played back from a run-length stream, banking
+    left and right as the camera strolls. The board's two colours are
+    still the only thing the palette moves; the pilot's eleven are
+    fixed, which is what the copper below does.
     """
     import jetpack as J
     from mkchqdata import sam
     from mkhrdata import fog as fogtab
-    b = Bench("harness_chq6.asm", org=0)
+    from sam import Sam
+    b = Sam("harness_chq6.asm",
+            ("harness_chq5c0.asm", "harness_chq5c1.asm",
+             "harness_chq5c2.asm", "harness_chq5msk0.asm",
+             "harness_chq5msk1.asm"), screens=(10, 12),
+            chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"]})
     s = b.syms
-    b.call_regs(s["chq6_init"])
+    b.call(s["chq6_init"])
     fog, haze = fogtab()
     fixed = {i: sam_rgb(sam(*rgb)) for i, rgb in J.PAL.items()}
     n = int(seconds * 25)
@@ -538,10 +544,11 @@ def chequer6(outdir, seconds=8):
         camx, camz = stroll(t, 25)
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], camz.to_bytes(2, "little"))
-        into = b.peek(s["chq4_back"], 1)[0]
-        tt, _ = b.call_regs(s["chq6_frame"])
-        ts.append(tt)
-        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+        b.poke(s["chq6_pose"],                  # banking into the turns
+               bytes([1 + (1 if t % 100 < 25 else -1 if t % 100 >= 75
+                           else 0)]))
+        ts.append(b.call(s["chq6_frame"]))
+        frames.append(unpack(b.screen(b.shown())))
     still = [[0] * 192] * n
     idx, pal = copper(frames, still, fog, haze, fixed)
     p = "%s/chequer6.gif" % outdir

@@ -22,7 +22,7 @@ of hardware these budgets *do* now take account of is paging: a SAM has
 |---|---|---|---|
 | `chequer4` | 110,835 / **114,656** / 118,586 | **50** | the floor with its depth stripes in the pixels |
 | `chequer5` | 109,825 / **113,659** / 117,621 | **50** | the same routine, board to the horizon, bank paged |
-| `chequer6` | 150,767 / **154,607** / 158,575 | 25 | and a pilot in a jetpack over the top of it |
+| `chequer6` | **143,643** steady, 200,875 changing pose | 25 | and a pilot in a jetpack over it, masked, three poses |
 | `zarch` | 195,482 / **208,206** / 215,619 | 25 | Zarch's ground: a chequered plane, turning |
 | `chequer3` | 106,970 / **110,806** / 114,736 | **50** | the same picture, stripes in the palette |
 | `road2` | 104,750 / **112,736** / 118,270 | **50** | the Hang On road, 121% of the screen wide, bank paged |

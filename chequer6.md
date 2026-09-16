@@ -2,36 +2,62 @@
 
 **chequer5's board with a pilot standing in front of it.** 32×96 pixels of
 person in a jetpack, back to us, in the middle of the screen and over the
-top of everything, for **25,528 T-states a frame** — which takes the whole
-thing to 154,607, still 64% of a 25 Hz frame.
+top of everything — **three poses, banking left, level and right**, with a
+mask, for **33,452 T-states a frame**. The whole thing is 143,643, still
+60% of a 25 Hz frame.
 
 | | T-states a frame | |
 |---|---|---|
-| `chq4_floor` + `chq4_msk8` (chequer5's board, unchanged) | 128,587 | |
-| **the pilot** | **25,528** | 47 scanlines of him |
-| **`chq6_frame`** | **150,767 / 154,607 / 158,575** | **25 Hz, 64% of the frame** |
+| `chq4_floor` + `chq4_msk8` (chequer5's paged board, unchanged) | 110,191 | |
+| **the pilot** | **33,452** | 47 scanlines of him |
+| **`chq6_frame`** | **143,643 steady** | **25 Hz, 60% of the frame** |
+| a frame that changes pose | 200,875 | the top half, once a buffer |
 
-Bit exact against its model over 112 camera positions. The board is
-chequer4's routine over chequer5's viewport, not a line of it changed:
-everything here is the sprite.
+Bit exact against its model over 112 camera positions, poses and all. The
+board is chequer4's routine over chequer5's viewport, not a line of it
+changed: everything here is the sprite.
+
+## What the paged bank bought it
+
+The first version of this file ends with *"36 bytes spare below 0x2000 and
+109 in the gap — this is the last thing that fits"*. The board's bank is in
+pages of its own now (`chequer5.md`), so the pilot has the whole 8K a MODE
+4 screen leaves spare, and two things it could not afford before:
+
+**A mask.** A byte with one of its two pixels covered is read, masked and
+written rather than stored — three times the work — so the odd pixel used
+to go to the pilot's own black outline instead, thickening it to two pixels
+here and there. There are 110 such bytes in the sprite, they are two ops a
+row, and the outline is one pixel wide everywhere now. It costs about 7,900
+T-states a frame, which is most of the difference between 25,528 and
+33,452.
+
+**Three poses.** A shear rather than three sets of profiles — three pixels
+at the helmet, tapering to none at the knees — and 1,874 bytes of stream
+for the lot. The top half is still drawn once per buffer, and **each
+buffer's copy of the code remembers which pose its top half has**, which is
+free: the paged map keeps a copy of the resident block behind each buffer,
+so a per-buffer byte is what you get whether you want one or not. Changing
+pose costs one top half in each buffer and nothing after that.
+
+The pose change also has to put the sky back first, because nothing else
+ever paints over those rows — 16 bytes by 49 rows, and `PUSH` at 5.5
+T-states a byte rather than `LD (HL),n` and a `DJNZ` at 29, which is 6,000
+T-states instead of 25,698.
 
 ## Three things make him cheap
 
 **Half of him is never redrawn.** The pilot stands on rows 48 to 143 and
-the board only draws from row 97 down, so rows 48..96 go into *both*
-buffers once at `chq6_init` and are never touched again — nothing else
+the board only draws from row 97 down, so rows 48..96 go into each buffer
+once and are not touched again until the pose changes — nothing else
 writes there, not even the top run's spill, which lands in the last four
 bytes of row 96. Only the 47 rows the board draws over are redrawn a frame:
 183 bytes of stream rather than 565.
 
-**He has no mask.** A sprite byte is two pixels, and a byte with only one of
-them covered needs a read, an AND, an OR and a write — three times the work
-of a byte that is simply stored. So the silhouette is rounded out to whole
-bytes by giving the odd pixel to the pilot's own black outline
-(`tests/jetpack.py`). The outline is one pixel wide, so what that does is
-thicken it to two pixels here and there, which is the cheapest possible
-answer to an edge that does not land on a byte — and **every byte the pilot
-draws is a whole byte**, `LDIR` all the way.
+**Most of him is whole bytes.** A sprite byte is two pixels, and the 902
+bytes of him that are fully covered are `LDIR` all the way; only the 110
+where the silhouette does not land on a byte are read, masked and written.
+That is two ops a row, not two hundred.
 
 **Two thirds of his rows repeat the one above.** A person 32 pixels wide
 does not change much from row to row: 96 scanlines come out as **43 rows of
@@ -49,6 +75,7 @@ One entry a row, played by `chq6_draw`:
 | `0x01..0x10` | skip n bytes |
 | `0x20+n` | copy the n bytes that follow |
 | `0x40+n` | fill n bytes with the byte that follows |
+| `0x60`, `0x61` | one pixel of the next byte is the pilot's — `0x60` its left, `0x61` its right — and the board keeps the other |
 | `0x00` | end of row |
 
 The jump op is there because the free memory is in pieces: the board's run
@@ -81,8 +108,12 @@ difference between fitting and not.
 
 - The pilot is drawn after the board and before the flip, or the board
   draws over him.
-- Rows 48..96 are drawn once into both buffers. If anything else ever
-  writes there — a horizon, a sun, a score — they have to be redrawn too.
+- Rows 48..96 are drawn once per buffer **per pose**, and cleared to sky
+  first. If anything else ever writes there — a horizon, a city, a score —
+  they have to be redrawn every frame, and the top half with them.
+- `chq6_seen` is per buffer and must stay in the resident block, which is
+  the one thing the paged map duplicates. Nothing else here may carry
+  state from frame to frame.
 - The stream's row entries are what the split at row 97 is cut on, so a
   repeat run may not straddle it. `tests/mkjetdata.py` cuts it there.
 - 16 bytes wide starting at byte 56 of a row never crosses a page, which is

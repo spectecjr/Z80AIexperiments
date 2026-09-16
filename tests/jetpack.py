@@ -110,27 +110,56 @@ def pilot():
 
 
 def rows(px):
-    """The pilot as MODE 4 bytes, two pixels a byte, and which are drawn.
+    """The pilot as MODE 4 bytes, two pixels a byte, and how to draw each.
 
-    A byte with only one of its pixels covered would need a read, a mask
-    and a write to draw - three times the work of a byte that is simply
-    stored - so the odd pixel goes to the outline colour instead and the
-    byte becomes solid. The outline is black and one pixel wide, so what
-    that does is thicken it to two pixels here and there, which is the
-    cheapest possible answer to a silhouette that does not land on a byte.
+        0   nothing here: skip it
+        1   both pixels covered: store it
+        2   the left pixel only: keep the screen's right one
+        3   the right pixel only: keep the screen's left one
+
+    The first version of this had no 2 or 3 in it: a byte with one pixel
+    covered was made solid by giving the other pixel to the outline,
+    because a read, a mask and a write is three times the work of a
+    store. That thickened the black outline to two pixels here and
+    there. The board's bank is paged now and the frame has the room, so
+    the edge lands where it should.
     """
     out = []
     for y in range(H):
-        by, on = [], []
+        by, kind = [], []
         for x in range(0, W, 2):
             a, b = px[y][x], px[y][x + 1]
-            if a < 0 and b >= 0:
-                a = BLACK
-            elif b < 0 and a >= 0:
-                b = BLACK
-            by.append(((a if a >= 0 else 0) << 4) | (b if b >= 0 else 0))
-            on.append(a >= 0)
-        out.append((by, on))
+            if a < 0 and b < 0:
+                by.append(0)
+                kind.append(0)
+            elif a >= 0 and b >= 0:
+                by.append((a << 4) | b)
+                kind.append(1)
+            elif a >= 0:
+                by.append(a << 4)
+                kind.append(2)
+            else:
+                by.append(b)
+                kind.append(3)
+        out.append((by, kind))
+    return out
+
+
+def lean(px, way):
+    """The same pilot, banking: the upper body goes over, the boots stay.
+
+    A shear rather than three sets of profiles, which is what a sprite
+    this small can carry - three pixels at the helmet, tapering to none
+    at the knees.
+    """
+    if not way:
+        return px
+    out = blank()
+    for y in range(H):
+        k = way * int(round(3 * max(0.0, min(1.0, (72 - y) / 40.0))))
+        for x in range(W):
+            if 0 <= x + k < W:
+                out[y][x + k] = px[y][x]
     return out
 
 
