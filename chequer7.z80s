@@ -1,0 +1,313 @@
+;------------------------------------------------------------------
+; chequer7.z80s - a two layer city on the horizon
+;
+;   c7_city      redraw the band of city above the board
+;
+; Sixteen scanlines between the board and the sky, holding two layers
+; of buildings that scroll at different speeds: the far layer a byte a
+; frame, the near one two. That is the whole of the parallax, and it is
+; what the eye reads as distance - more than the colours do.
+;
+; EVERYTHING HERE IS A RECTANGLE, so everything here is PUSHes. The
+; band is drawn as sky, then the far buildings over it, then the near
+; ones over those: a byte under a near building is written three times,
+; and that overdraw is cheaper than merging two interval lists a row
+; would be. 2,048 bytes of band is 11,264 T-states at the floor, and
+; this draws it in 38,136 - sky 13,247, the far layer 13,671 and the
+; near one 11,218, each measured with the other's table emptied.
+;
+; ONE FILL BLOCK DOES ALL OF IT. Sixty-three PUSH DEs and a PUSH BC,
+; entered at 64 - pairs: the last PUSH a run makes is its leftmost, so
+; BC is the building's lit left face and DE its body. Make BC the same
+; as DE and the rectangle is flat, which is what the far layer and the
+; sky want; make it lighter and the near layer gets a four pixel
+; highlight down its left hand side for nothing at all.
+;
+; AND THE ODD BYTE. A layer's period is the screen's width, so a
+; building wraps round the right hand edge and is drawn in two parts.
+; The far layer's offset can be odd, so a part's width can be odd - and
+; PUSH writes two bytes. So a part of odd width has its left hand byte
+; drawn as a column of single stores, 31 T-states a row, and there is
+; about one such column a frame.
+;
+; The row pointer lives in the alternate register set, because BC and
+; DE are both colours and the fill block needs them: a row is two EXX
+; and a JP (IX), which is 56 T-states of overhead on up to 704 of
+; pixels.
+;
+; AND A BUILDING THAT THE EDGE DOES NOT CUT COSTS NO SETUP WORTH THE
+; NAME. Every width here is even, so only a building cut by the screen's
+; edge can leave a part of odd width, and only such a building needs
+; two colours, two parts or any arithmetic: the rest read their fill
+; entry and their row address straight out of the table and go. That is
+; 250 T-states a building against 800, and it was 800 because the setup
+; was written for the hard case and then used for all of them.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+C7_BASE:        EQU CHQ4_SCREEN + C7_TOP * 128
+
+;------------------------------------------------------------------
+; c7_city - the band, from (c7_t)
+;
+; The far layer is at (c7_t) bytes and the near one at twice that, both
+; masked to the period, which is the screen's width. The caller sets
+; c7_t, the way it sets the camera: nothing in the resident block may
+; carry state from one frame to the next, because there is a copy of it
+; behind each buffer.
+;------------------------------------------------------------------
+
+c7_city:
+        DI                      ; SP is about to be the screen, so an
+        LD   (c7_ret1),SP       ; interrupt would push PC into the city
+
+        LD   HL,0               ; the sky: one rectangle, the whole band
+        LD   (c7_top),HL
+        LD   HL,C7_SKY
+        LD   (c7_body),HL
+        LD   (c7_litc),HL
+        LD   A,C7_ROWS
+        LD   (c7_nrow),A
+        LD   B,128
+        XOR  A                  ; u = 0, and no left face to light
+        CALL c7_part
+
+        LD   HL,C7_FAR          ; the far layer, flat: its left faces
+        LD   (c7_body),HL       ; are too far off to catch anything
+        LD   (c7_litc),HL
+        LD   A,(c7_t)
+        LD   IY,c7_fars
+        CALL c7_layer
+
+        LD   HL,C7_NEAR
+        LD   (c7_body),HL
+        LD   HL,C7_LIT
+        LD   (c7_litc),HL
+        LD   A,(c7_t)
+        ADD  A,A                ; twice the speed, which is the parallax
+        LD   IY,c7_nears
+        CALL c7_layer
+
+        LD   SP,(c7_ret1)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; c7_layer - one layer of buildings
+;
+;   IY = its table    A = its offset in bytes
+;   (c7_body), (c7_litc) = the two colour pairs
+;
+; A building is eight bytes - x, width, rows, the fill block's entry for
+; that width, the address its top row ends at when the offset is zero,
+; and the offset of its top row - and 255 in place of an x ends the
+; layer. See tests/mkcitydata.py.
+;------------------------------------------------------------------
+
+c7_layer:
+        AND  127                ; the period is the screen's width, so
+        LD   (c7_sub+1),A       ; the wrap is a mask
+        LD   BC,(c7_litc)       ; the colours sit still for a whole layer
+        LD   DE,(c7_body)
+        LD   A,c7_fill >> 8     ; and the fill block is a page of its own,
+        LD   IXH,A              ; so an entry is one byte
+c7_l1:
+        EXX                     ; the scratch set: the colours stay where
+        LD   A,(IY+0)           ; the fill block wants them
+        INC  A
+        JR   Z,c7_l4            ; 255 in place of an x ends the layer
+        DEC  A
+c7_sub: SUB  0                  ; where it lands: u = (x - offset) mod 128
+        AND  127
+        LD   C,A
+        ADD  A,(IY+1)           ; and whether the screen's edge cuts it
+        CP   129
+        JR   NC,c7_l2
+
+        LD   A,(IY+3)           ; it does not, which is the usual case
+        LD   IXL,A              ; and costs four table reads
+        LD   A,(IY+4)
+        ADD  A,C
+        LD   L,A
+        LD   A,(IY+5)
+        ADC  A,0
+        LD   H,A                ; the right hand end of its first row
+        LD   A,(IY+2)
+        LD   B,A                ; rows
+        LD   DE,8
+        ADD  IY,DE
+        LD   DE,128
+        EXX
+        CALL c7_rows
+        JR   c7_l1
+
+c7_l2:                          ; the screen's edge does cut it: two parts,
+        SUB  128                ; either of which may be an odd width
+        LD   (c7_wrw),A         ; what wrapped round to the left hand edge
+        LD   A,(IY+2)
+        LD   (c7_nrow),A
+        LD   L,(IY+6)
+        LD   H,(IY+7)
+        LD   (c7_top),HL
+        LD   A,128
+        SUB  C
+        LD   (c7_pw),A          ; and what is left at the right hand one
+        LD   A,C
+        LD   (c7_pu),A          ; where that part starts
+        LD   DE,8
+        ADD  IY,DE
+        EXX                     ; c7_part wants them in this set, and EXX
+        LD   A,(c7_pw)          ; leaves A alone but not B
+        LD   B,A
+        LD   A,(c7_pu)
+        SCF                     ; this part has the building's left face
+        CALL c7_part
+        LD   A,(c7_wrw)
+        LD   B,A
+        XOR  A                  ; and this one starts at the screen's edge
+        CALL c7_part            ; with the carry clear: no left face
+        LD   BC,(c7_litc)       ; c7_part loads its own
+        LD   DE,(c7_body)
+        JR   c7_l1
+c7_l4:
+        EXX
+        RET
+
+
+;------------------------------------------------------------------
+; c7_part - one rectangle of one colour
+;
+;   A = its left hand byte     B = its width in bytes
+;   carry = it has the building's lit left face
+;   (c7_top) = the offset of its top row, (c7_nrow) = its rows
+;------------------------------------------------------------------
+
+c7_part:
+        LD   (c7_u),A
+        LD   A,0                ; the carry first: LD leaves it alone and
+        ADC  A,A                ; everything else here does not
+        LD   (c7_left),A
+        LD   A,B
+        OR   A
+        RET  Z
+        LD   (c7_w),A
+
+        LD   HL,(c7_top)        ; the right hand end of its first row
+        LD   DE,C7_BASE
+        ADD  HL,DE
+        LD   A,(c7_u)
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   A,(c7_w)
+        LD   E,A
+        ADD  HL,DE
+        LD   (c7_end),HL
+
+        LD   A,(c7_w)
+        SRL  A                  ; pairs, and the fill block is entered at
+        JR   Z,c7_odd           ; 64 - pairs; a part one byte wide is the
+        NEG                     ; odd column and nothing else
+        ADD  A,64
+        LD   E,A
+        LD   D,0
+        LD   IX,c7_fill
+        ADD  IX,DE
+
+        LD   DE,(c7_body)
+        LD   B,D
+        LD   C,E
+        LD   A,(c7_left)
+        OR   A
+        JR   Z,c7_p1
+        LD   BC,(c7_litc)       ; the leftmost PUSH, which is the last
+c7_p1:
+        EXX                     ; the pointers live over here
+        LD   HL,(c7_end)
+        LD   DE,128
+        LD   A,(c7_nrow)
+        LD   B,A
+        EXX
+        CALL c7_rows
+
+c7_odd:
+        LD   A,(c7_w)           ; an odd width leaves one byte at the left
+        AND  1                  ; that no PUSH can reach
+        RET  Z
+        LD   A,(c7_left)
+        OR   A
+        LD   HL,(c7_body)
+        JR   Z,c7_o1
+        LD   HL,(c7_litc)
+c7_o1:
+        LD   C,L                ; both bytes of a pair are the same colour
+        LD   A,(c7_w)
+        LD   E,A
+        LD   D,0
+        LD   HL,(c7_end)
+        OR   A
+        SBC  HL,DE
+        LD   A,(c7_nrow)
+        LD   B,A
+        LD   DE,128
+        LD   A,C
+c7_o2:
+        LD   (HL),A
+        ADD  HL,DE
+        DJNZ c7_o2
+        RET
+
+;------------------------------------------------------------------
+; c7_rows - the same run of PUSHes down a rectangle's rows
+;
+;   IX = where in the fill block to enter
+;   BC, DE = the leftmost pair's colour and the body's
+;   HL' = the first row's right hand end, DE' = 128, B' = rows
+;------------------------------------------------------------------
+
+c7_rows:
+        LD   (c7_ret2),SP
+        EXX
+c7_r1:
+        LD   SP,HL              ; a run fills rightwards to left
+        ADD  HL,DE              ; the next row, before SP is needed
+        EXX
+        JP   (IX)
+c7_ret:
+        EXX
+        DJNZ c7_r1
+        EXX
+        LD   SP,(c7_ret2)
+        RET
+
+;------------------------------------------------------------------
+; c7_fill - 64 PUSHes, entered at 64 - pairs
+;
+; The last one is PUSH BC because the last PUSH a run makes is the
+; leftmost byte pair it writes.
+;------------------------------------------------------------------
+
+        ALIGN 256               ; so that an entry is one byte, and IXH
+c7_fill:                        ; can be set once a layer
+        DUP  63
+        PUSH DE
+        EDUP
+        PUSH BC
+        JP   c7_ret
+
+c7_t:           DEFB 0          ; the city's own clock, from the caller
+c7_off:         DEFS 1
+c7_body:        DEFS 2          ; the rectangle's colour, and the pair its
+c7_litc:        DEFS 2          ; leftmost PUSH puts down
+c7_u:           DEFS 1
+c7_w:           DEFS 1
+c7_left:        DEFS 1
+c7_nrow:        DEFS 1
+c7_top:         DEFS 2
+c7_end:         DEFS 2
+c7_wrw:         DEFS 1          ; what a cut building left at the edge,
+c7_pw:          DEFS 1          ; the part it left behind, and where
+c7_pu:          DEFS 1          ; that part starts
+c7_ret1:        DEFS 2
+c7_ret2:        DEFS 2

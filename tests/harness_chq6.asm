@@ -4,6 +4,7 @@
 ; board's bank is chequer5's, in pages of its own.
         DEVICE NOSLOT64K
 CHQ4_PAGED:     EQU 1
+CHQ6_CITY:      EQU 0            ; no city: that is chequer7
 chq4_band:      EQU 0x0000      ; the bank's bands, at the foot of it
         ORG 0xE000
         INCLUDE "chequer5equ.z80s"

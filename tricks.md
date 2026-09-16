@@ -645,3 +645,56 @@ The trap is worth knowing if you ever walk a table across chunks: the
 terminator that says "switch" goes round the loop to be found, so anything
 the top of that loop does — here, stepping the phase — happens one extra
 time. Give it back at the switch.
+
+## A sprite over a background that does not move is a run, not a stream
+
+A masked sprite player costs what it costs because every byte is a
+decision: an op to dispatch, and for the edge bytes a read, a mask and a
+write. But a sprite drawn where **the background is one constant** needs
+none of it. Bake the background into the sprite:
+
+    transparent byte      the background's byte
+    one pixel covered     the sprite's pixel, the background's other nibble
+    fully covered         the sprite's byte
+
+and what is left is a rectangle of constants, which is `LD SP` and a run
+of `PUSH`es at 5.5 T-states a byte. It also **removes the clear**: the run
+covers the whole box, so whatever was there before goes under it.
+
+chequer6's pilot is 32x96 and half of him stands against a sky that has
+one colour all the way across. That half was a run-length stream, masked,
+with a `PUSH` clear before it: about 41,000 T-states between them. As a
+compiled run it is **7,880**, and a frame that changes pose went from
+200,875 to 159,388. The price is data — 1,486 bytes a pose against 400 —
+so it wants the memory to have been found first.
+
+The condition is exact and worth checking before you rely on it: *nothing
+else paints those rows*. Put a scrolling city under the sprite and the
+background stops being constant, the run has to go back to being a masked
+stream, and the division between his halves moves (`chequer7`).
+
+## Write the general case, then take the common one out of it
+
+A routine that handles every case handles the usual one at the price of the
+worst one, and the usual one is usually most of the frame.
+
+chequer7 draws a band of city as rectangles: for each building, work out
+where it lands, whether the screen's edge cuts it in two, how wide each
+part is, whether a part's width is odd — `PUSH` writes two bytes — which
+colours its leftmost pair takes, and where in a 64-`PUSH` fill block to
+enter. That is about **800 T-states a building against 250 of pixels**.
+
+But only a building the edge cuts can be in two parts, or have an odd
+width, or want two colours. So: give the table four more bytes a building
+— the fill block's entry for that width, and the address its top row ends
+at when the offset is zero — and let the usual case read what it needs and
+go. The general routine stays, for the one building a layer that is
+actually cut.
+
+    the band, one routine for every case      46,212 T-states
+    the band, with the usual case lifted out  38,136      (-7,454)
+
+The same shape appears in road2 (a row whose road is on screen needs no
+stub and no spill repair; both exist for the rows that run off the edge)
+and in chequer4's band loop. If a routine's setup is the same size as its
+work, the question to ask is what fraction of calls needs all of it.

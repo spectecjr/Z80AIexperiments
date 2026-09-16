@@ -50,6 +50,7 @@ about which of those it is.
 | `harrier.z80s` | 1 px | 1 px | palette | 221,451 | 25 Hz |
 | `chequer5` | **1 px** | **1 px** | **pixels** | **129,183** | 25 Hz, board to the horizon |
 | `chequer6` | **1 px** | **1 px** | **pixels** | **154,607** | 25 Hz, and a pilot in front of it |
+| `chequer7` | **1 px** | **1 px** | **pixels** | **201,281** | 25 Hz, and a city on the horizon |
 
 `chequer4` is the one to use: it draws chequer3's screen — the GIFs come
 out byte for byte identical — with the depth alternation in the pixels
@@ -89,6 +90,18 @@ than every frame; his silhouette is rounded out to whole bytes with his own
 black outline, so no byte he draws needs a read-modify-write; and two
 thirds of his rows repeat the one above, so 96 scanlines are 43 rows of
 run-length stream. See `chequer6.md`.
+
+**A city behind him.** `chequer7` puts sixteen scanlines of two scrolling
+skylines between the board and the sky, for 38,136 T-states — the far layer
+moving a byte a frame and the near one two, which is the whole of the
+parallax. Everything in the band is a rectangle, so everything in it is
+`PUSH`es entered at 64 - pairs, and the band is drawn as sky, then far
+buildings over it, then near ones over those: overdraw, because merging two
+interval lists a row costs more than the pixels it saves. It also moved
+where the pilot divides — a city on rows 81..96 is something that paints
+over him, so 63 of his rows are redrawn a frame rather than 47 — and paid
+for that by compiling his top half into a run with the sky baked in. See
+`chequer7.md`.
 
 **The camera in the GIFs.** All five demos now share `stroll()` in
 `tests/mkgif.py`: a slide of two and a half squares either way taking

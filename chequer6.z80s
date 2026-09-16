@@ -9,11 +9,17 @@
 ; jetpack, back to us, in the middle of the screen and over the top of
 ; everything.
 ;
-; TWO HALVES, DRAWN AT DIFFERENT RATES. The pilot stands on rows 48 to
+; TWO HALVES, DRAWN TWO DIFFERENT WAYS. The pilot stands on rows 48 to
 ; 143 and the board only redraws from row 97 down, so the top half is
 ; drawn once per buffer and only the 47 rows the board draws over are
 ; redrawn a frame. That is the whole reason it is affordable: 183 bytes
 ; of stream a frame rather than 565.
+;
+; And because nothing paints over the top half, its background is one
+; constant - so it is not a stream at all but a compiled run of PUSHes
+; with the sky baked into the transparent bytes and into the single
+; pixel ones. 5.5 T-states a byte, no mask, and no clearing of the pose
+; that was there: 3,600 T-states against 27,000.
 ;
 ; THREE POSES, and the top half follows them. Each buffer's copy of
 ; this code remembers which pose its top half has - which is free,
@@ -28,6 +34,12 @@
 ; byte. The first version gave the odd pixel to the outline instead,
 ; because the board's bank had taken all but 250-odd bytes of the
 ; address space and there was nothing to spend.
+;
+; CHQ6_CITY, which the harness sets, puts chequer7's band of city in
+; between the board and the pilot. Everything else about the routine is
+; the same, including where the pilot's two halves divide - that comes
+; from the stream data, and chequer7's is cut at the city's top row
+; rather than the board's, because the city moves under the pilot.
 ;
 ; WHERE IT LIVES. In the 8K a MODE 4 screen leaves spare at the end of
 ; its odd page, with the board's code and both copies of the tables -
@@ -50,6 +62,9 @@ chq6_init:
 chq6_frame:
         CALL chq4_msk8
         CALL chq4_floor
+    IF CHQ6_CITY                ; chequer7: a band of city between the
+        CALL c7_city            ; board and the sky, under the pilot
+    ENDIF
         LD   A,(chq6_pose)      ; this pose's pair of streams
         ADD  A,A
         ADD  A,A
@@ -64,16 +79,12 @@ chq6_frame:
         JR   Z,chq6_f1
         LD   (chq6_seen),A
         PUSH HL
-        CALL chq6_clear         ; the pose that was there is not this one,
-        POP  HL                 ; and nothing else ever paints over it
-        PUSH HL
-        LD   E,(HL)
-        INC  HL
-        LD   D,(HL)
-        EX   DE,HL
-        LD   DE,JET_Y * 128 + JET_X / 2
-        CALL chq6_draw          ; the rows above the board, which nothing
-        POP  HL                 ; else ever touches
+        LD   A,(HL)             ; the rows above are a compiled run rather
+        INC  HL                 ; than a stream: nothing paints over them,
+        LD   H,(HL)             ; so the sky is baked into the transparent
+        LD   L,A                ; bytes and into the single pixel ones, and
+        CALL chq6_jphl          ; the pose that was there needs no clearing
+        POP  HL
 chq6_f1:
         INC  HL
         INC  HL
@@ -95,32 +106,11 @@ chq6_f1:
         RET
 
 ;------------------------------------------------------------------
-; chq6_clear - the pilot's top half back to sky
-;
-; Only for a pose change, and only the top half: the rows the board
-; draws over get a fresh board every frame. The box is the pilot's own,
-; 16 bytes by 49 rows, and everything above the board is sky - this
-; viewport has no haze.
+; chq6_jphl - call the run whose address is in HL
 ;------------------------------------------------------------------
 
-chq6_clear:
-        DI                      ; PUSH is 5.5 T-states a byte where
-        LD   (chq6_sp),SP       ; LD (HL),n and a DJNZ are 29
-        LD   HL,CHQ4_SCREEN + JET_Y * 128 + JET_X / 2 + JET_W
-        LD   BC,CHQ4_C1
-        LD   DE,128
-        LD   A,JET_SPLIT - JET_Y
-chq6_c1:
-        LD   SP,HL
-        DUP  JET_W / 2
-        PUSH BC
-        EDUP
-        ADD  HL,DE
-        DEC  A
-        JR   NZ,chq6_c1
-        LD   SP,(chq6_sp)
-        EI
-        RET
+chq6_jphl:
+        JP   (HL)
 
 ;------------------------------------------------------------------
 ; chq6_draw - play a stream of rows into a buffer
@@ -226,7 +216,6 @@ chq6_jump:
 chq6_dst:       DEFS 2
 chq6_ops:       DEFS 2
 chq6_rep:       DEFS 1
-chq6_sp:        DEFS 2
 chq6_pose:      DEFB 1          ; 0 banking left, 1 level, 2 right
 chq6_seen:      DEFB 255        ; and which pose this buffer's top half
                                 ; has. One copy a buffer, and no pose is
