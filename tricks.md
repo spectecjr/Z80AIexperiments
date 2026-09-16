@@ -612,3 +612,36 @@ choose between them went. `rd2_back`/`rd2_front` went too: `HMPR` and
 The rule that comes with it: **nothing in the duplicated block may carry
 state from one frame to the next**, and the caller's stack must be in the
 block that does not move.
+
+---
+
+## Stop patching: compile the loop instead
+
+`chequer4`'s band loop sets a band up by patching six bytes into the row
+loop — the row's last byte, the value set's address, whether the stack
+pointer shifts, and the run to jump to. At 454 T-states a band that was a
+quarter of `chequer5`'s frame, and the obvious answer, a precomputed table
+of those six bytes, is worth much less than it looks: **six `LD (nn),A`
+are 78 T-states of the 357 a table would replace**, and the table still
+has to do them *and* read six bytes. ~284 against ~357.
+
+The stores are the floor. So the thing to remove is the patching, not the
+arithmetic: **compile the row loop itself, once per (band, phase), with
+all six baked in**. The band loop then patches one address — the jump the
+row loop turns round on — and a row costs what it always did.
+
+    a band, patching six bytes        ~454 T-states
+    a band, patching a table's six    ~284
+    a band, patching one address      ~168      9,359 a frame, measured
+
+It costs 2,080 copies of a 30-byte loop, which is 62K, which is why this
+is a paging trick and not a 1990 one. Two things make it cheap to page:
+the bodies are walked in draw order, and **a band uses exactly one run**,
+so the runs can be cut by band alongside them — a chunk holds the bodies,
+the runs, the values and the band table for a stretch of bands and needs
+nothing from any other chunk. `chequer5` pages five times a frame.
+
+The trap is worth knowing if you ever walk a table across chunks: the
+terminator that says "switch" goes round the loop to be found, so anything
+the top of that loop does — here, stepping the phase — happens one extra
+time. Give it back at the switch.

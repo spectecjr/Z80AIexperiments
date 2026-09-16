@@ -560,6 +560,26 @@ the chequered floor for 25,528.
 
 ---
 
+## 16a. chequer5 at 50 Hz — **BUILT**
+
+The board all the way to the horizon, squares down to a single pixel, no
+haze: **113,659 T-states, 50 Hz**, worst frame included, bit exact over 112
+camera positions. `chequer5.md` has it.
+
+It was a 25 Hz routine and its own notes called the gap *a cliff, not a
+slope* — 13,000 T-states, with no partial extension that fits either. Both
+halves of the answer are things a flat 64K cannot hold:
+
+- **the swap mask is a lookup**, because bit 8 of `ztab[y] + camz` is
+  unchanged by adding 512 and inverted by adding 256, so the whole
+  per-scanline table is a function of `camz mod 512` — 512 of them, 64K,
+  6,139 T-states;
+- **the row loop is compiled per (band, phase)**, 2,080 copies of 30 bytes,
+  so the band loop patches one address instead of six bytes — 9,359.
+
+Paging costs five `OUT`s a frame, because the bank is cut by band and the
+board is drawn in band order.
+
 ## 17. The same road at 50 Hz, and wider than the screen — **BUILT**
 
 `road2.z80s` is `road.z80s` with the palette nailed down, a flatter camera

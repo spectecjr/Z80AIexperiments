@@ -71,8 +71,10 @@ def masks(here):
           % (MSK % 0, rows))
 
 
-def main(here):
-    vtab, vidx, rec = [], {}, []
+def values():
+    """The value sets a run POPs, and which set each (width, way round)
+    wants - shared out, because most runs want the same few."""
+    vtab, vidx, which = [], {}, {}
     for p in C.WIDTHS:
         for t in (0, 1):
             _, _, vals = M3.build(p, t)
@@ -82,9 +84,12 @@ def main(here):
             if v not in vidx:
                 vidx[v] = len(vtab)
                 vtab.append(v)
-            rec.append(("%s_e%d_%d" % (PRE, p, t),
-                        "chq4_val + %d" % (32 * vidx[v])))
+            which[(p, t)] = vidx[v]
+    return vtab, which
 
+
+def bands():
+    """The rows each width covers, widest square first."""
     band, y = [], C.H - 1
     while y >= C.TOP:
         p = C.PTAB[y]
@@ -93,6 +98,18 @@ def main(here):
             n += 1
             y -= 1
         band.append((n, p))
+    return band
+
+
+def main(here):
+    vtab, which = values()
+    rec = []
+    for p in C.WIDTHS:
+        for t in (0, 1):
+            rec.append(("%s_e%d_%d" % (PRE, p, t),
+                        "chq4_val + %d" % (32 * which[(p, t)])))
+
+    band = bands()
     assert [p for _, p in band] == list(range(C.WIDTHS[-1],
                                               C.WIDTHS[0] - 1, -1))
     spill = C.kmax(C.PTAB[C.TOP])

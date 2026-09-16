@@ -59,11 +59,13 @@ CHQ4_C2:        EQU 0x2222
 CHQ4_LMPR:      EQU 250
 CHQ4_HMPR:      EQU 251
 CHQ4_VMPR:      EQU 252
-CHQ4_SCR0:      EQU 6           ; the buffers, on even pages because a
-CHQ4_SCR1:      EQU 8           ; MODE 4 screen wraps even to odd
+CHQ4_SCR0:      EQU 10          ; the buffers, on even pages because a
+CHQ4_SCR1:      EQU 12          ; MODE 4 screen wraps even to odd
 CHQ4_MODE4:     EQU 0x60
-CHQ4_BANK:      EQU 0x20        ; the run bank, with RAM over ROM 0
-CHQ4_MSK0:      EQU 0x22        ; and the mask tables, two chunks of it
+CHQ4_BANK:      EQU 0x20        ; the bank's first chunk, RAM over ROM 0 -
+                                ; the others are two pages apart, and the
+                                ; band table says which comes next
+CHQ4_MSK0:      EQU 0x26        ; and the mask tables, two chunks of them
 CHQ4_SCREEN:    EQU 0x8000
 
 ;------------------------------------------------------------------
@@ -273,6 +275,30 @@ chq4_bp:
         LD   B,A                ; the count lives with the row pointer
         EXX
         INC  HL
+
+    IF CHQ4_PAGED
+        LD   E,(HL)             ; this band's table of compiled bodies
+        INC  HL
+        LD   D,(HL)
+        INC  HL
+        LD   (chq4_bp+1),HL     ; and on to the next band
+        EX   AF,AF'             ; the phase, two bytes an entry
+        ADD  A,A
+        ADD  A,E
+        LD   E,A
+        JR   NC,chq4_b2
+        INC  D
+chq4_b2:
+        LD   A,(DE)             ; the body for this band and phase, which
+        LD   (chq4_next+1),A    ; is the whole of what a band sets up now:
+        INC  DE                 ; the row's last byte, the value set, the
+        LD   A,(DE)             ; shift and the run are all baked into it
+        LD   (chq4_next+2),A
+        EXX                     ; the row loop turns round in the other
+        LD   A,B                ; set. Rows is never zero, so the jump
+        OR   A                  ; below is always taken the first time
+        JP   chq4_next
+    ELSE
         EX   AF,AF'
         SRL  A                  ; the odd pixel of phase picks the run
         JR   NC,chq4_b2
@@ -325,6 +351,7 @@ chq4_b4:
         EXX                     ; the row loop turns round in the other
                                 ; set: the row pointer, the mask pointer
                                 ; and the count are all in it
+    ENDIF
 
 ;------------------------------------------------------------------
 ; The row loop. Nothing between POP AF and the run may touch the
@@ -332,6 +359,7 @@ chq4_b4:
 ; the run overwrites it again if the run reaches that far.
 ;------------------------------------------------------------------
 
+    IF CHQ4_PAGED = 0
 chq4_row:
         LD   A,(DE)             ; this row's mask
 chq4_ed:
@@ -360,6 +388,8 @@ chq4_shift:
         EXX
 chq4_j:
         JP   0                  ; patched: the run for this band
+    ENDIF
+
 chq4_ret:
 chq3_ret:                       ; the names the run banks know: chequer3's
 chq5_ret:                       ; bank, or chequer5's own full-depth one
@@ -370,11 +400,34 @@ chq5_ret:                       ; bank, or chequer5's own full-depth one
         JR   NC,chq4_r2
         DEC  H
 chq4_r2:
+    IF CHQ4_PAGED
+        DEC  B
+chq4_next:
+        JP   NZ,0               ; patched: this band's compiled body, and
+        EXX                     ; one T-state dearer than the DJNZ it
+        JP   chq4_b1            ; replaces
+    ELSE
         DJNZ chq4_row
         EXX                     ; the band code wants the main set back
         JP   chq4_b1
+    ENDIF
 
 chq4_bend:
+    IF CHQ4_PAGED
+        INC  HL                 ; the byte after the count says which chunk
+        LD   A,(HL)             ; of the bank comes next, or zero for the
+        OR   A                  ; end of the board
+        JR   Z,chq4_bdone
+        OUT  (CHQ4_LMPR),A
+        LD   HL,chq4_band       ; every chunk keeps its band table at its
+        LD   (chq4_bp+1),HL     ; foot, so that is all there is to it
+        LD   HL,(chq4_acc)      ; but getting here cost a step of the
+        LD   BC,(chq4_cx)       ; phase, because the terminator went round
+        ADD  HL,BC              ; the band loop to be found - so give it
+        LD   (chq4_acc),HL      ; back
+        JP   chq4_b1
+chq4_bdone:
+    ENDIF
         EXX                     ; the top run spilled into the haze row
         LD   SP,HL              ; above it; put that back
         INC  SP
@@ -384,6 +437,10 @@ chq4_bend:
         PUSH BC
         EDUP
         LD   SP,(chq4_sp)
+    IF CHQ4_PAGED
+        LD   A,CHQ4_BANK        ; the caller's stack is in the first chunk
+        OUT  (CHQ4_LMPR),A
+    ENDIF
         EI
         RET
 

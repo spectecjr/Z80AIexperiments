@@ -22,12 +22,13 @@ os.environ["HARRIER_MINP"] = "1"        # before the model reads the geometry
 import chequer4 as C
 from sam import Sam
 
-CHUNKS = ("harness_chq5bank.asm", "harness_chq5msk0.asm",
-          "harness_chq5msk1.asm")
+CHUNKS = ("harness_chq5c0.asm", "harness_chq5c1.asm",   # the bank, cut
+          "harness_chq5c2.asm",                         # by band
+          "harness_chq5msk0.asm", "harness_chq5msk1.asm")
 
 
 def main():
-    b = Sam("harness_chq5.asm", CHUNKS, screens=(6, 8),
+    b = Sam("harness_chq5.asm", CHUNKS, screens=(10, 12),
             chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"]})
     s = b.syms
     it = b.call(s["chq4_init"])

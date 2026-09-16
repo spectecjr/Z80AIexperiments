@@ -21,7 +21,7 @@ of hardware these budgets *do* now take account of is paging: a SAM has
 | | T-states a frame (min / mean / max) | Hz | |
 |---|---|---|---|
 | `chequer4` | 110,835 / **114,656** / 118,586 | **50** | the floor with its depth stripes in the pixels |
-| `chequer5` | 125,343 / **129,183** / 133,151 | 25 | the same routine, board all the way to the horizon |
+| `chequer5` | 109,825 / **113,659** / 117,621 | **50** | the same routine, board to the horizon, bank paged |
 | `chequer6` | 150,767 / **154,607** / 158,575 | 25 | and a pilot in a jetpack over the top of it |
 | `zarch` | 195,482 / **208,206** / 215,619 | 25 | Zarch's ground: a chequered plane, turning |
 | `chequer3` | 106,970 / **110,806** / 114,736 | **50** | the same picture, stripes in the palette |

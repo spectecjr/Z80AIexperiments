@@ -1,16 +1,23 @@
 # chequer5 — design notes
 
-**The same routine as `chequer4.z80s`, byte for byte, with the board drawn
-all the way to the horizon.** Squares down to a single pixel wide, no haze
-at all: 95 scanlines of board where chequer4 draws 84. There is no
-`chequer5.z80s` — only a viewport, a run bank and a set of tables, which is
-the point.
+**The same routine as `chequer4.z80s` with the board drawn all the way to
+the horizon, at 50 Hz.** Squares down to a single pixel wide, no haze at
+all: 95 scanlines of board where chequer4 draws 84, for **113,659
+T-states, 95% of a 50 Hz frame, worst frame included**. There is still no
+`chequer5.z80s` — a viewport, a bank and a set of tables — but the bank is
+paged now and `CHQ4_PAGED` picks which memory map the shared code uses.
+
+It was a 25 Hz routine until the bank was paged. Two things moved it, and
+both are things a flat 64K cannot hold: the swap mask became a lookup
+rather than a calculation (6,139), and the row loop became a compiled body
+per band and phase (9,359).
 
 | | scanlines | narrowest square | T-states a frame | |
 |---|---|---|---|---|
 | `chequer4` | 84 | 8 px | 110,835 / **114,656** / 118,586 | 50 Hz |
-| **`chequer5`** | **95** | **1 px** | 119,179 / **123,018** / 126,985 | **25 Hz** |
-| `chequer5`, before the mask tables | 95 | 1 px | 125,343 / 129,183 / 133,151 | 25 Hz |
+| **`chequer5`** | **95** | **1 px** | 109,825 / **113,659** / 117,621 | **50 Hz** |
+| `chequer5`, before the compiled bodies | 95 | 1 px | 119,179 / 123,018 / 126,985 | 25 Hz |
+| `chequer5`, before the mask tables too | 95 | 1 px | 125,343 / 129,183 / 133,151 | 25 Hz |
 | `harrier` | 84 | 8 px | 220,394 / **221,451** / 223,413 | 25 Hz |
 
 Bit exact against its model over 112 camera positions, the same test as
@@ -57,9 +64,10 @@ T-states. So there is no partial extension that fits either. The board
 either stops where chequer4 stops, or it goes to the horizon and the frame
 goes to 25 Hz. That is a cliff, not a slope.
 
-**The mask tables took 6,139 off it and the cliff is still there**: the
-worst frame is 126,985, so 6,985 short. What is left is the band loop,
-and the honest arithmetic on it is below.
+**That was true of a flat 64K.** The mask tables took 6,139 off it and the
+compiled bodies another 9,359, and the cliff is behind us: the worst frame
+is 117,621, which is 2,379 inside a 50 Hz one. What follows is what it
+took.
 
 **At 25 Hz, though, it is cheap.** 129,183 of a 240,000 T-state frame is
 54%, where harrier's 25 Hz floor — with the haze, and eleven scanlines
@@ -82,25 +90,54 @@ Everything else — 62,300 T-states — is dispatch:
 | `chq4_msk8` | 7,807 | 82 |
 | the runs' overrun past the row | ~4,180 | ~44 |
 
-so it would have to lose 13,000 T-states, a fifth of it — 6,985 now that
-the mask table is a lookup. The band loop is where the rest is: 454
-T-states to set up a band that is 1.48 scanlines long, patching six bytes
-into the row loop from three tables.
+so it had to lose 13,000 T-states, a fifth of it. The band loop is where
+it was: 454 T-states to set up a band that is 1.48 scanlines long,
+patching six bytes into the row loop from three tables.
 
-**Precomputing those six bytes is not enough.** Counting the instructions:
-of the ~357 T-states a table would replace, ~78 is the six `LD (nn),A`
-stores that patch the row loop, and a table still has to do those *and*
-read six bytes. It comes out at ~284, so **~4,700 a frame** — worth having,
-not worth 6,985.
+**Precomputing those six bytes is not enough.** Of the ~357 T-states a
+table would replace, ~78 is the six `LD (nn),A` stores that patch the row
+loop, and a table still has to do those *and* read six bytes: ~284 against
+~357, so about 4,700 a frame. The stores are the floor, not the
+arithmetic — which is why the answer is not to compute the patch faster
+but to stop patching.
 
-**Compiling the row loop's body per (band, phase) is.** There are 2,080 of
-those pairs — the phase is in `[0, p)` and the widths run 1..64 — and a
-body is ~30 bytes, so 62K, with the run bank duplicated in each chunk
-beside it. The band loop then patches one address rather than six bytes:
-~168 against ~357, which is **~12,100 a frame** and clears the cliff with
-room. It is a day's work and ~227K of a 256K machine.
+**So the row loop is compiled instead**, one copy per (band, phase), with
+all six baked in — the row's last byte, the value set, the shift and the
+run to jump to. The band loop patches one address: the jump the row loop
+turns round on. A row costs exactly what it did, one T-state more for the
+`DEC B / JP NZ,nn` that replaces the `DJNZ`, and a band costs ~168 instead
+of ~454: **9,359 T-states a frame, measured**.
 
-Two things were measured and rejected while looking for it:
+There are 2,080 of those pairs, because the phase of a band of width p is
+in `[0, p)` and the widths run 1..64, and a body is 30 bytes. 62K of them,
+which is the whole point: it is not a thing a flat 64K can hold.
+
+## The bank is cut by band, so paging is five OUTs
+
+Nothing is duplicated and nothing is paged twice. The board is drawn
+widest square first and **a band uses exactly one run**, so bodies and runs
+are walked in the same order: a chunk holds the bodies, the runs, the value
+sets and the band table for a stretch of bands, and needs nothing from any
+other chunk.
+
+| chunk | bands | widths | bytes |
+|---|---|---|---|
+| 0 | 15 | 64..50 | 30,368 |
+| 1 | 22 | 49..28 | 31,092 |
+| 2 | 27 | 27..1 | 16,644 |
+
+Every chunk keeps its band table at its foot, so a switch is an `OUT` and
+a pointer, and the terminator carries the next chunk's `LMPR`. A frame
+pages **five** times — two for the mask table, two to walk the bank, one to
+put the first chunk back for the caller's stack — which is 55 T-states.
+
+The trap, and it cost an hour: the terminator goes round the band loop to
+be found, and the band loop's first act is to step the phase. Every chunk
+switch quietly ate one step, so the phases drifted after the first
+boundary and a band eventually indexed past its own table. The switch
+gives the step back.
+
+Two things were measured and rejected while looking for the 13,000:
 
 - **Drawing the far rows only when they change.** They change rarely — the
   phase of a 1-pixel square never moves at all — and over the demo's camera
@@ -114,6 +151,15 @@ Two things were measured and rejected while looking for it:
   enough on its own.
 
 ## Memory
+
+**Paged**: three bank chunks, two mask chunks and two screen pairs is 14
+pages of 16, or 224K of a 256K machine. The entry tables and the records
+are gone entirely — a body bakes the run's entry address and its value
+set — and `chq4_ztab` with them, because nothing computes a depth any
+more.
+
+What follows is how it fitted when it was flat, which is what `chequer4`
+and `chequer6` still do.
 
 A viewport change means a new run bank: 9,752 bytes of run and 3,264 of
 entry table, against chequer3's 8,722 and 3,204, because the widths now run

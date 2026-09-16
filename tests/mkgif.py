@@ -468,10 +468,8 @@ def chequer4(outdir, seconds=8):
         camx, camz = stroll(t)
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], camz.to_bytes(2, "little"))
-        into = b.peek(s["chq4_back"], 1)[0]
-        tt, _ = b.call_regs(s["chq4_frame"])
-        ts.append(tt)
-        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+        ts.append(b.call(s["chq4_frame"]))
+        frames.append(unpack(b.screen(b.shown())))
     still = [[0] * 192] * n                     # the palette does not move
     idx, pal = copper(frames, still, fog, haze)
     p = "%s/chequer4.gif" % outdir
@@ -482,29 +480,33 @@ def chequer4(outdir, seconds=8):
 
 
 def chequer5(outdir, seconds=8):
-    """chequer5 at its measured rate: 129,183 T-states a frame, 25 Hz.
+    """chequer5 at its measured rate: 113,659 T-states a frame, 50 Hz.
 
-    chequer4's routine byte for byte, with the board drawn all the way to
-    the horizon instead of stopping at eight-pixel squares: eleven more
-    scanlines, squares down to a single pixel, and no haze. It costs 14,500
-    T-states, which is exactly the wrong side of a 50 Hz frame - but at
-    25 Hz it is half the budget where harrier's 25 Hz floor was all of it.
+    chequer4's routine with the board drawn all the way to the horizon
+    instead of stopping at eight-pixel squares: eleven more scanlines,
+    squares down to a single pixel, and no haze. That cost 14,500 T-states
+    and put it the wrong side of a 50 Hz frame; a paged bank got it back,
+    with the swap mask a lookup rather than a calculation and a row loop
+    compiled per band and phase.
     """
     from mkhrdata import fog as fogtab
-    b = Bench("harness_chq5.asm", org=0)
+    from sam import Sam
+    b = Sam("harness_chq5.asm",
+            ("harness_chq5c0.asm", "harness_chq5c1.asm",
+             "harness_chq5c2.asm", "harness_chq5msk0.asm",
+             "harness_chq5msk1.asm"), screens=(10, 12),
+            chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"]})
     s = b.syms
-    b.call_regs(s["chq4_init"])
+    b.call(s["chq4_init"])
     fog, haze = fogtab()
-    n = int(seconds * 25)
+    n = int(seconds * 50)
     frames, ts = [], []
     for t in range(n):
-        camx, camz = stroll(t, 25)
+        camx, camz = stroll(t, 50)
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], camz.to_bytes(2, "little"))
-        into = b.peek(s["chq4_back"], 1)[0]
-        tt, _ = b.call_regs(s["chq4_frame"])
-        ts.append(tt)
-        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+        ts.append(b.call(s["chq4_frame"]))
+        frames.append(unpack(b.screen(b.shown())))
     still = [[0] * 192] * n                     # the palette does not move
     idx, pal = copper(frames, still, fog, haze)
     p = "%s/chequer5.gif" % outdir
