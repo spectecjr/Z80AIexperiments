@@ -21,7 +21,9 @@ The map is road2's (see road2.z80s):
     pages 4,5   buffer 0, and the resident code in page 5's spare 8K
     pages 6,7   buffer 1, and a second copy of the resident code
 
-which is what a MODE 4 screen leaves: 24K of a 32K pair.
+which is what a MODE 4 screen leaves: 24K of a 32K pair. Chunks are laid
+out two pages at a time from page 0 and step over the buffers, so
+chequer8's six are at 0, 2, 4, 6, 8 and 14.
 """
 import os
 import sys
@@ -59,9 +61,17 @@ class Sam:
         for i, s in enumerate(screens):                 # a copy behind each
             at = (s + 1) * PAGE + (code_at & 0x3FFF)    # buffer, as the
             self.ram[at:at + len(img)] = img            # routine requires
-        for i, h in enumerate(chunks):
+        self.pages = []                                 # chunks go two
+        taken, p = set(), 0                             # pages at a time,
+        for s in screens:                               # round the buffers
+            taken |= {s, s + 1}
+        while len(self.pages) < len(chunks):
+            if p not in taken and p + 1 not in taken:
+                self.pages.append(p)
+            p += 2
+        for h, p in zip(chunks, self.pages):
             img, syms = assemble(h, here=here, root=root, defines=defs)
-            self.ram[2 * i * PAGE:2 * i * PAGE + len(img)] = img
+            self.ram[p * PAGE:p * PAGE + len(img)] = img
             self.syms.update(syms)
         self.ram[RETADDR] = 0x76                        # HALT, to return to
 

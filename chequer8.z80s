@@ -1,0 +1,67 @@
+;------------------------------------------------------------------
+; chequer8.z80s - the board, the background and the pilot, all of it
+; repainted every frame
+;
+;   c8_init    the board's sky into both buffers, once
+;   c8_frame   draw from (chq4_camx, chq4_camz, c8_t, c8_pose), and flip
+;
+; chequer6 and chequer7 divide the pilot in two and redraw only the rows
+; something else paints over. This does not. Everything on the screen is
+; drawn from scratch every frame, which costs the pilot's top half - and
+; buys back the rule that made it awkward: there is no "drawn once per
+; buffer" state anywhere, so nothing here has to be per buffer, nothing
+; has to be cleared when it changes, and anything at all may move.
+;
+; THE PILOT IS COMPILED AND LIVES IN A PAGE OF ITS OWN. 96 rows of him
+; in 13,730 T-states rather than 46,793 for 63 rows of stream: every
+; byte is a PUSH, a store or a read-modify-write that was decided when
+; the data was made. At four bytes a pixel byte the three poses come to
+; 10K, which does not fit behind the screen, so LMPR maps them over the
+; board's bank for the length of the call and the bank goes back
+; afterwards - the caller's stack is in chunk 0, and that is the one
+; thing the map has to respect. See tests/mkjetrun.py.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+c8_init:
+        JP   chq4_init          ; the sky into both buffers; everything
+                                ; else is drawn every frame
+
+;------------------------------------------------------------------
+; c8_frame - one frame: the board, the background, the pilot, the flip
+;------------------------------------------------------------------
+
+c8_frame:
+        CALL chq4_msk8
+        CALL chq4_floor
+        CALL c7_city            ; the band between the board and the sky
+
+        LD   A,JET8_BANK        ; the pilot's page over the board's bank
+        OUT  (CHQ4_LMPR),A
+        LD   A,(c8_pose)
+        ADD  A,A
+        LD   L,A
+        LD   H,JET8_POSE >> 8
+        LD   A,(HL)             ; his three poses are reached through a
+        INC  HL                 ; table at the foot of the page, the way
+        LD   H,(HL)             ; the bank's chunks are
+        LD   L,A
+        CALL c8_jphl
+        LD   A,CHQ4_BANK        ; and the bank back, because the caller's
+        OUT  (CHQ4_LMPR),A      ; stack is in chunk 0
+
+        IN   A,(CHQ4_HMPR)      ; the flip, which is the hardware's own
+        AND  31                 ; record of which buffer is which
+        LD   C,A
+        OR   CHQ4_MODE4
+        OUT  (CHQ4_VMPR),A
+        LD   A,C
+        XOR  CHQ4_SCR0 ^ CHQ4_SCR1
+        OUT  (CHQ4_HMPR),A
+        RET
+
+c8_jphl:
+        JP   (HL)
+
+c8_pose:        DEFB 1          ; 0 banking left, 1 level, 2 right
