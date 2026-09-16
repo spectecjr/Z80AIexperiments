@@ -1,5 +1,6 @@
 ;------------------------------------------------------------------
-; road2.z80s - the Hang On road again, at 50 Hz and no CLUT writes
+; road2.z80s - the Hang On road again, at 50 Hz, no CLUT writes, and
+; wider than the screen
 ;
 ;   rd2_init     sky and grass into both buffers, once
 ;   rd2_frame    draw from (rd2_camx, rd2_camz) and flip
@@ -9,18 +10,18 @@
 ; white, the dashes - for two bits a scanline, and rides forward for
 ; nothing. That wants a CLUT write every scanline. At the ~150
 ; T-states a line interrupt costs here that is 28,800 a frame, about a
-; quarter of a 50 Hz one, to save at most 14,000; and it cannot even be
-; had, because the fill holds SP on the screen and an interrupt would
-; push its return address into the middle of the road.
+; quarter of a 50 Hz one, to save 11,762; and it cannot even be had,
+; because the fill holds SP on the screen and an interrupt would push
+; its return address into the middle of the road.
 ;
 ; So the palette is fixed and all of it is drawn. Two things pay:
 ;
 ; ONLY WHAT MOVED IS REPAINTED. A row's road is one interval, so the
 ; window is the road plus a fixed margin either side - which has to
 ; cover what it moves in the *two* frames a buffer waits its turn. No
-; record of where it was is needed, which also means every entry below
-; is a constant: the window moves with the road, so what the row does
-; never depends on where the road actually is. Only SP does.
+; record of where it was is needed, which also means every entry in
+; the bank is a constant: the window moves with the road, so what the
+; row does never depends on where the road actually is. Only SP does.
 ;
 ; ONE COMPILED RUN A ROW. A row's road has a shape fixed by the row and
 ; only its position moves, so it compiles once and SP places it - which
@@ -34,7 +35,7 @@
 ; A baked run has no such table: a one pixel line is a nibble in a
 ; PUSHed constant. The kerbs keep their red and white to the horizon.
 ;
-; AND THE ROAD IS WIDER THAN THE SCREEN - 118% of it at the bottom - so
+; AND THE ROAD IS WIDER THAN THE SCREEN - 121% of it at the bottom - so
 ; both ends of that run are off the row, and they want opposite
 ; answers. A PUSH run cannot be started late, so the right hand end is
 ; entered through a STUB: seven bytes a skip that hand the run the HL
@@ -45,58 +46,122 @@
 ; previous row - which is the next one drawn, and which puts grass back
 ; over it first, through the same uniform PUSH block a stale band uses.
 ;
-; The exception to the window is a row whose band parity has flipped
-; since this buffer last had it, which wants its whole width back
-; before the road goes on top. That is what sets the band period: at
-; 256 world units it is one row in six a frame and the routine misses
-; 50 Hz; at 512 it is one in twelve and the worst frame fits too. The
-; longer bands also happen to look better.
+; THE BANK IS PAGED, which is what lets every row have its own width
+; rather than one shared between two rows or five. It is 41,297 bytes
+; in two chunks of a 32K window; the rows are drawn widest first, so
+; the bank is walked forwards and a row's record carries the LMPR value
+; that pages its own chunk in. See .claude/skills/sam-coupe-hardware.
+;
+; THE MEMORY MAP, and it is the map that makes the rest simple:
+;
+;   0000-7FFF  LMPR: a chunk of the run bank, with its index tables at
+;              the foot of it. The caller's stack lives up at 7FFE, in
+;              chunk 0, and this routine leaves chunk 0 paged in.
+;   8000-DFFF  HMPR: the back buffer, always - the displayed one needs
+;              no mapping at all, which is what leaves the whole low
+;              32K for the bank.
+;   E000-FFFF  this code and its tables, in the 8K a MODE 4 screen
+;              leaves spare at the end of its odd page. There is a copy
+;              behind each buffer, and the only thing that differs
+;              between them is the one thing that should: each row's
+;              record remembers which band *that* buffer last painted.
 ;
 ; The geometry is road.z80s's, with a flatter camera: harrier's focal
 ; length, the bend integrated twice up the screen, steering as the
 ; constant of the first integration, and the centre held between rails
-; that are now only there to keep the accumulator off its own wrap.
+; that are only there to keep the accumulator off its own wrap.
 ;
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
 
-RD2_BUF0:       EQU 0x80
-RD2_BUF1:       EQU 0x20
+RD2_LMPR:       EQU 250         ; the low 32K: the bank
+RD2_HMPR:       EQU 251         ; the high 32K: the buffer being drawn
+RD2_VMPR:       EQU 252         ; and what the video hardware displays
+RD2_SCR0:       EQU 4           ; the two buffers, on even pages because a
+RD2_SCR1:       EQU 6           ; MODE 4 screen wraps even to odd
+RD2_MODE4:      EQU 0x60        ; the mode bits of VMPR
+RD2_BANK0:      EQU 0x20        ; chunk 0, with RAM over ROM 0
+RD2_SCREEN:     EQU 0x8000      ; where the back buffer is mapped
 RD2_G0:         EQU 0x2222      ; the grass, one band and the other
 RD2_G1:         EQU 0x3333
+
+;------------------------------------------------------------------
+; The way in, and the way back out of a run. RD2_OUT is a constant in
+; the bank - a chunk is assembled on its own and knows nothing else
+; about this code - so rd2_out has to be at a fixed address, which is
+; what the three bytes above it are for.
+;------------------------------------------------------------------
+
+rd2_enter:
+        JP   rd2_row
+
+rd2_out:
+        LD   HL,0
+        ADD  HL,SP              ; where the run ran out
+        LD   DE,-128
+        ADD  IX,DE
+        LD   A,L
+        SUB  IXL                ; and how far into the row above that is
+        LD   (rd2_dirt),A
+        EXX
+        DEC  B
+        EXX
+        JP   NZ,rd2_row
+
+rd2_seg1:
+        LD   HL,(rd2_segp)      ; the next stretch of rows, and the chunk of
+        LD   A,(HL)             ; the bank their runs are in. The rows are
+        INC  HL                 ; drawn widest first and the bank is cut in
+        OR   A                  ; the same order, so a bank of any size is
+        JR   Z,rd2_end          ; two OUTs a frame and nothing a row
+        OUT  (RD2_LMPR),A
+        LD   A,(HL)
+        INC  HL
+        LD   (rd2_segp),HL
+        EXX
+        LD   B,A
+        EXX
+        JP   rd2_row
+
+rd2_end:
+        LD   A,RD2_BANK0        ; the caller's stack is in chunk 0
+        OUT  (RD2_LMPR),A
+        LD   SP,(rd2_sp)
+        EI
+        RET
+
+        ASSERT rd2_out == RD2_OUT
 
 ;------------------------------------------------------------------
 ; rd2_init - the sky into both buffers, and grass under it
 ;
 ; The sky is drawn once and never again: nothing below the horizon
-; reaches it, not even the run's left hand end, because the window
-; stops well short of the row's start. The road's rows get grass so
-; that a buffer is never read before it is written, and every record's
-; parity marks are set to something no row can match, so the first two
-; frames repaint in full.
+; reaches it, not even a run's left hand end, because a row only
+; spills once it is wider than the rails, which is forty rows below
+; the horizon. The road's rows get grass so that a buffer is never
+; read before it is written, and every record's parity mark is set to
+; something no row can match, so the first frame in each repaints in
+; full.
+;
+; On return HMPR maps buffer 0, which is the one to draw into, and the
+; hardware is displaying buffer 1.
 ;------------------------------------------------------------------
 
 rd2_init:
-        LD   A,RD2_BUF0
-        LD   (rd2_back),A
-        LD   A,RD2_BUF1
-        LD   (rd2_front),A
-        LD   H,RD2_BUF0
+        LD   A,RD2_SCR1
+        OUT  (RD2_HMPR),A
         CALL rd2_fill
-        LD   H,RD2_BUF1
+        LD   A,RD2_SCR1 | RD2_MODE4
+        OUT  (RD2_VMPR),A
+        LD   A,RD2_SCR0
+        OUT  (RD2_HMPR),A
         CALL rd2_fill
-        LD   IX,rd2_rec         ; no row has drawn into either buffer yet
-        LD   B,RD2_ROWS
-rd2_i1:
-        LD   (IX+4),255
-        LD   (IX+5),255
-        LD   DE,RD2_REC
-        ADD  IX,DE
-        DJNZ rd2_i1
+        LD   A,RD2_BANK0
+        OUT  (RD2_LMPR),A
         RET
 
 rd2_fill:
-        LD   L,0
+        LD   HL,RD2_SCREEN
         LD   DE,rd2_sky
         LD   C,RD2_HZ + 1       ; the sky's own rows, a byte each
 rd2_f1:
@@ -119,32 +184,38 @@ rd2_f4:
         DJNZ rd2_f4
         DEC  C
         JR   NZ,rd2_f3
+        LD   HL,rd2_rec + 5     ; and no band has been painted into this
+        LD   DE,RD2_REC         ; buffer yet
+        LD   B,RD2_ROWS
+rd2_f5:
+        LD   (HL),255
+        ADD  HL,DE
+        DJNZ rd2_f5
         RET
 
 ;------------------------------------------------------------------
-; rd2_frame - one frame
+; rd2_frame - one frame, and the flip
+;
+; Which buffer is which is not written down anywhere: HMPR maps the
+; one being drawn and VMPR says which is shown, so the hardware keeps
+; that state and this reads it back. Note that the OUT to HMPR swaps
+; this code for the copy behind the other buffer - which is why both
+; copies have to be identical, and why the caller's stack has to be in
+; the low 32K.
 ;------------------------------------------------------------------
 
 rd2_frame:
         LD   HL,(rd2_camz)      ; the depth goes in as an immediate, so
         LD   (rd2_cl+1),HL      ; nothing has to carry it down the rows
-        LD   A,(rd2_back)       ; and which of the two parity marks in
-        CP   RD2_BUF0           ; each record is this buffer's
-        LD   A,0xBD             ; CP L
-        LD   HL,-2
-        JR   Z,rd2_fr1
-        LD   A,0xBC             ; CP H
-        LD   HL,-1
-rd2_fr1:
-        LD   (rd2_mk),A
-        LD   (rd2_mw+1),HL
         CALL rd2_draw
-        LD   A,(rd2_back)
-        LD   B,A
-        LD   A,(rd2_front)
-        LD   (rd2_back),A
-        LD   A,B
-        LD   (rd2_front),A
+        IN   A,(RD2_HMPR)
+        AND  31
+        LD   C,A                ; the buffer just drawn
+        OR   RD2_MODE4
+        OUT  (RD2_VMPR),A       ; show it
+        LD   A,C
+        XOR  RD2_SCR0 ^ RD2_SCR1
+        OUT  (RD2_HMPR),A       ; and map the other, to draw into next
         RET
 
 ;------------------------------------------------------------------
@@ -153,7 +224,8 @@ rd2_fr1:
 ; IX is the row's first byte on screen, IY the road's centre in 8.8
 ; pixels, and SP walks the row's record until the moment it becomes
 ; the screen. Bottom upwards because that is the order the bend
-; integrates in.
+; integrates in - and because that is what makes a run's left hand
+; spill repairable: it lands in the row that is drawn next.
 ;------------------------------------------------------------------
 
 rd2_draw:
@@ -178,28 +250,17 @@ rd2_draw:
         SBC  HL,DE
         PUSH HL
         POP  IY                 ; IY = x
-        LD   A,(rd2_back)
-        LD   IXH,A
-        LD   IXL,0
-        LD   DE,(192 - 1) * 128 ; the last row's first byte
-        ADD  IX,DE
+        LD   IX,RD2_SCREEN + (192 - 1) * 128
         EXX
-        LD   B,RD2_ROWS
         LD   HL,rd2_rec         ; the records, and the stride to the next
         LD   DE,RD2_REC
         EXX
-
-
+        LD   HL,rd2_seg         ; and the first stretch of rows
+        LD   (rd2_segp),HL
+        JP   rd2_seg1
 
 ;------------------------------------------------------------------
 ; One row: where the road is, and then the run that draws it
-;
-; The window - grass margin, road, grass margin - is one run, so a row
-; is one dispatch. Where its right hand end is off the screen the run
-; is entered through a stub, which hands it the HL it would have had
-; and puts back the odd byte at the screen's edge. Where its left hand
-; end is off, it simply spills into the previous row, which is the
-; next one drawn.
 ;------------------------------------------------------------------
 
 rd2_row:
@@ -208,9 +269,9 @@ rd2_row:
         ADD  HL,DE              ; on to the next while SP reads this one
         EXX
         POP  HL                 ; this row's depth, kept until the centre
-        LD   A,IYH              ; is out. The rails are constants now:
-        CP   RD2_CLO            ; they no longer keep the road on screen,
-        JR   NC,rd2_r1          ; only the accumulator off its own wrap
+        LD   A,IYH              ; is out. The rails no longer keep the road
+        CP   RD2_CLO            ; on screen - nothing does - they only keep
+        JR   NC,rd2_r1          ; the accumulator off its own wrap
         LD   A,RD2_CLO
 rd2_r1:
         CP   RD2_CHI + 1
@@ -218,21 +279,18 @@ rd2_r1:
         LD   A,RD2_CHI
 rd2_r2:
         LD   IYH,A
-        POP  DE                 ; E = w + margin + 1, D = the width's index
-        ADD  A,E                ; nine bits, because a road wider than the
-        RRA                     ; screen puts the window's end past 255
-        LD   B,0                ; A = that end as a byte, and the bit that
-        RL   B                  ; falls out of it is the phase
-        LD   C,A
-        LD   A,B                ; which run this row wants: four entries a
-        ADD  A,A                ; width and two a phase. B keeps it through
-        ADD  A,D                ; the geometry, which has no use for it
-        LD   B,A
-        LD   A,C                ; back to the window's end
+        POP  DE                 ; E = w + margin + 1, D = the width, as a
+        ADD  A,E                ; word offset into the index tables. Nine
+        RRA                     ; bits, because a road wider than the screen
+        LD   C,A                ; puts the window's end past 255
+        LD   A,D                ; and the bit that falls out is the phase,
+        ADC  A,0                ; which rides in the width's spare bottom
+        LD   B,A                ; bit until rd2_road wants both
+        LD   A,C
         SUB  128                ; how far past the screen's right hand edge
         JR   C,rd2_r3
-        INC  A                  ; it is, and so how many PUSHes of it are
-        SRL  A                  ; off the screen
+        INC  A                  ; the window ends, and so how many PUSHes of
+        SRL  A                  ; it are off the screen
         JR   rd2_r4
 rd2_r3:
         XOR  A
@@ -249,8 +307,8 @@ rd2_cl:
         LD   A,H                ; bit 8 of it is the band's parity, and
         AND  1                  ; all that riding forward costs
         LD   C,A
-        LD   A,H
-        AND  0x7E               ; bits 9 to 14 are the track's segment
+        LD   A,H                ; and bits 9 to 14 the track's segment
+        AND  0x7E
         LD   L,A
         LD   H,rd2_trk / 256
         LD   A,(HL)
@@ -263,18 +321,55 @@ rd2_cl:
         LD   D,H
         LD   E,L
         ADD  IY,DE              ; and x += dx, which is the row above's
-        LD   E,B                ; the run's index, for rd2_road
-        POP  HL                 ; the parity each buffer last painted
-        LD   A,C
-rd2_mk:
-        CP   L                  ; patched: which of the two is ours
+        POP  HL                 ; L = the window's width in bytes, H = the
+        LD   A,C                ; band this buffer last painted here
+        CP   H
         JR   Z,rd2_r7
-rd2_mw:
-        LD   HL,-2              ; patched with it. The bands have moved on
-        ADD  HL,SP              ; under this row, so all of its grass is
-        LD   (HL),A             ; stale and the whole of it goes back
-        XOR  A
-        JR   rd2_r9
+        ; --- the bands have moved on under this row, so its grass is
+        ; stale - but only the grass, and the window is about to have the
+        ; road drawn over it, so what goes back is the two ends
+        LD   A,(rd2_sk)
+        ADD  A,A
+        LD   E,A
+        LD   A,(rd2_sp0)
+        ADD  A,E                ; the window's right hand end, unclipped
+        SUB  L                  ; less its width: its left hand end
+        JR   NC,rd2_r5
+        XOR  A                  ; which may be off the row, and then there
+rd2_r5:                         ; is nothing stale to the left of it
+        INC  A                  ; round up: the byte it lands in is the
+        AND  0xFE               ; run's own
+        LD   (rd2_f),A
+        LD   A,C                ; and this buffer has the new band now
+        LD   HL,-1
+        ADD  HL,SP
+        LD   (HL),A
+        LD   D,RD2_G0 & 255
+        BIT  0,C
+        JR   Z,rd2_r6
+        LD   D,RD2_G1 & 255
+rd2_r6:
+        LD   E,D
+        LD   A,(rd2_f)
+        ADD  A,IXL              ; SP to where the left hand fill stops
+        LD   L,A
+        LD   A,IXH
+        ADC  A,0
+        LD   H,A
+        LD   SP,HL
+        LD   A,(rd2_f)
+        SRL  A
+        LD   L,A
+        LD   A,64
+        SUB  L                  ; and into the block that many PUSHes from
+        LD   L,A                ; its end
+        LD   H,rd2_fillL / 256
+        JP   (HL)
+
+rd2_r6b:
+        LD   A,(rd2_sp0)        ; then the grass from the window's right
+        JR   rd2_r8             ; hand end to the screen's
+
 rd2_r7:
         LD   A,(rd2_dirt)       ; otherwise only what the row below spilled
         CP   128                ; into it, and usually nothing did
@@ -288,10 +383,9 @@ rd2_r8:
 rd2_r9:
         RRA                     ; and a PUSH covers two
         LD   (rd2_f),A
-        LD   B,E                ; the run's index, while DE carries the
-        LD   D,RD2_G0 & 255     ; grass - which is the only thing a fill
-        BIT  0,C                ; needs a register pair for, and the only
-        JR   Z,rd2_r10          ; place the parity has to be a colour
+        LD   D,RD2_G0 & 255     ; DE carries the grass, because BC is the
+        BIT  0,C                ; width and the parity and HL is about to be
+        JR   Z,rd2_r10          ; the screen
         LD   D,RD2_G1 & 255
 rd2_r10:
         LD   E,D
@@ -309,6 +403,11 @@ rd2_r10:
 
 ;------------------------------------------------------------------
 ; Into the run: SP first, because the run starts PUSHing at once.
+;
+; The bank's index tables are eight pages at the foot of whichever
+; chunk is in - a page for each parity and phase of the run table, and
+; four more for the stubs - so the page is the parity and the phase,
+; and the offset in it is the width.
 ;------------------------------------------------------------------
 
 rd2_road:
@@ -319,13 +418,19 @@ rd2_road:
         ADC  A,0
         LD   H,A
         LD   SP,HL
+        LD   A,B                ; the phase, out of the width's bottom bit
+        AND  1
+        LD   L,A
+        LD   A,C                ; and the parity above it
+        ADD  A,A
+        ADD  A,L
+        LD   H,A
         LD   A,(rd2_sk)
         OR   A
         JR   NZ,rd2_p1
-        LD   L,E                ; nothing off the screen, so straight into
-        LD   A,C                ; the run: it loads HL itself. A page a
-        ADD  A,rd2_rt0 / 256    ; parity, so the parity is the page
-        LD   H,A
+        LD   A,B                ; nothing off the screen, so straight into
+        AND  0xFE               ; the run: it loads HL itself
+        LD   L,A
         LD   A,(HL)
         INC  L
         LD   H,(HL)
@@ -333,22 +438,25 @@ rd2_road:
         JP   (HL)
 
 rd2_p1:
-        DEC  A                  ; else the stub for that many PUSHes in,
-        LD   B,A                ; seven bytes each
+        LD   E,A                ; else the stub for that many PUSHes in:
+        DEC  A                  ; seven bytes each, in the stub table four
+        LD   E,A                ; pages above the run table
         ADD  A,A
         ADD  A,A
         ADD  A,A
-        SUB  B
-        LD   B,A
-        LD   L,E
-        LD   A,C
-        ADD  A,rd2_st0 / 256
+        SUB  E
+        LD   E,A
+        LD   A,H
+        ADD  A,4
         LD   H,A
+        LD   A,B
+        AND  0xFE
+        LD   L,A
         LD   A,(HL)
         INC  L
         LD   H,(HL)
         LD   L,A
-        LD   A,B
+        LD   A,E
         ADD  A,L
         LD   L,A
         JR   NC,rd2_p2
@@ -358,28 +466,6 @@ rd2_p2:
         INC  HL                 ; put at the screen's own right hand edge.
         LD   (IX+127),A         ; Stored always: where it was not wanted the
         JP   (HL)               ; run's own first PUSH covers it
-
-;------------------------------------------------------------------
-; The runs all end here, and the row loop with them. SP is where the
-; run ran out, which is the next row's problem if it is off the left
-; hand end of this one.
-;------------------------------------------------------------------
-
-rd2_out:
-        LD   HL,0
-        ADD  HL,SP              ; where the run ran out
-        LD   DE,-128
-        ADD  IX,DE
-        LD   A,L
-        SUB  IXL                ; and how far into the row above that is
-        LD   (rd2_dirt),A
-        EXX
-        DEC  B
-        EXX
-        JP   NZ,rd2_row
-        LD   SP,(rd2_sp)
-        EI
-        RET
 
 ;------------------------------------------------------------------
 ; Grass, from a byte in the row to the end of it: the whole row when
@@ -392,15 +478,19 @@ rd2_out:
         ALIGN 256
 rd2_fill128:
         DEFS 64,0xD5            ; PUSH DE
-        LD   E,B                ; and the run's index back
         JP   rd2_road
 
+        ALIGN 256
+rd2_fillL:
+        DEFS 64,0xD5            ; the same, for the grass to the left of a
+        JP   rd2_r6b            ; window whose band has moved on
+
 ;------------------------------------------------------------------
-; Workspace
+; Workspace. There is a copy of all of this behind each buffer, so
+; nothing here may carry state from one frame to the next - except
+; each record's parity mark, which is per buffer and wants to be.
 ;------------------------------------------------------------------
 
-rd2_back:       DEFB RD2_BUF0
-rd2_front:      DEFB RD2_BUF1
 rd2_camx:       DEFW 0          ; the camera's lateral offset, world units
 rd2_camz:       DEFW 0          ; and how far it has come
 rd2_dx:         DEFS 2
@@ -410,3 +500,4 @@ rd2_sk:         DEFS 1          ; and how many PUSHes of it are off screen
 rd2_dirt:       DEFS 1          ; how far into this row the row below
                                 ; spilled, 128 for not at all
 rd2_f:          DEFS 1          ; and where a fill starts, in PUSHes
+rd2_segp:       DEFS 2          ; where the row loop is in rd2_seg

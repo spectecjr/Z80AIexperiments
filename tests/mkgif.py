@@ -924,21 +924,24 @@ def road(outdir, seconds=8):
 
 
 def road2(outdir, seconds=8):
-    """road2 at its measured rate: 113,313 T-states a frame, 50 Hz.
+    """road2 at its measured rate: 112,736 T-states a frame, 50 Hz.
 
     The same road as demo/road.gif with the palette nailed down - no
     CLUT writes at all, so the bands, the kerb's red and white and the
-    dashes are drawn rather than flipped - on a flatter camera, and 118%
+    dashes are drawn rather than flipped - on a flatter camera, and 121%
     of the screen wide at the bottom, which is a road that runs off both
     edges. What pays for drawing it is that only what moved gets
-    repainted. Compare road.gif, which is the same road at 25 Hz with a
-    copper it cannot have.
+    repainted, and its run bank is paged rather than squeezed into the
+    address space, so every row has a width of its own. Compare
+    road.gif, which is the same road at 25 Hz with a copper it cannot
+    have.
     """
     import math
     import road2 as R
-    b = Bench("harness_rd2.asm", org=0)
+    from sam import Sam
+    b = Sam("harness_rd2.asm", ("harness_rd2a.asm", "harness_rd2b.asm"))
     s = b.syms
-    b.call_regs(s["rd2_init"])
+    b.call(s["rd2_init"])
     pal = [sam_rgb(v) for v in b.peek(s["rd2_pal"], 16)]
     n = seconds * 50
     frames, ts = [], []
@@ -947,10 +950,8 @@ def road2(outdir, seconds=8):
         camz = (t * 20) & 0xFFFF
         b.poke(s["rd2_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["rd2_camz"], camz.to_bytes(2, "little"))
-        into = b.peek(s["rd2_back"], 1)[0]
-        tt, _ = b.call_regs(s["rd2_frame"])
-        ts.append(tt)
-        frames.append(unpack(b.peek(BUF[into], 128 * 192)))
+        ts.append(b.call(s["rd2_frame"]))
+        frames.append(unpack(b.screen(b.shown())))
     p = "%s/road2.gif" % outdir
     durs = held(ts)
     size = write_gif(p, frames, pal, durs)

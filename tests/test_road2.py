@@ -8,14 +8,17 @@ road2 repaints only what moved, so a frame depends on the two before
 it: this drives a whole ride rather than a list of poses, and checks
 every frame of it against the ideal picture - which the routine has to
 land on however little of it it chose to touch.
+
+The bank is paged, so this runs on tests/sam.py's emulation of LMPR,
+HMPR and VMPR rather than on a flat 64K, and reads a buffer back out
+of physical RAM - after the flip the buffer just drawn is the one the
+video hardware is displaying, and it is not mapped at all.
 """
 import math
 import sys
 
-from bench import Bench
 import road2 as A
-
-BUF = {0x80: 0x8000, 0x20: 0x2000}
+from sam import Sam
 
 
 def ride(n):
@@ -25,22 +28,21 @@ def ride(n):
 
 
 def main():
-    b = Bench("harness_rd2.asm", org=0)
+    b = Sam("harness_rd2.asm", ("harness_rd2a.asm", "harness_rd2b.asm"))
     s = b.syms
-    it, _ = b.call_regs(s["rd2_init"])
+    it = b.call(s["rd2_init"])
     print("  rd2_init  %d T-states once, sky and grass into both buffers" % it)
     poses = ride(200)
     bad, times = 0, []
     for n, (camx, camz) in enumerate(poses):
         b.poke(s["rd2_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["rd2_camz"], camz.to_bytes(2, "little"))
-        into = b.peek(s["rd2_back"], 1)[0]
-        t, _ = b.call_regs(s["rd2_frame"])
+        t = b.call(s["rd2_frame"])
         times.append(t)
         if n < 2:
             continue                    # a buffer's first frame is its init
         want, _ = A.frame(camx, camz)
-        got = b.peek(BUF[into], A.STRIDE * A.H)
+        got = b.screen(b.shown())       # the flip shows what was drawn
         if got != bytes(want):
             bad += 1
             if bad <= 3:

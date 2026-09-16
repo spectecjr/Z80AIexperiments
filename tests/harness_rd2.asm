@@ -1,9 +1,10 @@
-        ORG 0x0000
-        HALT
-        DEFS 0x0100-$
-        INCLUDE "roaddata2.z80s"
+; The resident block: this code and its tables live in the 8K a MODE 4
+; screen leaves spare at the end of its odd page, with a copy behind
+; each buffer. tests/sam.py loads it there, and the two bank chunks
+; into pages of their own.
+        DEVICE NOSLOT64K
+        ORG 0xE000
+        INCLUDE "roaddata2equ.z80s"
         INCLUDE "road2.z80s"
-        ASSERT $ <= 0x2000              ; the low block, under the screens
-        DEFS 0xE000-$
-        INCLUDE "roaddata2hi.z80s"
-        ASSERT $ <= 0xFEC0              ; the high one, clear of the stack
+        INCLUDE "roaddata2rec.z80s"
+        ASSERT $ <= 0x10000

@@ -138,9 +138,13 @@ def simulate(poses):
             p, row = par[y], y * A.STRIDE
             grass = (A.GRASS0 + p) * 17
             sp, skip, odd = place(c, w)
-            if mark[y] != p:            # the band has moved on under it
-                f = 0
-                mark[y] = p
+            if mark[y] != p:            # the band has moved on under it,
+                mark[y] = p             # so the grass either side of the
+                f = sp & ~1             # window is stale - but not the
+                left = sp + 2 * skip - 2 * grid(w, 1)[1]        # window
+                if left > 0:            # itself, which the road is about
+                    n = (left + 1) & ~1                 # to cover anyway
+                    dst[row:row + n] = bytes([grass]) * n
             elif dirt < 128:            # the row below spilled into it
                 f = max(dirt, sp) & ~1
             else:
@@ -201,9 +205,16 @@ def cost():
     return push, 95 * (44 + 42 + 44 + 22)
 
 
-LOWBANK = 5500                  # how much of the run bank fits below the
-                                # screens, once the code and tables have
-                                # had their share; the rest goes above
+TABLES = 8 * 256                # the eight index pages at the foot of a
+                                # chunk: a page for each (parity, phase) of
+                                # the run table and of the stub table, so
+                                # that the page is the parity and the phase
+                                # and the offset is the width
+CHUNK = 0x7F00 - TABLES         # and what is left of the 32K window for
+                                # runs, less a little for the caller's stack
+RD2_OUT = 0xE003                # where a run goes when it is done: a fixed
+                                # address, because a chunk is assembled on
+                                # its own and knows nothing of the code
 
 
 def emit_runs(ws, kw, lw):
@@ -228,15 +239,15 @@ def emit_runs(ws, kw, lw):
 
     Skipping nothing needs no stub: a run starts by loading HL itself.
     """
-    chunks, runs, stubs, n = [], [], [], 0
+    groups, runs, stubs, n = [], {}, {}, 0
     for w in ws:
+        out, size = [], 0
         for par in (0, 1):
             for ph in (0, 1):
-                out = []
                 nm = "rd2_r%d_%d_%d" % (w, ph, par)
                 sm = "rd2_s%d_%d_%d" % (w, ph, par)
-                runs.append(nm)
-                stubs.append(sm)
+                runs[(w, ph, par)] = nm
+                stubs[(w, ph, par)] = sm
                 r = run(w, kw[w], lw[w], ph, par)
                 off, last, pos = [], None, 0
                 for a, b in r:
@@ -259,23 +270,52 @@ def emit_runs(ws, kw, lw):
                         out.append("        LD   HL,%d" % ((b << 8) | a))
                         last = (a, b)
                     out.append("        PUSH HL")
-                out.append("        JP   rd2_out")
-                size = pos + 3 + 7 * maxskip(w)
-                chunks.append((size, "\n".join(out)))
-                n += size
-    return chunks, runs, stubs, n
+                out.append("        JP   RD2_OUT")
+                size += pos + 3 + 7 * maxskip(w)
+        groups.append((w, size, "\n".join(out)))
+        n += size
+    return groups, runs, stubs, n
 
 
-def emit(path):
+def emit(here):
+    """Write the two bank chunks and the resident tables.
+
+    The bank is paged, so it is cut into chunks of a 32K window rather
+    than squeezed either side of the screens. A chunk carries its own
+    index tables at its foot - eight pages, one for each (parity, phase)
+    of the run table and of the stub table - so the row loop's lookup is
+    the same code whichever chunk is in, and a chunk needs to know
+    nothing about the code except where a run goes when it is done.
+
+    Widths are cut in the order the screen is drawn, bottom row first,
+    so a frame walks the bank forwards and pages once.
+    """
     ws, wix = widths()
     kw = {A.WTAB[y]: A.KTAB[y] for y in range(A.HZ + 1, A.H)}
     lw = {A.WTAB[y]: A.LTAB[y] for y in range(A.HZ + 1, A.H)}
-    rec = []
+    groups, runs, stubs, nrun = emit_runs(ws, kw, lw)
+    order = sorted(groups, key=lambda g: -g[0])         # widest first
+    banks, used, at = [[]], [0], {}
+    for w, size, text in order:
+        if used[-1] + size > CHUNK:
+            banks.append([])
+            used.append(0)
+        banks[-1].append(text)
+        used[-1] += size
+        at[w] = len(banks) - 1
+
+    rec, seg = [], []
     for y in range(A.H - 1, A.HZ, -1):
         w = A.WTAB[y]
-        rec += [A.ZTAB[y] & 255, A.ZTAB[y] >> 8, w + M + 1, wix[w] * 4,
-                255, 255]
-    chunks, runs, stubs, nrun = emit_runs(ws, kw, lw)
+        rec += [A.ZTAB[y] & 255, A.ZTAB[y] >> 8, w + M + 1, wix[w] * 2,
+                2 * grid(w, 1)[1], 255]
+        lmpr = 0x20 | 2 * at[w]         # RAM over ROM 0, and the chunk
+        if seg and seg[-1][0] == lmpr:  # this row's run is in. The rows
+            seg[-1][1] += 1             # are drawn widest first and the
+        else:                           # bank is cut in the same order,
+            seg.append([lmpr, 1])       # so this is two runs of rows and
+    seg.append([0, 0])                  # the paging is two OUTs a frame
+
     pal = [0] * 16
     for i, c in ((A.SKY0, (0, 0, 4)), (A.SKY1, (0, 2, 6)), (A.SKY2, (2, 4, 6)),
                  (A.SKY3, (4, 6, 6)), (A.GRASS0, (0, 4, 0)),
@@ -284,66 +324,64 @@ def emit(path):
                  (A.KERB1, (6, 6, 6)), (A.LINE, (6, 6, 4))):
         pal[i] = sam(*c)
 
-    def page(names, i):
-        return "\n".join("        DEFW " + ",".join(names[k:k + 2])
-                          for k in range(i, len(names), 4))
+    def table(labels, par, ph, bank):
+        """One index page: a word a width, and nothing for the widths
+        that are not in this chunk."""
+        return "\n".join("        DEFW %s"
+                          % (labels[(w, ph, par)] if at[w] == bank else "0")
+                          for w in ws)
 
-    def fill(space):
-        """Runs to sit in what an index table leaves of its own page.
-
-        Four tables of four bytes a width, each wanting a page of its
-        own so that the parity can be the page and the width the offset
-        - which is four hundred odd bytes of padding if nothing goes in
-        behind them, and the bank is tight enough to want them.
-        """
-        out = []
-        while True:
-            for i, (size, text) in enumerate(chunks):
-                if size <= space:
-                    out.append(text)
-                    space -= size
-                    chunks.pop(i)
-                    break
-            else:
-                return "\n".join(out)
+    for bank, body in enumerate(banks):
+        parts = ["; Generated by tests/mkroad2data.py - do not edit by hand.",
+                 "; Chunk %d of the run bank: LMPR pages it in at 0x0000."
+                 % bank,
+                 "\nRD2_OUT:        EQU 0x%04X      ; where a run goes when"
+                 " it is done" % RD2_OUT,
+                 "\n        ORG 0x0000"]
+        for kind, labels in (("rt", runs), ("st", stubs)):
+            for par in (0, 1):
+                for ph in (0, 1):
+                    parts.append("\n        ALIGN 256\nrd2_%s%d%d_%d:\n%s"
+                                 % (kind, par, ph, bank,
+                                    table(labels, par, ph, bank)))
+        parts.append("\n        ALIGN 256")
+        parts += body
+        parts.append("\n        ASSERT $ <= 0x%04X       ; the window, less"
+                     " the caller's stack" % (CHUNK + TABLES))
+        open(os.path.join(here, "roaddata2%s.z80s" % "abcdef"[bank]),
+             "w").write("\n".join(parts) + "\n")
 
     parts = ["; Generated by tests/mkroad2data.py - do not edit by hand.",
-             "\nRD2_HZ:         EQU %d" % A.HZ,
+             "\nRD2_OUT:        EQU 0x%04X      ; where a run goes when it is"
+             " done, which" % RD2_OUT,
+             ";                               ; the bank has baked in",
+             "RD2_HZ:         EQU %d" % A.HZ,
              "RD2_ROWS:       EQU %d          ; scanlines of road"
              % (A.H - 1 - A.HZ),
-             "RD2_M:          EQU %d           ; the repaint margin, pixels" % M,
+             "RD2_M:          EQU %d           ; the repaint margin, pixels"
+             % M,
              "RD2_REC:        EQU 6           ; bytes of record a row",
-             "RD2_CLO:        EQU %d          ; and the rails the centre" % A.CLO,
+             "RD2_CLO:        EQU %d          ; and the rails the centre"
+             % A.CLO,
              "RD2_CHI:        EQU %d         ; is held between" % A.CHI]
     for nm, v in (("GRASS", A.GRASS0), ("TARMAC", A.TARMAC0),
                   ("KERB", A.KERB0), ("LINE", A.LINE)):
         parts.append("RD2_%-11s EQU 0x%02X%02X" % (nm + ":", v * 17, v * 17))
-    gap = 256 - 4 * len(ws)
-    parts += ["\n        ALIGN 256\nrd2_trk:\n" + defw(A.TRACK),
-              "\nrd2_pal:\n" + defb(pal),
-              "\nrd2_sky:\n" + defb([c * 17 for c in A.SKY]),
-              "\n        ALIGN 256\nrd2_rt0:\n" + page(runs, 0),
-              fill(gap),
-              "\n        ALIGN 256\nrd2_rt1:\n" + page(runs, 2),
-              fill(gap),
-              "\n        ALIGN 256\nrd2_st0:\n" + page(stubs, 0),
-              fill(gap),
-              "\n        ALIGN 256\nrd2_st1:\n" + page(stubs, 2),
-              fill(gap),
-              "\nrd2_rec:\n" + defb(rec, 6)]
-    low = 0
-    while chunks and low < LOWBANK:
-        size, text = chunks.pop(0)
-        parts.append(text)
-        low += size
-    hibody = [text for _, text in chunks]
-    open(path, "w").write("\n".join(parts) + "\n")
-    open(path.replace(".z80s", "hi.z80s"), "w").write(
+    open(os.path.join(here, "roaddata2equ.z80s"), "w").write(
+        "\n".join(parts) + "\n")
+    open(os.path.join(here, "roaddata2rec.z80s"), "w").write(
         "; Generated by tests/mkroad2data.py - do not edit by hand.\n"
-        "; The rest of the run bank, for above the screen buffers.\n"
-        + "\n".join(hibody) + "\n")
-    print("  %-44s %d widths, %d bytes of run and stub"
-          % ("wrote " + os.path.basename(path), len(ws), nrun))
+        "; The resident tables: the track, the palette, the sky, and a\n"
+        "; record a row - which is where the band each buffer last\n"
+        "; painted is remembered, one copy a buffer.\n"
+        + "\n".join(["\nrd2_seg:\n" + defb([n for s in seg for n in s]),
+                     "\n        ALIGN 256\nrd2_trk:\n" + defw(A.TRACK),
+                     "\nrd2_pal:\n" + defb(pal),
+                     "\nrd2_sky:\n" + defb([c * 17 for c in A.SKY]),
+                     "\nrd2_rec:\n" + defb(rec, 6)]) + "\n")
+    print("  %-44s %d widths, %d bytes in %d chunk%s of %d"
+          % ("wrote the bank", len(ws), nrun, len(banks),
+             "" if len(banks) == 1 else "s", max(used)))
 
 
 if __name__ == "__main__":
@@ -354,6 +392,5 @@ if __name__ == "__main__":
     push, dispatch = cost()
     print("  %-44s %d PUSHes a frame, %d T-states"
           % ("a frame", push, push * 11 + dispatch))
-    here = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-    emit(os.path.join(here, "roaddata2.z80s"))
+    emit(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
     sys.exit(1 if check() else 0)

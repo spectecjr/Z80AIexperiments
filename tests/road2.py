@@ -87,20 +87,17 @@ def ztab():
 
 
 def wtab():
-    """Half the road's width at each scanline, in even pixels.
+    """Half the road's width at each scanline, exactly.
 
-    Quantised, because a run is compiled per width and the bank has to
-    fit either side of the screen buffers. Finely where the road is
-    narrow and the runs are short, coarsely where it is wide and they
-    are not: the edge is moving about a pixel a row either way, so what
-    changes is the tread of the staircase, not its angle.
+    A run is compiled per width, so this used to be quantised to fit the
+    bank either side of the screen buffers - and the road's edge then
+    held its place for two rows in the middle distance and four or five
+    at the bottom, which is what a quantised width looks like. The bank
+    is paged now, so every row has its own width and the edge steps
+    every row: about two pixels, which is what the geometry says.
     """
-    out = [0] * (HZ + 1)
-    for y in range(HZ + 1, H):
-        w = (RW * (y - HZ)) // CAMH
-        q = 2 if w <= 40 else 4 if w <= 80 else 8
-        out.append(max(MINW, q * (w // q)))
-    return out
+    return [0] * (HZ + 1) + [max(MINW, (RW * (y - HZ)) // CAMH)
+                             for y in range(HZ + 1, H)]
 
 
 def ktab():
@@ -126,7 +123,7 @@ def ltab():
 # against the 8.8 accumulator wrapping, a limit on how far off the road
 # the camera may wander, and what fixes the deepest skip a run needs a
 # stub for, which is what it costs in memory.
-CLO, CHI = 68, 187
+CLO, CHI = 64, 191
 
 
 def clamp():
