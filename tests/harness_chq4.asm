@@ -1,6 +1,8 @@
+CHQ4_PAGED:     EQU 0           ; the flat 64K layout
                 ORG 0x0000
                 HALT
                 DEFS 0x0100-$
+                INCLUDE "chequer4equ.z80s"
                 INCLUDE "chequer4data.z80s"
                 INCLUDE "chequer4.z80s"
                 INCLUDE "chequer3runlo.z80s"

@@ -41,7 +41,8 @@ def zeus_shim(builddir):
     return builddir
 
 
-def assemble(harness="harness.asm", incdirs=(), here=None, root=None):
+def assemble(harness="harness.asm", incdirs=(), here=None, root=None,
+             defines=None):
     """Assemble a harness. `here` is where the harness lives and `root`
     where its INCLUDEs are, both defaulting to this file's own directory
     and its parent - which is right for tests/ beside the sources.
@@ -55,6 +56,7 @@ def assemble(harness="harness.asm", incdirs=(), here=None, root=None):
     symf = "/tmp/%s.sym" % harness.replace(".asm", "")
     cmd = [SJASM, "--sym=" + symf, "--raw=" + binf, "-I" + root]
     cmd += ["-I" + d for d in incdirs]
+    cmd += ["-D%s=%d" % (k, v) for k, v in (defines or {}).items()]
     r = subprocess.run(cmd + [os.path.join(here, harness)],
                        capture_output=True, text=True)
     if r.returncode:

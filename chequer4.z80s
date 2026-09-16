@@ -34,16 +34,56 @@
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
 
+; CHQ4_PAGED is the harness's: 0 for the flat 64K layout with both
+; buffers mapped, 1 for the paged one below.
+
 CHQ4_BUF0:      EQU 0x80
 CHQ4_BUF1:      EQU 0x20
 CHQ4_C1:        EQU 0x1111      ; the two colour indices, both nibbles
 CHQ4_C2:        EQU 0x2222
 
 ;------------------------------------------------------------------
+; The paged layout, which is what chequer5 uses (see chequer5.md):
+;
+;   0000-7FFF  LMPR: the run bank with its bands, records and value
+;              sets at the foot of it - or a chunk of the mask tables,
+;              for as long as a frame takes to copy one out of it
+;   8000-DFFF  HMPR: the back buffer. The displayed one needs no
+;              mapping at all, which is what frees the low 32K
+;   E000-FFFF  this code, in the 8K a MODE 4 screen leaves spare at
+;              the end of its odd page, with a copy behind each buffer
+;
+; See .claude/skills/sam-coupe-hardware.
+;------------------------------------------------------------------
+
+CHQ4_LMPR:      EQU 250
+CHQ4_HMPR:      EQU 251
+CHQ4_VMPR:      EQU 252
+CHQ4_SCR0:      EQU 6           ; the buffers, on even pages because a
+CHQ4_SCR1:      EQU 8           ; MODE 4 screen wraps even to odd
+CHQ4_MODE4:     EQU 0x60
+CHQ4_BANK:      EQU 0x20        ; the run bank, with RAM over ROM 0
+CHQ4_MSK0:      EQU 0x22        ; and the mask tables, two chunks of it
+CHQ4_SCREEN:    EQU 0x8000
+
+;------------------------------------------------------------------
 ; chq4_init - sky, haze, and the rows the frame draws over
 ;------------------------------------------------------------------
 
 chq4_init:
+    IF CHQ4_PAGED
+        LD   A,CHQ4_SCR1        ; each buffer in turn, and the one left
+        OUT  (CHQ4_HMPR),A      ; mapped at the end is the one to draw
+        CALL chq4_fill          ; into
+        LD   A,CHQ4_SCR1 | CHQ4_MODE4
+        OUT  (CHQ4_VMPR),A
+        LD   A,CHQ4_SCR0
+        OUT  (CHQ4_HMPR),A
+        CALL chq4_fill
+        LD   A,CHQ4_BANK
+        OUT  (CHQ4_LMPR),A
+        RET
+    ELSE
         LD   A,CHQ4_BUF0
         LD   (chq4_back),A
         LD   A,CHQ4_BUF1
@@ -52,8 +92,12 @@ chq4_init:
         CALL chq4_fill
         LD   H,CHQ4_BUF1
         ; fall through
+    ENDIF
 
 chq4_fill:
+    IF CHQ4_PAGED
+        LD   H,CHQ4_SCREEN / 256
+    ENDIF
         LD   L,0
         PUSH HL
         LD   D,0x60
@@ -88,12 +132,23 @@ chq4_f4:
 chq4_frame:
         CALL chq4_msk8
         CALL chq4_floor
+    IF CHQ4_PAGED
+        IN   A,(CHQ4_HMPR)      ; which buffer is which is not written
+        AND  31                 ; down anywhere: HMPR maps the one being
+        LD   C,A                ; drawn and VMPR says which is shown
+        OR   CHQ4_MODE4
+        OUT  (CHQ4_VMPR),A      ; show what was just drawn
+        LD   A,C
+        XOR  CHQ4_SCR0 ^ CHQ4_SCR1
+        OUT  (CHQ4_HMPR),A      ; and map the other, to draw into next
+    ELSE
         LD   A,(chq4_back)
         LD   B,A
         LD   A,(chq4_front)
         LD   (chq4_back),A
         LD   A,B
         LD   (chq4_front),A
+    ENDIF
         RET
 
 ;------------------------------------------------------------------
@@ -107,6 +162,31 @@ chq4_frame:
 ;------------------------------------------------------------------
 
 chq4_msk8:
+    IF CHQ4_PAGED
+        LD   A,(chq4_camz+1)    ; bit 8 of the depth picks the chunk, and
+        LD   B,A                ; the camera's own square parity goes in
+        LD   A,(chq4_camx+1)    ; with it, because adding 256 to the depth
+        XOR  B                  ; is exactly what that parity does
+        AND  1
+        ADD  A,A                ; two pages a chunk
+        ADD  A,CHQ4_MSK0
+        OUT  (CHQ4_LMPR),A
+        LD   A,(chq4_camz)      ; and the low byte picks the table: 128
+        RRCA                    ; bytes each, so the index is a shift
+        LD   H,A
+        AND  0x80
+        LD   L,A
+        LD   A,H
+        AND  0x7F
+        LD   H,A
+        LD   DE,chq4_msk
+        DUP  192 - CHQ4_TOP
+        LDI                     ; 16 T-states a scanline against 81
+        EDUP
+        LD   A,CHQ4_BANK        ; and the bank back, for the drawing
+        OUT  (CHQ4_LMPR),A
+        RET
+    ELSE
         LD   A,(chq4_camz)
         LD   (chq4_z1+1),A
         LD   A,(chq4_camx+1)    ; the camera's own square is a parity
@@ -134,6 +214,7 @@ chq4_z2:
         INC  DE
         DJNZ chq4_m1
         RET
+    ENDIF
 
 ;------------------------------------------------------------------
 ; chq4_floor - the board, bottom row upwards, a band of rows a width
@@ -161,12 +242,17 @@ chq4_floor:
         LD   (chq4_acc),HL
         LD   HL,chq4_band
         LD   (chq4_bp+1),HL
-        LD   A,(chq4_back)
-        ADD  A,0x60
+    IF CHQ4_PAGED
         EXX
-        LD   H,A                ; the last byte of the last row, which
-        LD   L,0                ; is where a row's stack pointer starts
-        DEC  HL                 ; from and what the row loop stores into
+        LD   HL,CHQ4_SCREEN + 0x6000 - 1        ; the last byte of the
+    ELSE                                        ; last row, which is where
+        LD   A,(chq4_back)                      ; a row's stack pointer
+        ADD  A,0x60                             ; starts from and what the
+        EXX                                     ; row loop stores into
+        LD   H,A
+        LD   L,0
+        DEC  HL
+    ENDIF
         LD   DE,chq4_msk + 191 - CHQ4_TOP       ; and the mask
         EXX
 

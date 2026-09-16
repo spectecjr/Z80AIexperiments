@@ -9,11 +9,34 @@ the point.
 | | scanlines | narrowest square | T-states a frame | |
 |---|---|---|---|---|
 | `chequer4` | 84 | 8 px | 110,835 / **114,656** / 118,586 | 50 Hz |
-| **`chequer5`** | **95** | **1 px** | 125,343 / **129,183** / 133,151 | **25 Hz** |
+| **`chequer5`** | **95** | **1 px** | 119,179 / **123,018** / 126,985 | **25 Hz** |
+| `chequer5`, before the mask tables | 95 | 1 px | 125,343 / 129,183 / 133,151 | 25 Hz |
 | `harrier` | 84 | 8 px | 220,394 / **221,451** / 223,413 | 25 Hz |
 
 Bit exact against its model over 112 camera positions, the same test as
 chequer4's with `HARRIER_MINP=1`.
+
+## The mask table is not worked out, it is looked up
+
+`chq4_msk8` built the swap mask a scanline every frame — 81 T-states a
+row, **7,807** for a 95 row board — by adding `camz` to each row's depth
+and keeping bit 8. But bit 8 of `ztab[y] + camz` **does not change when
+camz changes by 512, and inverts when it changes by 256**, so the whole
+table is a function of `camz mod 512`: there are only 512 of them, and the
+camera's own square parity is the same thing as adding 256, so it goes in
+the same index.
+
+512 tables of 95 rows on a 128-byte stride is 64K — two pages of a SAM,
+which has sixteen. The frame pages one chunk in, copies 95 bytes out of it
+with unrolled `LDI`s, and pages the bank back: **7,807 becomes 1,668**, of
+which 1,520 is the copy. The copy is there because the window holds the run
+bank while the board is being drawn; the two `OUT`s cost 22.
+
+That took the routine into the paged memory map `road2.z80s` uses — the
+back buffer at `0x8000` by HMPR, the displayed one not mapped at all, this
+code in the 8K a MODE 4 screen leaves spare — which is what makes room for
+a 64K table in the first place. `chequer4` and `chequer6` still use the
+flat layout; `CHQ4_PAGED` in the harness picks.
 
 ## What the eleven scanlines cost
 
@@ -33,6 +56,10 @@ the next width, p=7, which is two scanlines and one band — about 2,350
 T-states. So there is no partial extension that fits either. The board
 either stops where chequer4 stops, or it goes to the horizon and the frame
 goes to 25 Hz. That is a cliff, not a slope.
+
+**The mask tables took 6,139 off it and the cliff is still there**: the
+worst frame is 126,985, so 6,985 short. What is left is the band loop,
+and the honest arithmetic on it is below.
 
 **At 25 Hz, though, it is cheap.** 129,183 of a 240,000 T-state frame is
 54%, where harrier's 25 Hz floor — with the haze, and eleven scanlines
@@ -55,10 +82,25 @@ Everything else — 62,300 T-states — is dispatch:
 | `chq4_msk8` | 7,807 | 82 |
 | the runs' overrun past the row | ~4,180 | ~44 |
 
-so it would have to lose 13,000 T-states, a fifth of it. The band loop is
-where it is: 454 T-states to set up a band that is 1.48 scanlines long,
-patching six bytes into the row loop from three tables. Two things were
-measured and rejected while looking for it:
+so it would have to lose 13,000 T-states, a fifth of it — 6,985 now that
+the mask table is a lookup. The band loop is where the rest is: 454
+T-states to set up a band that is 1.48 scanlines long, patching six bytes
+into the row loop from three tables.
+
+**Precomputing those six bytes is not enough.** Counting the instructions:
+of the ~357 T-states a table would replace, ~78 is the six `LD (nn),A`
+stores that patch the row loop, and a table still has to do those *and*
+read six bytes. It comes out at ~284, so **~4,700 a frame** — worth having,
+not worth 6,985.
+
+**Compiling the row loop's body per (band, phase) is.** There are 2,080 of
+those pairs — the phase is in `[0, p)` and the widths run 1..64 — and a
+body is ~30 bytes, so 62K, with the run bank duplicated in each chunk
+beside it. The band loop then patches one address rather than six bytes:
+~168 against ~357, which is **~12,100 a frame** and clears the cliff with
+room. It is a day's work and ~227K of a 256K machine.
+
+Two things were measured and rejected while looking for it:
 
 - **Drawing the far rows only when they change.** They change rarely — the
   phase of a 1-pixel square never moves at all — and over the demo's camera

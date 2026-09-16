@@ -1,8 +1,10 @@
+CHQ4_PAGED:     EQU 0           ; the flat 64K layout
                 ORG 0x0000
                 HALT
                 INCLUDE "chequer6.z80s"
                 ASSERT $ <= 0x0100
                 DEFS 0x0100-$
+                INCLUDE "chequer5equ.z80s"
                 INCLUDE "chequer5data.z80s"
                 INCLUDE "chequer4.z80s"
                 INCLUDE "jetdata.z80s"

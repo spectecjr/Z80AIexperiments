@@ -43,15 +43,24 @@ STACK = 0x7FF0                  # caller's stack, which lives there because
 
 class Sam:
     def __init__(self, resident, chunks, code_page=5, screens=(4, 6),
-                 code_at=0xE000, ram=256 * 1024, here=None, root=None):
+                 code_at=0xE000, ram=256 * 1024, here=None, root=None,
+                 chunk_defines=None):
+        """resident goes behind each screen; chunks at pages 0, 2, 4 ...
+
+        chunk_defines, if given, is called with the resident's symbols
+        and returns assembler defines for the chunks - which is how a
+        chunk learns the one address it needs from the code, without the
+        code having to sit at a fixed one.
+        """
         self.ram = bytearray(ram)
         img, self.syms = assemble(resident, here=here, root=root)
+        defs = chunk_defines(self.syms) if chunk_defines else None
         self.screens = screens
         for i, s in enumerate(screens):                 # a copy behind each
             at = (s + 1) * PAGE + (code_at & 0x3FFF)    # buffer, as the
             self.ram[at:at + len(img)] = img            # routine requires
         for i, h in enumerate(chunks):
-            img, syms = assemble(h, here=here, root=root)
+            img, syms = assemble(h, here=here, root=root, defines=defs)
             self.ram[2 * i * PAGE:2 * i * PAGE + len(img)] = img
             self.syms.update(syms)
         self.ram[RETADDR] = 0x76                        # HALT, to return to
