@@ -43,31 +43,36 @@ def main():
         assert page == s[equ] & 31, "the map and the constant disagree"
     it = b.call(s["c8_init"])
     print("  c8_init   %d T-states once, the sky into both buffers" % it)
-    poses = [(x, z, t, (t // 7) % 3)
-             for t, (x, z) in enumerate((x, z)
-                                        for x in range(-640, 641, 20)
-                                        for z in (0, 100, 900, 4321))]
+    # camx runs wide, because it is the desert's parallax as well as the
+    # board's phase now: a whole period of the far layer is 64 pixels of
+    # camera a pixel, and the step is odd so that the front layer's ends
+    # land inside a byte as often as not
+    poses = [(x, z, (i // 7) % 3)
+             for i, (x, z) in enumerate((x, z)
+                                        for x in range(-8192, 8193, 127)
+                                        for z in (0, 900))]
     bad, times = 0, []
-    for camx, camz, t, pose in poses:
+    for camx, camz, pose in poses:
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], (camz & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["c8_pose"], bytes([pose]))
-        b.poke(s["c9_far"], bytes([(t // T.REAR_EVERY) & 0xFF]))
-        b.poke(s["c9_near"], bytes([t & 0xFF]))
         times.append(b.call(s["c8_frame"]))
         got = b.screen(b.shown())
-        if got != bytes(C.frame(camx, camz, t, pose)):
+        if got != bytes(C.frame(camx, camz, pose)):
             bad += 1
-            want = bytes(C.frame(camx, camz, t, pose))
+            want = bytes(C.frame(camx, camz, pose))
             if bad <= 3:
                 d = [i for i in range(len(want)) if got[i] != want[i]]
-                print("  PIXEL MISMATCH x=%d z=%d t=%d pose=%d: %d bytes, "
+                print("  PIXEL MISMATCH x=%d z=%d pose=%d: %d bytes, "
                       "first at %d (y=%d x=%d) got %02X want %02X"
-                      % (camx, camz, t, pose, len(d), d[0], d[0] // C.STRIDE,
+                      % (camx, camz, pose, len(d), d[0], d[0] // C.STRIDE,
                          (d[0] % C.STRIDE) * 2, got[d[0]], want[d[0]]))
     n = len(poses)
     print("  %-40s %4d camera positions, %d mismatches"
           % ("Z80 against the model, pixels", n, bad))
+    print("  %-40s %d of the far layer, %d of the near"
+          % ("periods of parallax swept", 16384 >> T.FAR_SHIFT >> 8,
+             16384 >> T.NEAR_SHIFT >> 8))
     print()
     ft = b.call(s["chq4_floor"])
     mt = b.call(s["chq4_msk8"])

@@ -627,13 +627,13 @@ def chequer8(outdir, seconds=8):
 def _chequer8(outdir, seconds=8):
     """chequer8 at its measured rate: 194,191 T-states a frame, 25 Hz.
 
-    The board, a two layer desert on the horizon and the pilot, every
-    pixel of it drawn from scratch every frame. The rear layer -
-    pyramids, a far ridge, palms and rocks - moves one pixel every
-    three frames and the front dune ridge one pixel a frame, which is
-    slow enough to read as distance rather than as scenery going past.
+    The board in the bottom 40% of the screen, a two layer desert
+    standing on it and the pilot over both, every pixel drawn from
+    scratch every frame. The desert's parallax comes off the same camx
+    the board does - a pixel a frame for the near pyramids at the
+    camera's fastest, a pixel every three for the great one behind them
+    - so the scenery sways with the board rather than drifting past it.
     """
-    import desert as D
     import jetpack as J
     from mkchqdata import sam
     from mkhrdata import fog as fogtab
@@ -657,8 +657,6 @@ def _chequer8(outdir, seconds=8):
         camx, camz = stroll(t, 25)
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], camz.to_bytes(2, "little"))
-        b.poke(s["c9_far"], bytes([(t // D.REAR_EVERY) & 0xFF]))
-        b.poke(s["c9_near"], bytes([t & 0xFF]))
         b.poke(s["c8_pose"],                    # banking into the turns
                bytes([1 + (1 if t % 100 < 25 else -1 if t % 100 >= 75
                            else 0)]))

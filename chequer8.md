@@ -1,20 +1,21 @@
 # chequer8.z80s — design notes
 
 **The board over a viewport of its own, a two layer desert standing on it,
-and the pilot — every pixel drawn from scratch, every frame.** 189,719
-T-states, **79% of a 25 Hz frame**, and 197,353 in the worst frame found by
-sweeping cameras, layer offsets and poses.
+and the pilot — every pixel drawn from scratch, every frame.** 190,678
+T-states, **79% of a 25 Hz frame**, and 196,373 in the worst frame found by
+sweeping cameras and poses.
 
 | | T-states a frame | |
 |---|---|---|
-| `chq4_floor` + `chq4_msk8` | 95,640 | 77 scanlines: the bottom 40% |
-| **the desert** | **79,552** | 32 scanlines, two layers, by pixels |
+| `chq4_floor` + `chq4_msk8` | 95,591 | 77 scanlines: the bottom 40% |
+| **the desert** | **79,684** | 32 scanlines, two layers, by pixels |
 | **the pilot** | **14,401** | all 96 rows of him, compiled |
-| the paging and the flip | ~130 | |
-| **`c8_frame`** | **184,510 / 189,719 / 196,105** | **25 Hz** |
+| the paging and the flip | ~1,000 | including the parallax arithmetic |
+| **`c8_frame`** | **184,902 / 190,678 / 196,373** | **25 Hz** |
 
-Bit exact against `tests/chequer8.py` over 260 camera positions, which is a
-whole period of both layers and every pose.
+Bit exact against `tests/chequer8.py` over 260 camera positions spanning
+16,384 world units of camera — a whole period of the far layer's parallax
+and four of the near one.
 
 ## The board gets the bottom 40%, and a camera of its own
 
@@ -97,6 +98,32 @@ something else at a different rate is the one depth cue that needs neither
 colour nor perspective, and it is the reason the front layer cannot be a
 compiled run: it has to leave the layer behind it showing.
 
+## And the camera drives both of them
+
+A layer at depth Z moves `FOCAL * camx / Z` pixels when the camera slides
+sideways. So the two offsets are not a frame counter any more, they are the
+board's own `camx` shifted right — **six for the far layer and four for the
+near one**, which puts them at 64 and 16 focal lengths of depth, 14,144 and
+3,536 world units. Six `SRA H / RR L` pairs, a hundred T-states, and the
+scenery is tied to the ground under it:
+
+| camera slides right by | the board's bottom row | the near pyramids | the great one |
+|---|---|---|---|
+| 192 world units | 48 pixels left | 12 left | 3 left |
+
+At the camera's fastest — the eight second slide in the GIFs peaks at 20
+world units a frame — that is five pixels a frame for the board, one for the
+near pyramids and one every three frames for the great pyramid, which is
+where those two rates came from in the first place.
+
+**It is a fudge and worth naming as one.** Anything drawn above the horizon
+line is, strictly, infinitely far away and has no parallax at all; scenery
+that shifts as though it stood at 3,536 units would properly be drawn
+nineteen scanlines *below* the horizon, on the board. Every arcade game of
+this kind makes the same trade, and what you buy with it is that the
+scenery now sways with the camera instead of drifting past on a clock of
+its own.
+
 A pixel is half a MODE 4 byte, and that is what it costs.
 
 **The rear layer is compiled, one run of `PUSH`es a (row, phase).** A run
@@ -142,9 +169,9 @@ span.
 
 | | T-states a frame | |
 |---|---|---|
-| the rear layer | 45,938 | 32 rows, and no spill left in it |
-| the front layer | 33,614 | 57 spans, 590 T-states each |
-| **`c9_band`** | **79,552** | **77,489 to 83,664 over a whole period** |
+| the rear layer | 46,077 | 32 rows, and no spill left in it |
+| the front layer | 33,608 | 57 spans, 590 T-states each |
+| **`c9_band`** | **79,684** | **77,635 to 83,743 over a whole period** |
 
 ## This is where a 256K SAM runs out
 
@@ -188,9 +215,13 @@ where the odd byte lands.
 - The desert's colours are the pilot's — 4, 5, 6, 7 and 12 — because those
   are fixed; the copper grades 1, 2 and 3, and the band's sky is index 1 so
   that it grades with the rest of the sky.
-- `c9_far`, `c9_near` and `c8_pose` all come from the caller every frame,
-  like the camera. There is a copy of the resident block behind each buffer
-  and nothing in it may carry state.
+- `c9_far` and `c9_near` are worked out from `chq4_camx` at the top of
+  every band, not kept from the last one, and `c8_pose` comes from the
+  caller. There is a copy of the resident block behind each buffer and
+  nothing in it may carry state from frame to frame.
+- Both layers move **left** as their offset grows, which is the way the
+  board's own pattern moves when `camx` grows. Flip one sign and the
+  scenery slides against the ground.
 
 ## What a moving horizon would cost
 

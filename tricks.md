@@ -765,6 +765,15 @@ and a course of stone in the light, palms, three ridges of dune, a scatter
 of rocks. Drawn as rectangles at run time, in the city, every one of those
 would have been another rectangle a row.
 
+**Drive the offsets from the camera, not from a counter.** A layer at depth
+Z moves `FOCAL * camx / Z` pixels when the camera slides, so a depth chosen
+as a power of two times the focal length makes each layer's offset a shift
+of the camera's own `camx` - six for chequer8's far layer, four for its
+near one. It costs a hundred T-states and it is the difference between
+scenery that belongs to the ground and scenery that drifts past on a clock
+of its own. The fudge to know you are making: anything drawn above the
+horizon is strictly at infinity and has no parallax at all.
+
 A second layer over the top cannot share any of it, because the two layers
 move at different rates: it goes on as spans, with a read-modify-write at
 either end where the edge lands inside a byte. **That read-modify-write is

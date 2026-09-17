@@ -38,14 +38,14 @@ assert C.TOP == 115 and D.TOP + D.ROWS == C.TOP, \
 W, H, STRIDE, TOP, PTAB = C.W, C.H, C.STRIDE, C.TOP, C.PTAB
 
 
-def frame(camx, camz, t, pose=1):
-    """pose 0 banks left, 1 is level, 2 banks right; t is the desert's.
+def frame(camx, camz, pose=1):
+    """pose 0 banks left, 1 is level, 2 banks right.
 
-    The rear layer moves a pixel every three frames and the front one a
-    pixel a frame, which is what the two offsets are.
+    The desert's two offsets come from camx, the same camera the board
+    is drawn from - which is the whole of what ties them together.
     """
     buf = C.frame(camx, camz)
-    for r, row in enumerate(D.band(t)):
+    for r, row in enumerate(D.band(*D.offsets(camx))):
         at = (D.TOP + r) * STRIDE
         buf[at:at + STRIDE] = row
     for y, (by, kind) in enumerate(J.rows(J.lean(J.pilot(), pose - 1))):

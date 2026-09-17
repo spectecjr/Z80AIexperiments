@@ -9,10 +9,16 @@ of the screen - and the sky, holding two layers that scroll at
 different speeds:
 
     the REAR layer   sky, the great pyramid, a dune field, palms and
-                     rocks - one pixel every three frames, which at
-                     25 Hz is eight pixels a second
-    the FRONT layer  three smaller pyramids standing nearer, one pixel
-                     a frame
+                     rocks, at 64 focal lengths of depth
+    the FRONT layer  three smaller pyramids standing nearer, at 16
+
+BOTH ARE DRIVEN BY THE CAMERA, not by a frame counter: a layer at depth
+Z shifts by FOCAL * camx / Z pixels when the camera slides sideways, so
+the offsets are the camera's own camx shifted right by six and by four.
+Slide the camera right and the board's squares go left, the pyramids go
+left more slowly, and the great one behind them more slowly still. At
+the camera's fastest that is a pixel a frame for the front layer and a
+pixel every three frames for the rear.
 
 THE FRONT PYRAMIDS OVERLAP THE REAR LAYER, which is the whole point of
 them: something passing in front of something else at a different rate
@@ -48,8 +54,31 @@ FLIT, FDARK = 12, 4             # pyramid is pale sand with a dull rose
                                 # darkest red there is, because nearer
                                 # means more contrast, not more detail
 
-REAR_EVERY = 3                  # frames a pixel, rear layer
+FAR_SHIFT, NEAR_SHIFT = 6, 4    # how deep the two layers are, as a shift:
+                                # a layer at depth Z moves FOCAL * camx / Z
+                                # pixels when the camera slides, so depths
+                                # of 64 and 16 focal lengths - 14,144 and
+                                # 3,536 world units - are a shift of six
+                                # and a shift of four. At the camera's
+                                # fastest that is a pixel a frame for the
+                                # near layer and a pixel every three for
+                                # the far one, which is where those rates
+                                # came from in the first place
 GROUND = 24                     # the rear layer's own horizon, in rows
+
+
+def offsets(camx):
+    """Where the two layers stand, from the camera's sideways position.
+
+    Both are drawn on the horizon, which strictly means infinitely far
+    away and no parallax at all - the shifts above are the arcade fudge
+    that every game of this kind makes, and they are what ties the
+    scenery to the board underneath it: slide the camera right and both
+    move left, the board by a square and the desert by a few pixels.
+
+    The Z80 keeps the low byte of each, so this does too.
+    """
+    return (camx >> FAR_SHIFT) & 0xFF, (camx >> NEAR_SHIFT) & 0xFF
 
 
 def lcg(s):
@@ -148,20 +177,20 @@ def spans():
 SPANS = spans()
 
 
-def band(t):
-    """The 32 rows of band at frame t, as MODE 4 bytes.
+def band(far, near):
+    """The 32 rows of band at these two offsets, as MODE 4 bytes.
 
-    The rear layer moves a pixel every three frames and the front one a
-    pixel a frame, both to the left.
+    Both layers move left as their offset grows, which is the way the
+    board's own pattern moves when the camera slides right.
     """
-    back, off = rear(), t // REAR_EVERY
-    px = [[back[y][(x + off) % PERIOD] for x in range(PERIOD)]
+    back = rear()
+    px = [[back[y][(x + far) % PERIOD] for x in range(PERIOD)]
           for y in range(ROWS)]
     for y, row in enumerate(SPANS):
         for x0, x1, c in row:
             n = (x1 - x0) % PERIOD + 1
             for k in range(n):
-                px[y][(x0 + k - t) % PERIOD] = c
+                px[y][(x0 + k - near) % PERIOD] = c
     return [bytes((row[2 * i] << 4) | row[2 * i + 1] for i in range(STRIDE))
             for row in px]
 
@@ -176,7 +205,7 @@ def main(path):
     im = Image.new("RGB", (PERIOD * z, (ROWS + 1) * z * n))
     p = im.load()
     for f in range(n):
-        for y, row in enumerate(band(f * 12)):
+        for y, row in enumerate(band(*offsets(f * 192))):
             for x in range(PERIOD):
                 b = row[x >> 1]
                 c = (b >> 4) if not (x & 1) else (b & 15)

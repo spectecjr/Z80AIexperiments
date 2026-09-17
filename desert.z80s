@@ -4,12 +4,13 @@
 ;
 ;   c9_band    redraw the band, from (c9_far) and (c9_near)
 ;
-; Twenty-four scanlines between the board and the sky. The rear layer -
-; sky, pyramids, a far ridge, palms and rocks - moves a pixel every
-; three frames; the front layer, a dune ridge along the bottom of the
-; band, moves a pixel every frame. The caller supplies both offsets,
-; because nothing in the resident block may carry state from one frame
-; to the next.
+; Thirty-two scanlines between the board and the sky. The rear layer
+; holds the great pyramid, a dune field, palms and rocks at 64 focal
+; lengths of depth; the front layer three smaller pyramids at 16, which
+; pass in front of them. Both offsets are worked out from the camera's
+; own camx, so the scenery moves with the board rather than drifting
+; past it: at the camera's fastest that is a pixel a frame for the front
+; layer and a pixel every three for the rear.
 ;
 ; THE REAR LAYER IS COMPILED, one run of PUSHes a (row, phase), in
 ; chunks of its own. A run is two whole periods of its row, so entering
@@ -49,6 +50,26 @@ C9_BASE:        EQU CHQ4_SCREEN + C9_TOP * 128
 c9_band:
         DI                      ; SP is about to be the screen
         LD   (c9_sp),SP
+
+;--- where the two layers stand, from the camera ------------------
+
+        LD   HL,(chq4_camx)     ; a layer at depth Z moves FOCAL * camx / Z
+        SRA  H                  ; pixels when the camera slides, so a depth
+        RR   L                  ; of 16 focal lengths is a shift of four
+        SRA  H                  ; and one of 64 is a shift of six - and the
+        RR   L                  ; scenery is tied to the board under it
+        SRA  H                  ; rather than drifting past on a counter
+        RR   L
+        SRA  H
+        RR   L
+        LD   A,L
+        LD   (c9_near),A
+        SRA  H
+        RR   L
+        SRA  H
+        RR   L
+        LD   A,L
+        LD   (c9_far),A
 
 ;--- the rear layer, bottom row upwards ---------------------------
 
@@ -331,9 +352,8 @@ c9_fill:
         EDUP
         JP   c9_sret
 
-c9_far:         DEFB 0          ; the two offsets, in pixels, from the
-c9_near:        DEFB 0          ; caller: one a pixel every three frames
-                                ; and one a pixel a frame
+c9_far:         DEFB 0          ; the two offsets, in pixels, worked out
+c9_near:        DEFB 0          ; above from the camera
 c9_ent:         DEFS 2
 c9_stop:        DEFS 2
 c9_at:          DEFS 2
