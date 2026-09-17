@@ -13,311 +13,311 @@ CHQ4_HZN:       EQU 78          ; and how many there are
 
 chq4_hztab:
         DEFB 0x20       ; 96 scanlines, widest square 80, 1.00 rows of deep board a scanline
-        DEFW 2548
+        DEFW 2096
         DEFB 96,81
         DEFB 0,1
         DEFB 0x20       ; 95 scanlines, widest square 80, 1.01 rows of deep board a scanline
-        DEFW 2500
+        DEFW 2056
         DEFB 95,81
         DEFB 3,1
         DEFB 0x20       ; 94 scanlines, widest square 80, 1.02 rows of deep board a scanline
-        DEFW 2452
+        DEFW 2016
         DEFB 94,81
         DEFB 6,1
         DEFB 0x20       ; 93 scanlines, widest square 80, 1.03 rows of deep board a scanline
-        DEFW 2404
+        DEFW 1976
         DEFB 93,81
         DEFB 8,1
         DEFB 0x20       ; 92 scanlines, widest square 80, 1.04 rows of deep board a scanline
-        DEFW 2356
+        DEFW 1936
         DEFB 92,81
         DEFB 11,1
         DEFB 0x20       ; 91 scanlines, widest square 80, 1.05 rows of deep board a scanline
-        DEFW 2312
+        DEFW 1900
         DEFB 91,81
         DEFB 14,1
         DEFB 0x20       ; 90 scanlines, widest square 80, 1.07 rows of deep board a scanline
-        DEFW 2268
+        DEFW 1864
         DEFB 90,81
         DEFB 17,1
         DEFB 0x20       ; 89 scanlines, widest square 80, 1.08 rows of deep board a scanline
-        DEFW 2220
+        DEFW 1824
         DEFB 89,81
         DEFB 20,1
         DEFB 0x20       ; 88 scanlines, widest square 80, 1.09 rows of deep board a scanline
-        DEFW 2176
+        DEFW 1788
         DEFB 88,81
         DEFB 24,1
         DEFB 0x20       ; 87 scanlines, widest square 80, 1.11 rows of deep board a scanline
-        DEFW 2132
+        DEFW 1752
         DEFB 87,81
         DEFB 27,1
         DEFB 0x20       ; 86 scanlines, widest square 80, 1.12 rows of deep board a scanline
-        DEFW 2084
+        DEFW 1712
         DEFB 86,81
         DEFB 30,1
         DEFB 0x20       ; 85 scanlines, widest square 80, 1.13 rows of deep board a scanline
-        DEFW 2036
+        DEFW 1672
         DEFB 85,81
         DEFB 34,1
         DEFB 0x20       ; 84 scanlines, widest square 80, 1.14 rows of deep board a scanline
-        DEFW 1992
+        DEFW 1632
         DEFB 84,81
         DEFB 37,1
         DEFB 0x20       ; 83 scanlines, widest square 80, 1.16 rows of deep board a scanline
-        DEFW 1948
+        DEFW 1592
         DEFB 83,81
         DEFB 41,1
         DEFB 0x20       ; 82 scanlines, widest square 80, 1.17 rows of deep board a scanline
-        DEFW 1904
+        DEFW 1556
         DEFB 82,81
         DEFB 44,1
         DEFB 0x20       ; 81 scanlines, widest square 80, 1.19 rows of deep board a scanline
-        DEFW 1860
+        DEFW 1520
         DEFB 81,81
         DEFB 48,1
         DEFB 0x20       ; 80 scanlines, widest square 80, 1.20 rows of deep board a scanline
-        DEFW 1820
+        DEFW 1488
         DEFB 80,81
         DEFB 52,1
         DEFB 0x20       ; 79 scanlines, widest square 80, 1.22 rows of deep board a scanline
-        DEFW 1780
+        DEFW 1456
         DEFB 79,81
         DEFB 56,1
         DEFB 0x20       ; 78 scanlines, widest square 80, 1.23 rows of deep board a scanline
-        DEFW 1740
+        DEFW 1424
         DEFB 78,81
         DEFB 60,1
         DEFB 0x20       ; 77 scanlines, widest square 80, 1.25 rows of deep board a scanline
-        DEFW 1700
+        DEFW 1392
         DEFB 77,81
         DEFB 64,1
         DEFB 0x20       ; 76 scanlines, widest square 80, 1.27 rows of deep board a scanline
-        DEFW 1664
+        DEFW 1360
         DEFB 76,81
         DEFB 68,1
         DEFB 0x20       ; 75 scanlines, widest square 80, 1.29 rows of deep board a scanline
-        DEFW 1628
+        DEFW 1328
         DEFB 75,81
         DEFB 73,1
         DEFB 0x20       ; 74 scanlines, widest square 80, 1.30 rows of deep board a scanline
-        DEFW 1588
+        DEFW 1296
         DEFB 74,81
         DEFB 77,1
         DEFB 0x20       ; 73 scanlines, widest square 80, 1.32 rows of deep board a scanline
-        DEFW 1548
+        DEFW 1264
         DEFB 73,81
         DEFB 82,1
         DEFB 0x20       ; 72 scanlines, widest square 80, 1.34 rows of deep board a scanline
-        DEFW 1508
+        DEFW 1232
         DEFB 72,81
         DEFB 87,1
         DEFB 0x20       ; 71 scanlines, widest square 80, 1.36 rows of deep board a scanline
-        DEFW 1468
+        DEFW 1200
         DEFB 71,81
         DEFB 91,1
         DEFB 0x20       ; 70 scanlines, widest square 80, 1.38 rows of deep board a scanline
-        DEFW 1428
+        DEFW 1168
         DEFB 70,81
         DEFB 96,1
         DEFB 0x20       ; 69 scanlines, widest square 80, 1.40 rows of deep board a scanline
-        DEFW 1392
+        DEFW 1140
         DEFB 69,81
         DEFB 102,1
         DEFB 0x20       ; 68 scanlines, widest square 80, 1.42 rows of deep board a scanline
-        DEFW 1356
+        DEFW 1108
         DEFB 68,81
         DEFB 107,1
         DEFB 0x20       ; 67 scanlines, widest square 80, 1.44 rows of deep board a scanline
-        DEFW 1316
+        DEFW 1076
         DEFB 67,81
         DEFB 112,1
         DEFB 0x20       ; 66 scanlines, widest square 80, 1.46 rows of deep board a scanline
-        DEFW 1276
+        DEFW 1044
         DEFB 66,81
         DEFB 118,1
         DEFB 0x20       ; 65 scanlines, widest square 80, 1.48 rows of deep board a scanline
-        DEFW 1236
+        DEFW 1012
         DEFB 65,81
         DEFB 124,1
         DEFB 0x20       ; 64 scanlines, widest square 80, 1.51 rows of deep board a scanline
-        DEFW 1196
+        DEFW 980
         DEFB 64,81
         DEFB 130,1
         DEFB 0x20       ; 63 scanlines, widest square 80, 1.53 rows of deep board a scanline
-        DEFW 1156
+        DEFW 948
         DEFB 63,81
         DEFB 136,1
         DEFB 0x20       ; 62 scanlines, widest square 80, 1.56 rows of deep board a scanline
-        DEFW 1116
+        DEFW 916
         DEFB 62,81
         DEFB 143,1
         DEFB 0x20       ; 61 scanlines, widest square 80, 1.58 rows of deep board a scanline
-        DEFW 1084
+        DEFW 888
         DEFB 61,81
         DEFB 149,1
         DEFB 0x20       ; 60 scanlines, widest square 80, 1.61 rows of deep board a scanline
-        DEFW 1052
+        DEFW 860
         DEFB 60,81
         DEFB 156,1
         DEFB 0x20       ; 59 scanlines, widest square 80, 1.64 rows of deep board a scanline
-        DEFW 1016
+        DEFW 832
         DEFB 59,81
         DEFB 163,1
         DEFB 0x20       ; 58 scanlines, widest square 80, 1.67 rows of deep board a scanline
-        DEFW 980
+        DEFW 804
         DEFB 58,81
         DEFB 171,1
         DEFB 0x20       ; 57 scanlines, widest square 80, 1.70 rows of deep board a scanline
-        DEFW 944
+        DEFW 776
         DEFB 57,81
         DEFB 178,1
         DEFB 0x20       ; 56 scanlines, widest square 80, 1.73 rows of deep board a scanline
-        DEFW 908
+        DEFW 748
         DEFB 56,81
         DEFB 186,1
         DEFB 0x20       ; 55 scanlines, widest square 80, 1.76 rows of deep board a scanline
-        DEFW 876
+        DEFW 724
         DEFB 55,81
         DEFB 194,1
         DEFB 0x20       ; 54 scanlines, widest square 80, 1.79 rows of deep board a scanline
-        DEFW 848
+        DEFW 700
         DEFB 54,81
         DEFB 203,1
         DEFB 0x20       ; 53 scanlines, widest square 80, 1.83 rows of deep board a scanline
-        DEFW 820
+        DEFW 676
         DEFB 53,81
         DEFB 212,1
         DEFB 0x20       ; 52 scanlines, widest square 80, 1.86 rows of deep board a scanline
-        DEFW 788
+        DEFW 648
         DEFB 52,81
         DEFB 221,1
         DEFB 0x20       ; 51 scanlines, widest square 80, 1.90 rows of deep board a scanline
-        DEFW 760
+        DEFW 624
         DEFB 51,81
         DEFB 230,1
         DEFB 0x20       ; 50 scanlines, widest square 80, 1.94 rows of deep board a scanline
-        DEFW 728
+        DEFW 600
         DEFB 50,81
         DEFB 240,1
         DEFB 0x20       ; 49 scanlines, widest square 80, 1.98 rows of deep board a scanline
-        DEFW 696
+        DEFW 576
         DEFB 49,81
         DEFB 251,1
         DEFB 0x20       ; 48 scanlines, widest square 80, 2.02 rows of deep board a scanline
-        DEFW 664
+        DEFW 552
         DEFB 48,81
         DEFB 5,2
         DEFB 0x20       ; 47 scanlines, widest square 80, 2.07 rows of deep board a scanline
-        DEFW 632
+        DEFW 528
         DEFB 47,81
         DEFB 17,2
         DEFB 0x20       ; 46 scanlines, widest square 80, 2.11 rows of deep board a scanline
-        DEFW 604
+        DEFW 504
         DEFB 46,81
         DEFB 28,2
         DEFB 0x20       ; 45 scanlines, widest square 80, 2.16 rows of deep board a scanline
-        DEFW 576
+        DEFW 480
         DEFB 45,81
         DEFB 41,2
         DEFB 0x20       ; 44 scanlines, widest square 80, 2.21 rows of deep board a scanline
-        DEFW 548
+        DEFW 456
         DEFB 44,81
         DEFB 54,2
         DEFB 0x20       ; 43 scanlines, widest square 80, 2.26 rows of deep board a scanline
-        DEFW 520
+        DEFW 432
         DEFB 43,81
         DEFB 67,2
         DEFB 0x20       ; 42 scanlines, widest square 80, 2.32 rows of deep board a scanline
-        DEFW 492
+        DEFW 408
         DEFB 42,81
         DEFB 81,2
         DEFB 0x20       ; 41 scanlines, widest square 80, 2.38 rows of deep board a scanline
-        DEFW 464
+        DEFW 384
         DEFB 41,81
         DEFB 96,2
         DEFB 0x20       ; 40 scanlines, widest square 80, 2.44 rows of deep board a scanline
-        DEFW 436
+        DEFW 364
         DEFB 40,81
         DEFB 112,2
         DEFB 0x20       ; 39 scanlines, widest square 80, 2.50 rows of deep board a scanline
-        DEFW 408
+        DEFW 344
         DEFB 39,81
         DEFB 128,2
         DEFB 0x20       ; 38 scanlines, widest square 80, 2.57 rows of deep board a scanline
-        DEFW 384
+        DEFW 324
         DEFB 38,81
         DEFB 145,2
         DEFB 0x20       ; 37 scanlines, widest square 80, 2.64 rows of deep board a scanline
-        DEFW 360
+        DEFW 304
         DEFB 37,81
         DEFB 164,2
         DEFB 0x20       ; 36 scanlines, widest square 80, 2.71 rows of deep board a scanline
-        DEFW 336
+        DEFW 284
         DEFB 36,81
         DEFB 183,2
         DEFB 0x20       ; 35 scanlines, widest square 80, 2.79 rows of deep board a scanline
-        DEFW 312
+        DEFW 264
         DEFB 35,81
         DEFB 203,2
         DEFB 0x20       ; 34 scanlines, widest square 80, 2.88 rows of deep board a scanline
-        DEFW 288
+        DEFW 244
         DEFB 34,81
         DEFB 225,2
         DEFB 0x20       ; 33 scanlines, widest square 80, 2.97 rows of deep board a scanline
-        DEFW 264
+        DEFW 224
         DEFB 33,81
         DEFB 248,2
         DEFB 0x20       ; 32 scanlines, widest square 80, 3.07 rows of deep board a scanline
-        DEFW 240
+        DEFW 204
         DEFB 32,81
         DEFB 17,3
         DEFB 0x20       ; 31 scanlines, widest square 80, 3.17 rows of deep board a scanline
-        DEFW 220
+        DEFW 184
         DEFB 31,81
         DEFB 43,3
         DEFB 0x20       ; 30 scanlines, widest square 80, 3.28 rows of deep board a scanline
-        DEFW 200
+        DEFW 168
         DEFB 30,81
         DEFB 71,3
         DEFB 0x20       ; 29 scanlines, widest square 80, 3.39 rows of deep board a scanline
-        DEFW 180
+        DEFW 152
         DEFB 29,81
         DEFB 101,3
         DEFB 0x20       ; 28 scanlines, widest square 80, 3.52 rows of deep board a scanline
-        DEFW 160
+        DEFW 136
         DEFB 28,81
         DEFB 133,3
         DEFB 0x20       ; 27 scanlines, widest square 80, 3.65 rows of deep board a scanline
-        DEFW 140
+        DEFW 120
         DEFB 27,81
         DEFB 167,3
         DEFB 0x20       ; 26 scanlines, widest square 80, 3.80 rows of deep board a scanline
-        DEFW 120
+        DEFW 104
         DEFB 26,81
         DEFB 205,3
         DEFB 0x20       ; 25 scanlines, widest square 80, 3.96 rows of deep board a scanline
-        DEFW 100
+        DEFW 88
         DEFB 25,81
         DEFB 245,3
         DEFB 0x20       ; 24 scanlines, widest square 80, 4.13 rows of deep board a scanline
-        DEFW 80
+        DEFW 72
         DEFB 24,81
         DEFB 33,4
         DEFB 0x20       ; 23 scanlines, widest square 80, 4.32 rows of deep board a scanline
-        DEFW 64
+        DEFW 56
         DEFB 23,81
         DEFB 81,4
         DEFB 0x20       ; 22 scanlines, widest square 80, 4.52 rows of deep board a scanline
-        DEFW 48
+        DEFW 40
         DEFB 22,81
         DEFB 134,4
         DEFB 0x20       ; 21 scanlines, widest square 80, 4.75 rows of deep board a scanline
-        DEFW 32
+        DEFW 24
         DEFB 21,81
         DEFB 192,4
         DEFB 0x20       ; 20 scanlines, widest square 80, 5.00 rows of deep board a scanline
-        DEFW 16
+        DEFW 12
         DEFB 20,81
         DEFB 0,5
         DEFB 0x20       ; 19 scanlines, widest square 80, 5.28 rows of deep board a scanline

@@ -64,7 +64,7 @@ def body(p, ph, which):
     t = ph & 1
     ops, ent, _ = M3.build(p, t)
     at, edge = ent[C.kmax(p) - 1 - (ph >> 2)]
-    val = "chq4_val + %d" % (32 * which[(p, t)])
+    val = "chq4_val + %d" % (M4.stride() * which[(p, t)])
     return "\n".join([
         "%s_y%d_%d:" % (PRE, p, ph),
         "        LD   A,(DE)             ; this row's mask",
@@ -72,7 +72,8 @@ def body(p, ph, which):
         "        LD   (HL),A",
         "        LD   A,(DE)",
         "        DEC  DE",
-        "        AND  0x10               ; the mask again, as the offset to",
+        "        AND  0x%02X               ; the mask again, as the offset"
+        % (0x90 if M4.SWAP ^ M4.XSWAP else 0x10),
         "        ADD  A,(%s) & 255       ; the complement of this run's" % val,
         "        EXX                     ; values",
         "        LD   L,A",
@@ -129,7 +130,8 @@ def chunks(band):
     """Share the bands out, widest first, so that a chunk is a stretch
     of the screen and a frame walks the bank forwards."""
     out, cur, used = [], [], 0
-    spare = 1024 + 4 * len(BOARDS)      # the values, and a terminator a
+    spare = (M4.stride() * len(M4.values()[0])      # the value groups, and
+             + 4 * len(BOARDS) + 256)               # a terminator a
     for n, p in band:                   # horizon
         want = p * BODY + 2 * p + runbytes(p) + 3      # bodies, table, runs
         want += 4 * TALLY.get(p, 0)                    # and band entries
@@ -235,17 +237,27 @@ def emit(here):
                                    % (n, PRE, p) for n, p in part))
             parts.append("        DEFB 0,%d       ; and the chunk that"
                          " comes after" % nxt)
-        parts.append("\n        ALIGN 32")
+        bit = M4.SWAP ^ M4.XSWAP
+        parts.append("\n        ALIGN %d" % (256 if bit else 32))
         parts.append("chq4_val:       ; BC, DE, HL, IX, IY and AF in the"
-                     " order a\n                ; body POPs them, and"
-                     " sixteen bytes on, the\n                ; same set"
-                     " with the two colours exchanged")
+                     " order a body\n                ; POPs them, and the"
+                     " same set again for each\n                ; other way"
+                     " round a scanline can be. The mask\n                ;"
+                     " byte AND %s is the offset to the one it"
+                     "\n                ; wants."
+                     % ("0x90" if bit else "0x10"))
+        slots = (((0x00, 0), (0x10, M4.XSWAP), (0x80, bit), (0x90, M4.SWAP))
+                 if bit else ((0x00, 0), (0x10, M4.SWAP)))
         for v in vtab:
-            parts.append("        DEFB " + ",".join(str(x) for x in v))
-            parts.append("        DEFS 4")
-            parts.append("        DEFB "
-                         + ",".join(str(x ^ M4.SWAP) for x in v))
-            parts.append("        DEFS 4")
+            at = 0
+            for off, xor in slots:
+                if off > at:
+                    parts.append("        DEFS %d" % (off - at))
+                parts.append("        DEFB "
+                             + ",".join(str(x ^ xor) for x in v))
+                at = off + len(v)
+            parts.append("        DEFS %d" % ((256 if bit else 32) - at))
+
         for _, p in part:
             parts.append("\n%s_t%d:        ; a body a phase" % (PRE, p))
             parts.append("\n".join("        DEFW %s_y%d_%d" % (PRE, p, ph)

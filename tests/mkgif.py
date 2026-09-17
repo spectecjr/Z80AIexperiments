@@ -714,9 +714,17 @@ def chequer9(outdir, seconds=10):
                     str(seconds)], env=env, check=True)
 
 
-def corners(t):
+def corners(t, exact=False):
     """Round the four corners of the screen, a leg at a time, easing in
-    and out of each so that the turns read as turns."""
+    and out of each so that the turns read as turns.
+
+    exact gives the position before it is rounded, which is what the
+    CAMERA wants. The pilot has to land on a whole byte, because that
+    is what he is drawn on; the camera does not, and if it is taken
+    from his rounded position it inherits his quantisation - the ground
+    stands still for three frames and then jumps two bytes' worth,
+    which at the bottom of the screen is nineteen pixels.
+    """
     import math
     legs = ((10, 0), (100, 0), (100, 144), (10, 144))   # byte, row
     n = len(legs)
@@ -725,7 +733,8 @@ def corners(t):
     u = 0.5 - 0.5 * math.cos(math.pi * min(1.0, u * 1.25))
     x0, y0 = legs[k]
     x1, y1 = legs[(k + 1) % n]
-    return round(x0 + (x1 - x0) * u), round(y0 + (y1 - y0) * u)
+    x, y = x0 + (x1 - x0) * u, y0 + (y1 - y0) * u
+    return (x, y) if exact else (round(x), round(y))
 
 
 def _chequer9(outdir, seconds=10):
@@ -780,9 +789,11 @@ def _chequer9(outdir, seconds=10):
     n, m = int(seconds * 25), len(C9.HORIZONS)
     frames, ts, last = [], [], 56
     for t in range(n):
-        px, py = corners(t / n)
-        hz = min(m - 1, max(0, round((m - 1) * py / 144)))
-        camx = (px - 56) * 20           # the board and the desert follow,
+        fx, fy = corners(t / n, exact=True)      # where he is, unrounded:
+        px, py = round(fx), round(fy)            # the sprite lands on a
+        hz = min(m - 1, max(0, round((m - 1) * fy / 144)))   # byte and a
+        camx = int((fx - 56) * 20)      # scanline, the camera on neither
+                                        # the board and the desert follow,
                                         # at half the rate they used to:
                                         # the board's widest square went
                                         # from 64 pixels to 80 when the
@@ -804,7 +815,20 @@ def _chequer9(outdir, seconds=10):
         frames.append(unpack(b.screen(b.shown())))
     idx, pal = flat(frames, pal)
     p = "%s/chequer9.gif" % outdir
-    durs = held(ts)
+    durs = [2 * TICK] * n           # 25 Hz throughout, which is what this
+                                    # one would actually run at. held()
+                                    # gives every frame the whole number
+                                    # of display frames it costs, which is
+                                    # right for a routine whose cost sits
+                                    # in one band - but this one's halves
+                                    # as the board shrinks, so free
+                                    # running it would show 96 frames at
+                                    # 25 Hz, 111 at 50 and 43 back at 25.
+                                    # Its steps are per frame, so that is
+                                    # not judder, it is the whole demo
+                                    # changing speed twice. A demo that
+                                    # wanted the 50 Hz half would have to
+                                    # halve its steps to go with it.
     size = write_gif(p, idx, pal, durs)
     got, bad, secs = check_gif(p, idx, pal, durs)
     report(p, size, n, durs, secs, got, bad)

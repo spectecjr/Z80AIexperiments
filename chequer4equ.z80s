@@ -4,7 +4,11 @@
 CHQ4_HZ:        EQU 96
 CHQ4_TOP:       EQU 108          ; first row with a board
 CHQ4_HAZE:      EQU 51          ; and what is above it
-CHQ4_SWAP:      EQU 51          ; exchanges the two colours
+CHQ4_SWAP:      EQU 51          ; what a square of depth does
+CHQ4_XSWAP:     EQU 51          ; and what a square of camera
+CHQ4_BAND:      EQU 0          ; does - which differ by this
+                                ; where the board has four
+                                ; colours, and not at all where it has two
 CHQ4_ABOVE:     EQU 51          ; and what the top run spills
                                 ; into, haze or sky
 CHQ4_SKYC:      EQU 0x1111      ; the sky, both nibbles of

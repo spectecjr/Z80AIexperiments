@@ -5,21 +5,24 @@ sixteen colours that never change.** The ground rises to meet the pilot — 10% 
 when he is at the bottom of it, half the screen when he is at the top — and
 the square at the bottom of the screen is the same size at every one of the
 78 horizons, because a shallower board is the same picture with scanlines
-left out rather than a squeezed copy of it. 141,242 T-states a frame on the
-demo's own path, 194,449 in its worst frame, and 191,412 in the worst frame
-of the sweep: **81% of a 25 Hz frame, and 109 of the 250 frames in the GIF
-fit inside a 50 Hz one.**
+left out rather than a squeezed copy of it. 139,314 T-states a frame on the
+demo's own path, 195,910 in its worst frame, and 192,096 in the worst frame
+of the sweep: **82% of a 25 Hz frame.** 109 of the 250 frames in the GIF fit
+inside a 50 Hz one, which the GIF does not take advantage of: it holds every
+one of them for a 25 Hz frame, because everything here steps by so much a
+frame and letting the cheap half run at 50 Hz doubles the speed of the whole
+demo rather than making it smoother.
 
 | | T-states a frame | |
 |---|---|---|
-| **the board** | **28,670 … 124,064** | 19 scanlines (10%) to 96 (50%), four colours |
-| the swap mask | 1,354 … 6,205 | the deep board's, with the same rows left out |
+| **the board** | **28,669 … 124,066** | 19 scanlines (10%) to 96 (50%), four colours |
+| the swap mask | 1,513 … 6,903 | the deep board's, with the same rows left out |
 | **the desert** | **49,866** | 20 scanlines, two layers, by pixels |
 | **the pilot** | **8,056** | 24x48, anywhere on the screen |
 | the sky he left behind | 1,158 … 5,021 | the rows of his old box above the band |
 | the rows the board gave up | 0 … 3,736 | when the horizon drops |
 | the horizon table and the flip | 613 | |
-| **`cq9_frame`** | **86,054 / 141,242 / 194,449** | **25 Hz** |
+| **`cq9_frame`** | **86,232 / 139,314 / 195,910** | **25 Hz** |
 
 Bit exact against `tests/chequer9.py` over 156 frames: every one of the 78
 horizons twice, walked up the screen and back down, with the camera moving
@@ -54,8 +57,8 @@ board's own mask table with that step:
 
 | | T-states |
 |---|---|
-| the mask, 19 rows of board | 1,354 |
-| the mask, 96 rows | 6,205 |
+| the mask, 19 rows of board | 1,513 |
+| the mask, 96 rows | 6,903 |
 | a straight `LDI` copy, when the board was a rescaled one | 522 … 1,754 |
 
 A table is 128 bytes on a 128 byte boundary and the walk is 95 at most, so
@@ -127,7 +130,7 @@ odd rows of squares come out in two indices the even rows never use:
 
 `1 ^ 0xB = 10` and `2 ^ 0xB = 9`, so a swapped row draws 10 where an even one
 draws 1: the checker keeps its offset and the whole row is a band darker.
-**Not one extra T-state** — the board measures 28,670 and 124,064 at the two
+**Not one extra T-state** — the board measures 28,669 and 124,066 at the two
 ends of the horizon, which is what it measured in two colours — and not one
 extra byte of table, because the complement of every value set was already
 there. All it costs is two palette indices.
@@ -145,6 +148,23 @@ It wants to be **only just** loud enough. In luma the four are 247 and 210,
 174 and 196: 37 across a band and 44 between them. Pull the pairs further
 apart and the ground starts to strobe as it scrolls, because the bands are a
 square row deep and a square row is three scanlines at the horizon.
+
+**And a square of camera is not a square of depth.** With two colours both
+of them just exchange the pair, and one XOR does for both - which is why the
+camera's own square parity has always been folded into the mask table's
+index, as though it were 256 more of depth. With four it is wrong: depth
+switches *pair* as well as exchanging the two, and a camera sliding sideways
+must not do that. Folded together, crossing a square in x inverts the
+banding over the whole screen — a flash every five frames at walking pace,
+which reads as the board stuttering rather than as a colour fault.
+
+So there are four states a scanline now, not two, and the mask byte says
+which: `0x00`, `0x33` for the camera's square, `0xBB` for depth's, `0x88`
+for both. A value group holds four sets instead of a set and its complement,
+at 0, 16, 128 and 144 so that **the mask byte AND `0x90` is the offset** —
+the row loop is the same instruction it always was with a different
+constant. It costs 3.5K a chunk in value tables and one `XOR` a scanline in
+the mask walk, 684 T-states a frame.
 
 **And the dark pair goes in the other way round.** A swapped row draws 10
 where an even row draws 1, so for the checker to change phase from one band
@@ -245,7 +265,7 @@ pyramids with a lit face out of the board's sands against a deep brown
 shadow of their own. Six indices for the band, four of which the ground is
 already drawn in.
 
-At the 10% horizon the whole frame is 89,717 T-states and the desert is
+At the 10% horizon the whole frame is 89,875 T-states and the desert is
 49,866 of it — **more than the board, the pilot and both fills together.**
 It is the one thing in the frame that does not know where the horizon is.
 
@@ -286,13 +306,19 @@ Twenty-four of the thirty-two pages `LMPR` can address, so a 512K SAM.
 ## What is left
 
 - **The desert is half the shallow frame** and does not vary with the
-  horizon. Now that the board falls to 28,670 there is room to widen the
+  horizon. Now that the board falls to 28,669 there is room to widen the
   band back towards chequer8's 32 scanlines — about 2,500 T-states a row.
-- **The frame varies by more than a factor of two**, 86,054 to 194,449. The
+- **The frame varies by more than a factor of two**, 86,232 to 195,910. The
   cheap end is inside a 50 Hz frame, so a demo that ran at 50 Hz while the
   pilot was low and dropped to 25 Hz as he climbed would be honest, and the
-  line interrupt makes that switch rather than a guess.
-- **The mask gather is 6,205 T-states at the tall end** where the copy it
+  line interrupt makes that switch rather than a guess. **It would have to
+  halve its own steps to go with it**: everything here moves by so much a
+  frame, so doubling the frame rate doubles the speed of the camera, the
+  pilot and the forward travel. The GIF holds every frame for a 25 Hz one
+  for exactly that reason - free running it, the way the other demos here
+  are recorded, shows the whole thing change speed twice a lap rather than
+  showing judder.
+- **The mask gather is 6,903 T-states at the tall end** where the copy it
   replaced was 1,754. A per-horizon compiled gather would take it back to
   about two thousand, at 78 more little routines in the bank.
 - **The front layer is still spans at pixel precision**, which is the
@@ -302,6 +328,13 @@ Twenty-four of the thirty-two pages `LMPR` can address, so a 512K SAM.
 - **The horizon is the pilot's height and nothing else.** A camera that
   pitched properly would move the board's phase as well, and that is a
   different demo — this one is Space Harrier's fudge on purpose.
+
+**The camera must not come off a rounded position.** The pilot lands on a
+whole byte, because that is what he is drawn on; the camera that follows him
+does not have to, and taking it from his rounded byte gives the ground his
+quantisation - still for three frames, then nineteen pixels in one. The
+worst change of speed from one frame to the next goes from 6.2 pixels to 1.6
+by keeping one float.
 
     python3 tests/mkchq9data.py               # the board, the desert, the pilot
     python3 tests/jetpack.py /tmp/pilot.png   # look at him, at whatever size

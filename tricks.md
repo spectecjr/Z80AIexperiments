@@ -800,8 +800,8 @@ is on the screen. So:
   that one are the ones that would be off the bottom.
 - **the depth-indexed tables are the same tables**, only generated as deep
   as the deepest board and read as far as the horizon says. chequer9's swap
-  masks are 512 of them and the walk is ten instructions a scanline: 1,354
-  T-states at 19 rows of board and 6,205 at 96, against the 1,500 to 7,800
+  masks are 512 of them and the walk is ten instructions a scanline: 1,513
+  T-states at 19 rows of board and 6,903 at 96, against the 1,500 to 7,800
   that computing the mask a scanline again would have cost. This was
   expected to be the bill for a moving horizon and it is not.
 

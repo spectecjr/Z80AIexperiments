@@ -36,6 +36,18 @@ EQU = "chequer%sequ.z80s" % SET                         # viewport of
                                                         # set of its own
 C1 = 0x1111                     # the two colour indices, both nibbles
 C2 = 0x2222
+def stride():
+    """Bytes a value group: a set for every way round a scanline can be,
+    at sixteen bytes each and spaced so that the mask byte itself is the
+    offset - two of them where a square of depth and a square of camera
+    do the same thing, four where they do not."""
+    return 256 if SWAP ^ XSWAP else 32
+
+
+XSWAP = 0x33                    # what a square of CAMERA does: exchange
+                                # the two colours of whichever pair the
+                                # scanline is drawn in, because sliding
+                                # sideways by one square is exactly that
 SWAP = int(os.environ.get("CHQ_SWAP", "0x33"), 0)
                                 # what exchanges them, one byte - and, if
                                 # it carries a bit the two colours do not,
@@ -45,7 +57,20 @@ SWAP = int(os.environ.get("CHQ_SWAP", "0x33"), 0)
                                 # checkerboard comes in bands. It costs
                                 # two palette indices and not one
                                 # T-state, because the complement of a
-                                # value set was always there
+                                # value set was always there.
+                                #
+                                # A SQUARE OF DEPTH AND A SQUARE OF
+                                # CAMERA ARE THEN DIFFERENT THINGS. With
+                                # two colours both of them just exchange
+                                # the pair and one XOR does for both;
+                                # with four, depth switches pair as well
+                                # and the camera must not - slide
+                                # sideways across a square with them
+                                # folded together and the whole screen's
+                                # banding inverts. So there are four
+                                # states a scanline now, not two, and
+                                # four value sets to a group instead of a
+                                # set and its complement
 SKY = int(os.environ.get("HARRIER_SKY", 1))     # and the sky: the board's
                                 # own first colour where a copper grades
                                 # the two apart by scanline, and an index
@@ -125,7 +150,7 @@ def main(here):
     for p in C.WIDTHS:
         for t in (0, 1):
             rec.append(("%s_e%d_%d" % (PRE, p, t),
-                        "chq4_val + %d" % (32 * which[(p, t)])))
+                        "chq4_val + %d" % (stride() * which[(p, t)])))
 
     band = bands()
     assert [p for _, p in band] == list(range(C.WIDTHS[-1],
@@ -145,8 +170,15 @@ def main(here):
              "CHQ4_TOP:       EQU %d          ; first row with a board" % C.TOP,
              "CHQ4_HAZE:      EQU %d          ; and what is above it"
              % (C.HAZE * 0x11),
-             "CHQ4_SWAP:      EQU %d          ; exchanges the two colours"
+             "CHQ4_SWAP:      EQU %d          ; what a square of depth does"
              % SWAP,
+             "CHQ4_XSWAP:     EQU %d          ; and what a square of camera"
+             % XSWAP,
+             "CHQ4_BAND:      EQU %d          ; does - which differ by this"
+             % (SWAP ^ XSWAP),
+             "                                ; where the board has four"
+             "\n                                ; colours, and not at all"
+             " where it has two",
              "CHQ4_ABOVE:     EQU %d          ; and what the top run spills"
              % (C.HAZE * 0x11 if C.TOP > C.HZ + 1 else SKY * 0x11,
                 ),

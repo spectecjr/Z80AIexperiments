@@ -31,6 +31,8 @@ W, H, STRIDE = HR.W, HR.H, HR.STRIDE
 HZ, S, HAZE = HR.HZ, HR.S, HR.HAZE
 PTAB, ZTAB, TOP = HR.PTAB, HR.ZTAB, HR.TOP
 WIDTHS = sorted(set(p for p in PTAB if p))
+XSWAP = 0x33                    # a square of camera: exchange the two
+                                # colours of the pair this scanline is in
 SWAP = int(os.environ.get("CHQ_SWAP", "0x33"), 0)
                                 # exchanges index 1 and 2 in both nibbles,
                                 # and with a third bit in it puts the odd
@@ -59,10 +61,16 @@ def frame(camx, camz, hz=None):
     """
     buf, par = HR.frame(camx, camz, hz)
     top = TOP if hz is None else HR.viewport(hz)[2]
-    for y in range(top, H):
-        if par[y]:
+    xp = (camx >> 8) & 1        # the camera's own square, which exchanges
+    for y in range(top, H):     # the two colours of whichever pair the
+        m = 0                   # scanline is in; harrier.py folds it in
+        if par[y] ^ xp:         # with the depth's, so take it out again
+            m ^= SWAP           # and apply the two separately - they are
+        if xp:                  # the same XOR only where the board has
+            m ^= XSWAP          # two colours
+        if m:
             for i in range(y * STRIDE, (y + 1) * STRIDE):
-                buf[i] ^= SWAP
+                buf[i] ^= m
     return buf
 
 

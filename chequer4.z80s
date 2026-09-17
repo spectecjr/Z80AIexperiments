@@ -170,6 +170,19 @@ chq4_frame:
 
 chq4_msk8:
     IF CHQ4_PAGED
+    IF CHQ4_BAND                ; where the board has four colours, a
+        LD   A,(chq4_camz+1)    ; square of depth and a square of camera
+        AND  1                  ; are different things: depth switches
+        ADD  A,A                ; which PAIR the scanline is drawn in as
+        ADD  A,CHQ4_MSK0        ; well as exchanging the two, and the
+        OUT  (CHQ4_LMPR),A      ; camera must only exchange them. Fold
+        LD   A,(chq4_camx+1)    ; them together, the way a two colour
+        AND  1                  ; board can, and sliding sideways across
+        JR   Z,chq4_x1          ; a square inverts the banding over the
+        LD   A,CHQ4_XSWAP       ; whole screen.
+chq4_x1:
+        LD   (chq4_gx+1),A      ; so the camera's square is its own XOR
+    ELSE
         LD   A,(chq4_camz+1)    ; bit 8 of the depth picks the chunk, and
         LD   B,A                ; the camera's own square parity goes in
         LD   A,(chq4_camx+1)    ; with it, because adding 256 to the depth
@@ -178,6 +191,7 @@ chq4_msk8:
         ADD  A,A                ; two pages a chunk
         ADD  A,CHQ4_MSK0
         OUT  (CHQ4_LMPR),A
+    ENDIF
         LD   A,(chq4_camz)      ; and the low byte picks the table: 128
         RRCA                    ; bytes each, so the index is a shift
         LD   H,A
@@ -193,7 +207,11 @@ chq4_msk8:
         LD   C,0x80             ; horizon draws the same board with
 chq4_g1:                        ; scanlines left out, and the mask has to
         LD   A,(HL)             ; lose the same ones. Half a step in, so
-        LD   (DE),A             ; that both ends of it are exact.
+    IF CHQ4_BAND                ; that both ends of it are exact.
+chq4_gx:
+        XOR  0                  ; patched: the camera's own square, which
+    ENDIF                       ; exchanges a pair but never switches it
+        LD   (DE),A
         INC  DE
         LD   A,C
 chq4_gf:

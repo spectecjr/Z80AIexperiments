@@ -52,7 +52,7 @@ about which of those it is.
 | `chequer6` | **1 px** | **1 px** | **pixels** | **154,607** | 25 Hz, and a pilot in front of it |
 | `chequer7` | **1 px** | **1 px** | **pixels** | **201,281** | 25 Hz, and a city on the horizon |
 | `chequer8` | **1 px** | **1 px** | **pixels** | **190,655** | 25 Hz, 40% of the screen, a desert above it |
-| `chequer9` | **1 px** | **1 px** | **pixels** | **141,242** | 25 Hz, a four colour board, the horizon moving between 10% and 50%, no palette changes at all |
+| `chequer9` | **1 px** | **1 px** | **pixels** | **139,314** | 25 Hz, a four colour board, the horizon moving between 10% and 50%, no palette changes at all |
 
 `chequer4` is the one to use: it draws chequer3's screen — the GIFs come
 out byte for byte identical — with the depth alternation in the pixels
@@ -165,8 +165,8 @@ helmet's grey. Nine indices for him, four for the board, six for the desert
 ground, plus green palms and a deep brown shadow that puts the near pyramids
 in front - and one flat sky. He is 24x48 and 8,056 T-states.
 
-86,054 / 141,242 / 194,449, and 191,412 in the worst frame of the sweep -
-81%, with 109 of the GIF's 250 frames inside a 50 Hz one. The bank is 95K
+86,232 / 139,314 / 195,910, and 192,096 in the worst frame of the sweep -
+82%, with 109 of the GIF's 250 frames inside a 50 Hz one. The bank is 95K
 and 17K of lists, and the map is 24 pages. See `chequer9.md`.
 
 **chequer9's camera is the pilot**, not `stroll()`: the board and the desert
