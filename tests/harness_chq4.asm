@@ -1,4 +1,5 @@
 CHQ4_PAGED:     EQU 0           ; the flat 64K layout
+CHQ4_DYNHZ:     EQU 0           ; the horizon stands still here
                 ORG 0x0000
                 HALT
                 DEFS 0x0100-$

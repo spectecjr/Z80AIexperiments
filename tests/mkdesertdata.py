@@ -37,8 +37,11 @@ import sys
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import desert as D                                      # noqa: E402
 
-BANK0 = 0x20                    # LMPR: RAM over ROM 0, and the pages the
-FIRST = 16                      # map has spare past the pilot's
+BANK0 = 0x20                    # LMPR: RAM over ROM 0, and the page the
+FIRST = int(os.environ.get("DESERT_FIRST", 16))     # map has spare - which
+SET = os.environ.get("DESERT_SET", "")              # is a different page
+                                # in a demo whose board takes more chunks,
+                                # so both it and the file names are given
 WINDOW = 0x7F00                 # what LMPR maps, less the caller's stack
 
 
@@ -141,7 +144,7 @@ def emit_chunks(here, back):
                 n += len(code) + 384 + 3
         parts.append("\n        ASSERT $ <= 0x%04X       ; the window, less"
                      " the caller's stack" % WINDOW)
-        open(os.path.join(here, "desertrun%d.z80s" % k), "w").write(
+        open(os.path.join(here, "desert%srun%d.z80s" % (SET, k)), "w").write(
             "\n".join(parts) + "\n")
     return cut, n
 
@@ -169,7 +172,7 @@ def emit_resident(here):
             "%d,%d,0x%02X" % (x0, x1, 0x11 * c) for x0, x1, c in D.SPANS[y])
             + (",255" if D.SPANS[y] else "255"))
         nsp += len(D.SPANS[y])
-    open(os.path.join(here, "desertdata.z80s"), "w").write(
+    open(os.path.join(here, "desert%sdata.z80s" % SET), "w").write(
         "\n".join(parts) + "\n")
     return nsp
 
@@ -178,8 +181,9 @@ def main(here):
     back = D.rear()
     cut, n = emit_chunks(here, back)
     nsp = emit_resident(here)
-    print("desert: %d rows of rear layer at four phases in %d chunks, "
-          "%d bytes; %d front spans" % (D.ROWS, len(cut), n, nsp))
+    print("desert%s: %d rows of rear layer at four phases in %d chunks "
+          "from page %d, %d bytes; %d front spans"
+          % (SET, D.ROWS, len(cut), FIRST, n, nsp))
 
 
 if __name__ == "__main__":

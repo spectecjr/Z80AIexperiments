@@ -182,9 +182,25 @@ chq4_msk8:
         AND  0x7F
         LD   H,A
         LD   DE,chq4_msk
+    IF CHQ4_DYNHZ               ; as many scanlines as this horizon has,
+        LD   A,(chq4_rows)      ; entered at two bytes an LDI
+        NEG
+        ADD  A,128
+        ADD  A,A
+        LD   C,A
+        LD   B,0
+        LD   IX,chq4_ldi
+        ADD  IX,BC
+        JP   (IX)
+chq4_ldi:
+        DUP  128
+        LDI                     ; 16 T-states a scanline against 81
+        EDUP
+    ELSE
         DUP  192 - CHQ4_TOP
         LDI                     ; 16 T-states a scanline against 81
         EDUP
+    ENDIF
         LD   A,CHQ4_BANK        ; and the bank back, for the drawing
         OUT  (CHQ4_LMPR),A
         RET
@@ -235,6 +251,24 @@ chq4_floor:
         LD   L,A                ; the widest square and one more, so
         LD   H,0                ; that the first band's subtraction
         LD   (chq4_cx),HL       ; leaves it times the widest
+    IF CHQ4_DYNHZ               ; which is a different square at every
+        LD   DE,0               ; horizon, so it is a multiply rather
+        LD   A,(chq4_wide)      ; than six shifts
+chq4_m1:
+        SRL  A
+        JR   NC,chq4_m2
+        EX   DE,HL
+        ADD  HL,DE
+        EX   DE,HL
+chq4_m2:
+        ADD  HL,HL
+        OR   A
+        JR   NZ,chq4_m1
+        LD   (chq4_acc),DE
+        LD   A,(chq4_bnk0)      ; and the chunk the bottom band is in
+        OUT  (CHQ4_LMPR),A
+        LD   HL,(chq4_bp0)      ; and where in its table that band is
+    ELSE
         LD   B,H
         LD   C,A
         DUP  6
@@ -243,6 +277,7 @@ chq4_floor:
         ADD  HL,BC
         LD   (chq4_acc),HL
         LD   HL,chq4_band
+    ENDIF
         LD   (chq4_bp+1),HL
     IF CHQ4_PAGED
         EXX
@@ -255,7 +290,11 @@ chq4_floor:
         LD   L,0
         DEC  HL
     ENDIF
+    IF CHQ4_DYNHZ
+        LD   DE,(chq4_mskp)                     ; and the mask, which is
+    ELSE                                        ; as long as the board
         LD   DE,chq4_msk + 191 - CHQ4_TOP       ; and the mask
+    ENDIF
         EXX
 
 chq4_b1:
@@ -455,4 +494,13 @@ chq4_camz:      DEFW 0
 chq4_sp:        DEFS 2
 chq4_cx:        DEFS 2
 chq4_acc:       DEFS 2
+    IF CHQ4_DYNHZ
+chq4_rows:      DEFS 1          ; scanlines of board, 191 - the horizon
+chq4_wide:      DEFS 1          ; the widest square down there, and one
+chq4_bnk0:      DEFS 1          ; the chunk the bottom band is in
+chq4_bp0:       DEFS 2          ; where in its table that band is
+chq4_mskp:      DEFS 2          ; and the last byte of the swap mask
+chq4_msk:       DEFS 128        ; which is as long as the tallest board
+    ELSE
 chq4_msk:       DEFS 192 - CHQ4_TOP
+    ENDIF

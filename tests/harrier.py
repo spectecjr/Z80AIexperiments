@@ -53,6 +53,23 @@ PTAB = ptab()
 TOP = min(y for y in range(H) if PTAB[y])       # first row with a board
 
 
+def viewport(hz):
+    """The same two tables for a horizon at another row.
+
+    A square's width and a scanline's depth both depend on the row's
+    distance from the horizon and on nothing else, so moving the
+    horizon does not change the board - it changes how much of it is on
+    the screen. This is what a demo with a horizon that moves asks for,
+    and what lets one run bank serve all of them.
+    """
+    z = [0] * (hz + 1) + [(CAMH * FOCAL) // (y - hz) for y in range(hz + 1, H)]
+    p = [0] * H
+    for y in range(hz + 1, H):
+        w = int(round((S * (y - hz)) / CAMH))
+        p[y] = w if w >= MINP else 0
+    return p, z, min(y for y in range(H) if p[y])
+
+
 def line(p, phi):
     """One scanline, exactly: colour is floor((x - 128 + phi) / p)."""
     out = bytearray(STRIDE)
@@ -65,18 +82,24 @@ def line(p, phi):
     return out
 
 
-def frame(camx, camz):
-    """The screen, and the parity the copper flips the palette by."""
+def frame(camx, camz, hz=None):
+    """The screen, and the parity the copper flips the palette by.
+
+    hz moves the horizon, for the demos that have one that moves; the
+    tables then come from viewport() above and nothing else changes.
+    """
+    ptab, ztab, top = (PTAB, ZTAB, TOP) if hz is None else viewport(hz)
+    hz = HZ if hz is None else hz
     buf = bytearray(b"\x11" * (STRIDE * H))
-    for y in range(HZ + 1, TOP):
+    for y in range(hz + 1, top):
         buf[y * STRIDE:(y + 1) * STRIDE] = bytes([HAZE * 0x11]) * STRIDE
     par = [0] * H
-    for y in range(HZ + 1, H):
+    for y in range(hz + 1, H):
         # the camera's own square is a parity too: crossing one
         # exchanges the two colours, exactly as a square of depth does,
         # and only the low byte of camx survives into the phase
-        par[y] = (((ZTAB[y] + camz) >> 8) & 1) ^ ((camx >> 8) & 1)
-        p = PTAB[y]
+        par[y] = (((ztab[y] + camz) >> 8) & 1) ^ ((camx >> 8) & 1)
+        p = ptab[y]
         if p:
             buf[y * STRIDE:(y + 1) * STRIDE] = line(p, ((camx % S) * p) // S)
     return buf, par

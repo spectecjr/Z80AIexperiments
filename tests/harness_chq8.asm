@@ -7,6 +7,8 @@
 ; of their own. C9_RET is what the desert's runs jump back to.
         DEVICE NOSLOT64K
 CHQ4_PAGED:     EQU 1
+CHQ4_DYNHZ:     EQU 0           ; the horizon stands still here
+C9_DYNHZ:       EQU 0           ; so the desert's band stands still too
 CHQ6_CITY:      EQU 0           ; c8_frame calls the city itself
 chq4_band:      EQU 0x0000      ; the bank's bands, at the foot of it
         ORG 0xE000

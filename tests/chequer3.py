@@ -81,18 +81,26 @@ def line(p, k, t, s):
     return out
 
 
-def frame(camx, camz):
-    """The screen, and the parity the copper flips the palette by."""
+def frame(camx, camz, hz=None):
+    """The screen, and the parity the copper flips the palette by.
+
+    hz moves the horizon, for the demos that have one that moves: the
+    tables come from harrier.viewport, and everything else here is the
+    same because a square's width depends on the distance from the
+    horizon and not on the row.
+    """
+    ptab, ztab, top = (PTAB, ZTAB, TOP) if hz is None else HR.viewport(hz)
+    hz = HZ if hz is None else hz
     buf = bytearray(b"\x11" * (STRIDE * H))
-    for y in range(HZ + 1, TOP):
+    for y in range(hz + 1, top):
         buf[y * STRIDE:(y + 1) * STRIDE] = bytes([HAZE * 0x11]) * STRIDE
     par = [0] * H
-    for y in range(HZ + 1, H):
+    for y in range(hz + 1, H):
         # the camera's own square is a parity too: crossing one
         # exchanges the two colours, exactly as a square of depth does,
         # and only the low byte of camx survives into the phase
-        par[y] = (((ZTAB[y] + camz) >> 8) & 1) ^ ((camx >> 8) & 1)
-        p = PTAB[y]
+        par[y] = (((ztab[y] + camz) >> 8) & 1) ^ ((camx >> 8) & 1)
+        p = ptab[y]
         if p:
             k, t, s = entry(p, camx)
             row = line(p, k, t, s)

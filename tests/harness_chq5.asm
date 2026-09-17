@@ -4,6 +4,7 @@
 ; tables into pages of their own.
         DEVICE NOSLOT64K
 CHQ4_PAGED:     EQU 1
+CHQ4_DYNHZ:     EQU 0           ; the horizon stands still here
 chq4_band:      EQU 0x0000      ; the bank's bands, at the foot of it
         ORG 0xE000
         INCLUDE "chequer5equ.z80s"

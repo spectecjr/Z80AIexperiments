@@ -44,6 +44,12 @@
 
 C9_BASE:        EQU CHQ4_SCREEN + C9_TOP * 128
 
+; C9_DYNHZ says the band follows a horizon that moves rather than
+; sitting at C9_TOP: its bottom row is the one above the board's top,
+; so both addresses come off (chq4_rows) - how many scanlines of board
+; there are - and the runs themselves do not care where they land,
+; because SP says.
+
 ;------------------------------------------------------------------
 ; c9_band - the whole band: the rear layer, then the front over it
 ;------------------------------------------------------------------
@@ -92,6 +98,21 @@ c9_band:
         ADD  HL,DE
         LD   (c9_ent),HL
 
+    IF C9_DYNHZ
+        LD   A,(chq4_rows)      ; the band sits on the board, wherever
+        NEG                     ; the board's top has got to
+        ADD  A,192
+        LD   H,A
+        LD   L,0
+        SRL  H
+        RR   L
+        LD   DE,CHQ4_SCREEN
+        ADD  HL,DE
+        LD   (c9_bot),HL
+        LD   DE,-C9_ROWS * 128
+        ADD  HL,DE
+        LD   (c9_top),HL
+    ENDIF
         LD   A,C9_BANK0         ; the first chunk of the rear layer.
         OUT  (CHQ4_LMPR),A      ; From here to the end of the band the
 c9_ph1: LD   A,0               ; caller's stack is not mapped, so this
@@ -103,7 +124,11 @@ c9_ph1: LD   A,0               ; caller's stack is not mapped, so this
         LD   L,A
 
         EXX
+    IF C9_DYNHZ
+        LD   HL,(c9_bot)                    ; the bottom row's right end
+    ELSE
         LD   HL,C9_BASE + C9_ROWS * 128     ; the bottom row's right end
+    ENDIF
         LD   DE,-128
         LD   B,C9_ROWS
         EXX
@@ -186,7 +211,11 @@ c9_rdone:
 ;--- the front layer, over the top of it --------------------------
 
         LD   HL,c9_spans
+    IF C9_DYNHZ
+        LD   DE,(c9_top)
+    ELSE
         LD   DE,C9_BASE
+    ENDIF
         LD   (c9_row),DE
         LD   A,C9_ROWS
         LD   (c9_left),A
@@ -355,6 +384,8 @@ c9_far:         DEFB 0          ; the two offsets, in pixels, worked out
 c9_near:        DEFB 0          ; above from the camera
 c9_ent:         DEFS 2
 c9_stop:        DEFS 2
+c9_top:         DEFS 2
+c9_bot:         DEFS 2
 c9_at:          DEFS 2
 c9_row:         DEFS 2
 c9_left:        DEFS 1

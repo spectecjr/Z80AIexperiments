@@ -46,10 +46,14 @@ def line(p, phi, par):
     return out
 
 
-def frame(camx, camz):
-    """The screen. There is no parity to hand out: it is in the pixels."""
-    buf, par = HR.frame(camx, camz)
-    for y in range(TOP, H):
+def frame(camx, camz, hz=None):
+    """The screen. There is no parity to hand out: it is in the pixels.
+
+    hz moves the horizon, for chequer9, which has one that does.
+    """
+    buf, par = HR.frame(camx, camz, hz)
+    top = TOP if hz is None else HR.viewport(hz)[2]
+    for y in range(top, H):
         if par[y]:
             for i in range(y * STRIDE, (y + 1) * STRIDE):
                 buf[i] ^= SWAP

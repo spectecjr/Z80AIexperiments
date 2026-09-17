@@ -1,0 +1,156 @@
+;------------------------------------------------------------------
+; chequer9.z80s - the horizon moves
+;
+;   cq9_init     sky into both buffers, once
+;   cq9_frame    draw from (chq4_camx, chq4_camz, cq9_hz), and flip
+;
+; chequer8's board is the bottom 40% of the screen and stays there.
+; This one's horizon moves between row 114 and row 77 - between 40% of
+; the screen and 59% of it - the way Space Harrier's does when the
+; player flies up and down: not because the camera is doing anything a
+; camera could do, but because it puts the ground where the eye wants
+; it.
+;
+; ONE BANK SERVES EVERY HORIZON. A square's width at row y is
+; round(S * (y - horizon) / CAMH), which depends on the row's distance
+; from the horizon and nothing else. So the band table - how many
+; scanlines each square width gets - is the same table at every
+; horizon: a taller board simply starts further down it, at the band
+; that holds the bottom row of the screen. The bands before that one
+; would be off the bottom.
+;
+; The bank goes up to 96 pixel squares rather than 64, because pitching
+; the horizon up brings coarser ground into view: 4,656 compiled bodies
+; in six chunks, against chequer8's 2,080 in three.
+;
+; A HORIZON IS ALLOWED WHEN THE SCREEN'S BOTTOM ROW IS THE LAST ROW OF
+; ITS BAND, because a band is drawn whole. 32 of the 39 rows in the
+; range are, which is a horizon every scanline or two, and the table in
+; chequer9hz.z80s has them: the chunk to page in, where in its band
+; table to start, how many scanlines that is, and the widest square,
+; which is what the phase accumulator is seeded with.
+;
+; WHAT THE SWAP MASK DOES ABOUT IT: nothing at all. A scanline's depth
+; is CAMH * FOCAL / (y - horizon), which is the same function of the
+; same distance, so the 512 lookup tables are the ones chequer5 built -
+; only longer, 128 rows rather than 77, and copied as far as the
+; horizon says. That is the whole of it: 1,380 T-states, not the 9,300
+; that computing the mask a scanline again would have cost.
+;
+; AND WHAT MOVES DOWN HAS TO BE PUT BACK. When the horizon drops, rows
+; that held board or desert become sky, and nothing else paints there.
+; Each buffer remembers the board it was drawn with last - per buffer,
+; free, because the paged map keeps a copy of this block behind each -
+; and puts back the difference.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+;------------------------------------------------------------------
+; cq9_init - sky into both buffers
+;------------------------------------------------------------------
+
+cq9_init:
+        JP   chq4_init
+
+;------------------------------------------------------------------
+; cq9_frame - one frame at the horizon (cq9_hz) says
+;------------------------------------------------------------------
+
+cq9_frame:
+        LD   A,(cq9_hz)         ; five bytes a horizon, lowest first
+        LD   E,A
+        ADD  A,A
+        ADD  A,A
+        ADD  A,E
+        LD   E,A
+        LD   D,0
+        LD   HL,chq4_hztab
+        ADD  HL,DE
+        LD   A,(HL)             ; the chunk the bottom band is in
+        LD   (chq4_bnk0),A
+        INC  HL
+        LD   E,(HL)
+        INC  HL
+        LD   D,(HL)
+        LD   (chq4_bp0),DE      ; where in its table that band is
+        INC  HL
+        LD   A,(HL)             ; how many scanlines of board
+        LD   (chq4_rows),A
+        INC  HL
+        LD   A,(HL)
+        LD   (chq4_wide),A      ; and the widest square, plus one
+
+        LD   A,(chq4_rows)      ; the swap mask is as long as the board
+        DEC  A
+        LD   E,A
+        LD   D,0
+        LD   HL,chq4_msk
+        ADD  HL,DE
+        LD   (chq4_mskp),HL
+
+        LD   A,(cq9_seen)       ; what this buffer was drawn with last:
+        LD   HL,chq4_rows       ; if the board has shrunk since, the rows
+        SUB  (HL)               ; it has given up are sky now and nothing
+        CALL NZ,cq9_sky         ; else will paint them
+        JR   C,cq9_f1           ; (it grew, and covers its own)
+cq9_f1:
+        LD   A,(chq4_rows)
+        LD   (cq9_seen),A
+
+        CALL chq4_msk8
+        CALL chq4_floor
+        CALL c9_band
+
+        IN   A,(CHQ4_HMPR)      ; the flip, which is the hardware's own
+        AND  31                 ; record of which buffer is which
+        LD   C,A
+        OR   CHQ4_MODE4
+        OUT  (CHQ4_VMPR),A
+        LD   A,C
+        XOR  CHQ4_SCR0 ^ CHQ4_SCR1
+        OUT  (CHQ4_HMPR),A
+        RET
+
+;------------------------------------------------------------------
+; cq9_sky - put back the rows the band and the board have given up
+;
+;   A = how many scanlines of board this buffer has lost, and the
+;   carry set if it has gained them instead, in which case there is
+;   nothing to do: what grew covers its own rows.
+;
+; The rows in question are the ones above the band's new top, which is
+; where the fill ends: the band and the board paint everything below.
+;------------------------------------------------------------------
+
+cq9_sky:
+        RET  C
+        LD   B,A
+        LD   A,(chq4_rows)      ; the band's top row, which is where the
+        ADD  A,C9_ROWS          ; sky now has to reach down to
+        NEG
+        ADD  A,192
+        LD   H,A
+        LD   L,0
+        SRL  H
+        RR   L                  ; that row's first byte
+        LD   DE,CHQ4_SCREEN
+        ADD  HL,DE
+        DI                      ; SP is about to be the screen
+        LD   (cq9_sp),SP
+        LD   SP,HL
+        LD   DE,CHQ4_C1
+cq9_s1:
+        DUP  64
+        PUSH DE
+        EDUP
+        DJNZ cq9_s1
+        LD   SP,(cq9_sp)
+        EI
+        RET
+
+cq9_hz:         DEFB 0          ; which horizon, 0 to CHQ4_HZN - 1, from
+                                ; the caller: 0 is the tallest board
+cq9_seen:       DEFB 0          ; and how many scanlines of board this
+                                ; buffer has on it, which is per buffer
+cq9_sp:         DEFS 2

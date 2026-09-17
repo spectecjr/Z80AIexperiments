@@ -38,10 +38,15 @@ ends are the masked bytes above.
 The period is 256 pixels, the width of the screen, so the wrap on both
 layers is what the subtraction does on its own.
 """
+import os
 import sys
 
-ROWS = 32                       # scanlines of band
-TOP = 83                        # the first of them; the board starts at 115
+ROWS = int(os.environ.get("DESERT_ROWS", 32))   # scanlines of band, which
+                                # a demo with a horizon that moves wants
+                                # fewer of: the taller its board can get,
+                                # the less frame there is for scenery
+TOP = 115 - ROWS                # the first of them, where the board's
+                                # horizon stands still
 STRIDE = 128
 PERIOD = 256                    # pixels, which is the screen's width
 
@@ -67,7 +72,7 @@ FAR_SHIFT, NEAR_SHIFT = 6, 5    # how deep the two layers are: a layer at
                                 # the front is exactly twice the rear
                                 # because it is the same number shifted
                                 # one place less
-GROUND = 24                     # the rear layer's own horizon, in rows
+GROUND = ROWS - 8               # the rear layer's own horizon, in rows
 
 
 def offsets(camx):
@@ -127,9 +132,10 @@ def rear():
         for x in range(PERIOD):                 # stands on
             px[y][x] = DARK
 
-    pyramid(px, 56, 42, 22, GROUND, LIT, SAND, course=4)    # the great one
-    pyramid(px, 170, 20, 12, GROUND, LIT, SAND)             # and a lesser
-    pyramid(px, 202, 11, 7, GROUND, LIT, SAND)              # pair beside it
+    big = GROUND - 2                                        # the great one
+    pyramid(px, 56, 2 * big - 2, big, GROUND, LIT, SAND, course=4)
+    pyramid(px, 170, big - 2, big // 2 + 1, GROUND, LIT, SAND)   # a lesser
+    pyramid(px, 202, big // 2, big // 3, GROUND, LIT, SAND)      # pair
 
     for amp, f, ph, base, crest in ((1.8, 2, 0.7, GROUND + 2, LIT),
                                     (2.2, 3, 2.3, GROUND + 4, SAND),
@@ -154,7 +160,9 @@ def rear():
 # The front layer: three pyramids standing on the bottom row of the band,
 # which is nearer than the rear layer's ground line, and smaller than the
 # great pyramid behind them - so they pass in front of it.
-FRONTS = ((36, 15, 9), (128, 21, 11), (206, 12, 7))
+FRONTS = ((36, 15, ROWS * 9 // 32),         # the near pyramids: smaller
+          (128, 21, ROWS * 11 // 32),       # than the great one behind
+          (206, 12, ROWS * 7 // 32))        # them, and in front of it
 
 
 def spans():
