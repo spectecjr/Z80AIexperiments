@@ -917,10 +917,21 @@ use: `1 ^ 0xB = 10` and `2 ^ 0xB = 9`, the checker keeps its offset, and the
 whole row comes out a shade down. Space Harrier's banded ground, for no
 T-states and no table.
 
+**Spend them as two pairs, not as four steps of one ramp.** In perspective a
+column of squares is one long wedge converging on the horizon and a row of
+them is a thin strip, so an evenly spread ramp reads as columns running away
+rather than as bands rolling in. Put the two colours of each pair a shade
+apart and the pairs far apart: what alternates across the screen goes quiet,
+what alternates into it goes loud, and the ground bands the way the arcade
+one does.
+
 What it costs is that MODE 4 has sixteen colours and they were all spoken
 for: the pilot had twelve, the board two, the sky one. His two dark greys
 are one grey now. **That is the shape of every colour decision on this
-machine** - the frame budget is not the binding one.
+machine** - the frame budget is not the binding one. It also pays twice: the
+desert band used to borrow the pilot's suit for its sand, and now takes the
+board's four instead - the rear layer in the pale pair, the near pyramids in
+the dark one, which is aerial perspective for nothing.
 
 ## Every CALL is a bet that the page underneath it has not moved
 

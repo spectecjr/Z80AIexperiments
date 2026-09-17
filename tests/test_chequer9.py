@@ -18,6 +18,7 @@ import os
 import sys
 
 os.environ["HARRIER_MINP"] = "1"        # chequer9's viewport
+os.environ["DESERT_PAL"] = "board4"     # and the desert drawn in them
 os.environ["CHQ_SWAP"] = "0xBB"         # a board in four colours
 os.environ["JET_PAL"] = "board4"
 os.environ["JET_W"] = "24"              # chequer9's pilot, 24x48

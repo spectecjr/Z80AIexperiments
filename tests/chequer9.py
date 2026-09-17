@@ -17,6 +17,7 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+os.environ["DESERT_PAL"] = "board4"     # and the desert drawn in them
 os.environ["CHQ_SWAP"] = "0xBB"         # a board in four colours: the
 os.environ["JET_PAL"] = "board4"        # odd rows of squares are drawn in
                                         # a second, darker pair, which is

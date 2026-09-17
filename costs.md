@@ -82,7 +82,9 @@ the board's two colours is an XOR over six register values and one edge
 byte, so a swap constant with a third bit in it (`0xBB` rather than `0x33`)
 draws the odd rows of squares in two indices the even rows never use - a
 band a square row, which is what Space Harrier's ground does. It costs two
-palette indices, and sixteen is all there are. See `chequer9.md`.
+palette indices, and sixteen is all there are: the pilot's two dark greys
+are one grey now, and the desert band, which used to borrow his suit,
+is drawn in the board's four sands instead. See `chequer9.md`.
 
 ## 1a. The floors, measured
 

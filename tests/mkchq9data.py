@@ -59,7 +59,8 @@ VIEW = {"HARRIER_HZ": "95",     # the deepest board: 96 scanlines, half
 SAND = {"DESERT_ROWS": "20",    # a shorter band than chequer8's, so that
         "DESERT_SET": "9",      # the tallest board still fits the frame,
         "DESERT_FIRST": "18",   # and past the board's chunks in the map
-        "DESERT_SKY": "15"}     # with a flat sky, in an index of its own
+        "DESERT_SKY": "15",     # with a flat sky, in an index of its own
+        "DESERT_PAL": "board4"} # and its sand out of the board's own four
 JET = {"JET_FIRST": "22",       # the pilot goes past the desert's, and
        "JET_W": "24",           # is 24x48 here rather than the 32x96 the
        "JET_H": "48",           # demos with a pilot who stands still use

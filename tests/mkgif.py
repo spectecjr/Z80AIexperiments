@@ -706,7 +706,8 @@ def chequer9(outdir, seconds=10):
                HARRIER_CAMH="308", DESERT_ROWS="20",
                HARRIER_SKY="15", DESERT_SKY="15",
                JET_W="24", JET_H="48",
-               CHQ_SWAP="0xBB", JET_PAL="board4")
+               CHQ_SWAP="0xBB", JET_PAL="board4",
+               DESERT_PAL="board4")
     here = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "mkgif.py")
     subprocess.run([sys.executable, here, "--chequer9", outdir,
@@ -752,14 +753,18 @@ def _chequer9(outdir, seconds=10):
     s = b.syms
     b.call(s["cq9_init"])
     pal = {i: sam_rgb(sam(*rgb)) for i, rgb in J.PAL.items()}
-    pal[1] = sam_rgb(sam(7, 7, 5))      # the board's four sands. A swapped
-    pal[2] = sam_rgb(sam(7, 5, 3))      # row draws 10 where an even one
-    pal[10] = sam_rgb(sam(6, 4, 2))     # draws 1 and 9 where it draws 2,
-    pal[9] = sam_rgb(sam(6, 6, 4))      # so 10 is the darker sand and 9
-    pal[15] = sam_rgb(sam(2, 4, 4))     # the darker cream: the checker
-                                        # carries on and the odd rows of
-                                        # squares come out a band darker,
-                                        # under one flat teal sky
+    pal[1] = sam_rgb(sam(7, 7, 5))      # the board's four sands, as two
+    pal[2] = sam_rgb(sam(6, 6, 4))      # PAIRS rather than four steps of
+    pal[10] = sam_rgb(sam(6, 4, 2))     # one ramp: 1 and 2 are a shade
+    pal[9] = sam_rgb(sam(5, 3, 1))      # apart, 9 and 10 are a shade apart,
+                                        # and the two pairs are far apart.
+                                        # What alternates across the screen
+                                        # is then quiet and what alternates
+                                        # INTO it is loud, which is what
+                                        # makes the board read as bands
+                                        # rolling towards the player rather
+                                        # than as columns running away.
+    pal[15] = sam_rgb(sam(2, 4, 4))     # under one flat teal sky
     n, m = int(seconds * 25), len(C9.HORIZONS)
     frames, ts, last = [], [], 56
     for t in range(n):

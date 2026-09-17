@@ -54,8 +54,18 @@ SKY = int(os.environ.get("DESERT_SKY", 1))      # the board's own sky
                                 # index, so that the band grades with the
                                 # rest of the sky - or an index of its own
                                 # where the sky is flat. The rest are
-LIT, SAND, DARK = 7, 6, 5       # the pilot's, which are fixed. The great
-FLIT, FDARK = 12, 4             # pyramid is pale sand with a dull rose
+if os.environ.get("DESERT_PAL") == "board4":
+    LIT, SAND, DARK = 1, 2, 9   # the board's own four sands, where the
+    FLIT, FDARK = 10, 9         # board has four: the rear layer in the
+                                # pale pair the near rows of squares are
+                                # drawn in and the front pyramids in the
+                                # darker pair from the far rows, which is
+                                # aerial perspective and costs nothing
+                                # because they are indices the screen
+                                # already has
+else:
+    LIT, SAND, DARK = 7, 6, 5   # the pilot's, which are fixed. The great
+    FLIT, FDARK = 12, 4         # pyramid is pale sand with a dull rose
                                 # shadow - aerial perspective, the far
                                 # things paler - the dune field below it
                                 # is darker still, and the front pyramids

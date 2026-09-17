@@ -152,9 +152,16 @@ exchanges its two is an XOR over six register values and one edge byte, so a
 swap constant carrying a third bit - `0xBB` rather than `0x33` - draws the
 odd rows of squares in two indices the even rows never use: a pale pair and
 a darker one, banding as they scroll in, which is Space Harrier's ground.
+The four have to be two pairs and not four steps of one ramp, because a
+column of squares in perspective is a long converging wedge and a row of
+them is a thin strip - spread them evenly and the eye follows the wedges
+instead of the bands.
+
 Same T-states to the digit, two more palette indices, and sixteen is all
-there are - so the pilot's two dark greys are one grey now. He is 24x48 and
-8,066 T-states.
+there are: the pilot's two dark greys are one grey now, and the desert band,
+which used to borrow his suit for its sand, is drawn in the board's own four
+instead - the rear layer pale, the near pyramids dark, which is the aerial
+perspective it wanted anyway. He is 24x48 and 8,066 T-states.
 
 85,994 / 141,182 / 194,389, and 191,352 in the worst frame of the sweep -
 81%, with 109 of the GIF's 250 frames inside a 50 Hz one. The bank is 95K

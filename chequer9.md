@@ -122,15 +122,24 @@ odd rows of squares come out in two indices the even rows never use:
 
 | | even rows of squares | odd rows |
 |---|---|---|
-| the light square | 1, pale cream | 9, a darker cream |
-| the dark square | 2, sand | 10, a darker sand |
+| one square | 1, pale cream | 10, tan |
+| the next | 2, a shade down | 9, a shade down again |
 
 `1 ^ 0xB = 10` and `2 ^ 0xB = 9`, so a swapped row draws 10 where an even one
-draws 1: the checker keeps its offset and the whole row is a shade down.
+draws 1: the checker keeps its offset and the whole row is a band darker.
 **Not one extra T-state** — 94,054 and 191,352 at the two ends, the same
 numbers the two colour board measured — and not one extra byte of table,
 because the complement of every value set was already there. All it costs is
 two palette indices.
+
+**The four have to be two pairs, not four steps of one ramp.** Spread them
+evenly and the board reads as columns running away to the horizon rather
+than as bands rolling in, because in perspective a column of squares is one
+long converging wedge and a row of them is a thin strip: the eye follows the
+wedges. So the contrast has to go the other way round from the obvious — 1
+and 2 a shade apart, 9 and 10 a shade apart, and the two pairs far apart.
+Then what alternates across the screen is quiet, what alternates into it is
+loud, and the ground bands the way Space Harrier's does.
 
 **Which is what made it expensive.** Sixteen colours is sixteen colours: the
 pilot had twelve, the board two and the sky one. Four for the board means
@@ -138,11 +147,13 @@ the pilot gives one up, so his two dark greys — the helmet's shadow and the
 jetpack's body — became one grey at index 3, and 9 and 10 went to the board.
 At 24x48 that is a distinction of about four pixels.
 
-**And it is why the desert is red.** The band borrows the pilot's suit
-colours because there were never any indices for a desert of its own; with
-the board now sand, those reds are the loudest thing on the screen. Making
-it sand as well wants indices that do not exist — or a pilot who is not a
-person in a red suit.
+**And it is what the desert is drawn in.** The band used to borrow the
+pilot's suit, because there were never any indices for a desert of its own;
+now there are four sands on the screen and it uses those — the rear layer in
+the pale pair, the front pyramids in the dark one, which is the aerial
+perspective it wanted anyway and costs nothing, because they are indices the
+screen already has. The desert and the ground are the same four colours,
+which is why the horizon reads as one place.
 
 ## The pilot is 24x48 now
 
@@ -196,6 +207,12 @@ puts them wherever the band happens to be.
 | the front layer | 13,930 | 33 spans |
 | **`c9_band`** | **49,796** | |
 
+Its colours are the board's now: the great pyramid, the dunes and the palms
+in the pale pair, the three near pyramids in the dark one. Five roles into
+four indices, so the dune shadows and the near pyramids' shadow faces share
+one — which is only visible where a near pyramid stands in front of a dune
+shadow, and its lit face is beside it.
+
 At the 10% horizon the whole frame is 89,657 T-states and the desert is
 49,796 of it — **more than the board, the pilot and both fills together.**
 It is the one thing in the frame that does not know where the horizon is.
@@ -236,9 +253,6 @@ Twenty-four of the thirty-two pages `LMPR` can address, so a 512K SAM.
 
 ## What is left
 
-- **The desert borrows the pilot's suit** for its colours, which is why it
-  is red under a sand board. It wants three or four indices of its own and
-  there are none; the only source is the pilot, who is down to eleven.
 - **The desert is half the shallow frame** and does not vary with the
   horizon. Now that the board falls to 28,670 there is room to widen the
   band back towards chequer8's 32 scanlines — about 2,500 T-states a row.
