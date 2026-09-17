@@ -47,11 +47,11 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-import city                                             # noqa: E402
+import desert                                           # noqa: E402
 import jetpack as J                                     # noqa: E402
 from mkjetdata import X, Y, SKY                         # noqa: E402
 
-SPLIT = city.TOP                # the first row something else paints
+SPLIT = desert.TOP              # the first row something else paints
 
 BANK = 0x2E                     # LMPR: RAM over ROM 0, and the page the
                                 # bench's map has spare behind the screens

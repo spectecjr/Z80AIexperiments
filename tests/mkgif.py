@@ -605,6 +605,54 @@ def chequer7(outdir, seconds=8):
     got, bad, secs = check_gif(p, idx, pal, durs)
     report(p, size, n, durs, secs, got, bad)
 
+
+def chequer8(outdir, seconds=8):
+    """chequer8 at its measured rate: 189,528 T-states a frame, 25 Hz.
+
+    The board, a two layer desert on the horizon and the pilot, every
+    pixel of it drawn from scratch every frame. The rear layer -
+    pyramids, a far ridge, palms and rocks - moves one pixel every
+    three frames and the front dune ridge one pixel a frame, which is
+    slow enough to read as distance rather than as scenery going past.
+    """
+    import desert as D
+    import jetpack as J
+    from mkchqdata import sam
+    from mkhrdata import fog as fogtab
+    from sam import Sam
+    b = Sam("harness_chq8.asm",
+            ("harness_chq5c0.asm", "harness_chq5c1.asm",
+             "harness_chq5c2.asm", "harness_chq5msk0.asm",
+             "harness_chq5msk1.asm", "harness_jetrun.asm",
+             "harness_desert0.asm", "harness_desert1.asm"), screens=(10, 12),
+            chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"],
+                                     "CHQ4_SCR": y["CHQ4_SCREEN"],
+                                     "C9_RET": y["c9_ret"]})
+    s = b.syms
+    b.call(s["c8_init"])
+    fog, haze = fogtab()
+    fixed = {i: sam_rgb(sam(*rgb)) for i, rgb in J.PAL.items()}
+    n = int(seconds * 25)
+    frames, ts = [], []
+    for t in range(n):
+        camx, camz = stroll(t, 25)
+        b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["chq4_camz"], camz.to_bytes(2, "little"))
+        b.poke(s["c9_far"], bytes([(t // D.REAR_EVERY) & 0xFF]))
+        b.poke(s["c9_near"], bytes([t & 0xFF]))
+        b.poke(s["c8_pose"],                    # banking into the turns
+               bytes([1 + (1 if t % 100 < 25 else -1 if t % 100 >= 75
+                           else 0)]))
+        ts.append(b.call(s["c8_frame"]))
+        frames.append(unpack(b.screen(b.shown())))
+    still = [[0] * 192] * n
+    idx, pal = copper(frames, still, fog, haze, fixed)
+    p = "%s/chequer8.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, idx, pal, durs)
+    got, bad, secs = check_gif(p, idx, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
+
 def zarch(outdir, seconds=8):
     """zarch at its measured rate: 206,012 T-states a frame, 25 Hz.
 
@@ -1067,6 +1115,7 @@ if __name__ == "__main__":
     chequer5(d)
     chequer6(d)
     chequer7(d)
+    chequer8(d)
     zarch(d)
     road(d)
     road2(d)

@@ -89,6 +89,25 @@ A bank switch is `OUT (250),A` - **11 T-states**. If the rows of a picture
 are drawn in an order that walks the bank monotonically, a bank of any size
 costs a handful of those a frame.
 
+**The stack is in a page too, and this is the trap.** A `CALL` writes the
+return address to whatever is mapped now; the `RET` reads it from whatever
+is mapped then. So, for any routine that pages the low block while the
+caller's stack is in it:
+
+- put the caller's page back **before returning**;
+- **never `CALL` across a switch** - inline the switch, or jump to it;
+- a routine that also puts `SP` on the screen must put `SP` back before
+  anything in it calls anything.
+
+Nothing complains when this is wrong: the `RET` goes to whatever those two
+bytes happen to be in the page that is there now.
+
+**Count the pages before committing to a map.** A 256K machine has sixteen
+and they go quickly: a compiled run bank and its lookup tables can be ten of
+them on their own, two buffers are four, and a compiled sprite is one more.
+`chequer8` needs twenty, which is a 512K machine - worth deciding on
+purpose rather than discovering.
+
 ## The palette - CLUT (base 248)
 
 Sixteen write-only 7-bit registers, **one port each**: colour *n* is at port

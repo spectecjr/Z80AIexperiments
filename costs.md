@@ -12,7 +12,10 @@ came out of, what each one costs, and where it does not pay. The one piece
 of hardware these budgets *do* now take account of is paging: a SAM has
 256K in 16K pages and the 64K address space is only a window onto it, which
 `road2` uses for a 41,297-byte run bank at a cost of two `OUT`s a frame.
-`.claude/skills/sam-coupe-hardware` has the registers.
+`.claude/skills/sam-coupe-hardware` has the registers. `chequer8` is the
+first thing here that does not fit a 256K machine: twenty pages of the
+thirty-two LMPR can address, so a 512K SAM. `chequer8.md` says what a 256K
+version would have to give up.
 
 ---
 
@@ -24,6 +27,7 @@ of hardware these budgets *do* now take account of is paging: a SAM has
 | `chequer5` | 109,825 / **113,659** / 117,621 | **50** | the same routine, board to the horizon, bank paged |
 | `chequer6` | **143,643** steady, 159,388 changing pose | 25 | and a pilot in a jetpack over it, masked, three poses |
 | `chequer7` | 193,921 / **201,281** / 209,572 | 25 | and a two layer city scrolling on the horizon |
+| `chequer8` | 180,981 / **189,528** / 210,166 | 25 | a two layer desert instead, by pixels, and the pilot compiled |
 | `zarch` | 195,482 / **208,206** / 215,619 | 25 | Zarch's ground: a chequered plane, turning |
 | `chequer3` | 106,970 / **110,806** / 114,736 | **50** | the same picture, stripes in the palette |
 | `road2` | 104,750 / **112,736** / 118,270 | **50** | the Hang On road, 121% of the screen wide, bank paged |

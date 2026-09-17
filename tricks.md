@@ -698,3 +698,90 @@ The same shape appears in road2 (a row whose road is on screen needs no
 stub and no spill repair; both exist for the rows that run off the edge)
 and in chequer4's band loop. If a routine's setup is the same size as its
 work, the question to ask is what fraction of calls needs all of it.
+
+## A sprite that does not change is a routine, not data
+
+A masked sprite player spends most of its time on decisions that were the
+same last frame and will be the same next frame: which op this is, how many
+bytes it covers, whether this one needs a mask. Only the *background* under
+the sprite changes. So compile the sprite:
+
+    a run of solid bytes   LD SP,end and a PUSH a pair - 5.5 T-states a
+                           byte, with DE reloaded only where the pair
+                           changes and SP only where a run does not carry
+                           on from the one before
+    an odd byte            LD A,n / LD (nn),A, because PUSH writes two
+    one pixel of sprite    LD A,(nn) / AND / OR / LD (nn),A, which is the
+                           only read-modify-write left
+
+chequer6's pilot is 32x96 with 110 single-pixel bytes. Played from a
+run-length stream he costs **63 T-states a byte on the screen**; compiled he
+costs about **15**, and all 96 rows go down in 14,479 T-states where 63 rows
+of stream cost 46,793.
+
+Two things make it possible and one makes it worth it. Every address in the
+compiled form is absolute, which needs **the back buffer at a fixed
+address** - the paged map gives that for free, because `HMPR` maps whichever
+buffer is being drawn to the same place. It is about four bytes of code a
+pixel byte, so three poses came to 8,688 and needed **a page of their own**.
+And what it buys is not just the T-states: with the whole sprite cheap
+enough to redraw every frame, "drawn once per buffer" goes away, and with it
+the clearing, the per-buffer bookkeeping and the rule that nothing may move
+underneath it.
+
+## Scrolling a picture by pixels: compile it per phase, spill the rest
+
+A background that scrolls by whole bytes moves two pixels at a time. On a
+slow layer that reads as scenery being dragged past; it is the single
+biggest difference between chequer7's city and chequer8's desert, which are
+otherwise the same idea.
+
+Sub-byte scrolling of a whole row means the byte at every colour boundary
+changes, so nothing can be worked out at run time - but everything can be
+worked out in advance:
+
+- **Compile the row, once per pixel phase.** Four phases means the run is
+  entered at a pair (four pixels), the phase supplies the rest, and `SP`
+  never has to take up an odd byte. Two phases is half the memory and wants
+  an odd byte put back at the end of every row.
+- **Hold two whole periods in the run**, so that entering it at the right
+  pair gives any rotation of the pattern.
+- **Let the end spill.** A run cannot stop early, so the pushes left over
+  land in the row above - draw the band bottom upwards and the next row
+  covers them. Only the topmost row's spill has to be put back.
+- **Carry the entry points with the run**: a run reloads `DE` only where the
+  colour changes, so an entry is (the `DE` it needs, where to go). Four
+  bytes each, 64 of them, a quarter of a K a run.
+
+The bill for chequer8's rear layer: 24 rows at four phases, 45K of bank,
+34,856 T-states a frame - of which about a third is spill, because a run
+entered at *s* makes `128 - s` pushes and only 64 of them land. In exchange,
+**detail is free**: pyramids with two faces, palms, a ridge that undulates,
+a scatter of rocks. Drawn as rectangles at run time, in the city, every one
+of those would have been another rectangle a row.
+
+A second layer over the top cannot share any of it, because the two layers
+move at different rates: it goes on as spans, with a read-modify-write at
+either end where the edge lands inside a byte. That is 45 T-states an edge
+and the reason the front layer is the expensive half per pixel.
+
+## Every CALL is a bet that the page underneath it has not moved
+
+A `CALL` writes the return address to the stack in whatever page is mapped
+now, and the `RET` reads it from whatever page is mapped then. Page memory
+in between and it reads someone else's bytes - silently, and a long way from
+where the mistake is.
+
+This bit twice in one afternoon. `c9_band` pages the desert's chunks in over
+the board's bank, and the caller's stack is in chunk 0: a `CALL c9_chunk`
+that ended with the new chunk mapped returned into the middle of a compiled
+run. Inlining the switch fixed it. Then the same routine returned to *its*
+caller with the last desert chunk still mapped, and the frame ended in the
+weeds.
+
+The rules that came out of it, for any routine that pages:
+
+- put the caller's page back before returning;
+- never `CALL` across a switch - inline it, or jump;
+- and if the routine also puts `SP` on the screen, put *that* back before
+  anything calls anything.

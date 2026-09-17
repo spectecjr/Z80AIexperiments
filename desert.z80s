@@ -1,0 +1,328 @@
+;------------------------------------------------------------------
+; desert.z80s - two layers of desert on the horizon, scrolling by
+; pixels
+;
+;   c9_band    redraw the band, from (c9_far) and (c9_near)
+;
+; Twenty-four scanlines between the board and the sky. The rear layer -
+; sky, pyramids, a far ridge, palms and rocks - moves a pixel every
+; three frames; the front layer, a dune ridge along the bottom of the
+; band, moves a pixel every frame. The caller supplies both offsets,
+; because nothing in the resident block may carry state from one frame
+; to the next.
+;
+; THE REAR LAYER IS COMPILED, one run of PUSHes a (row, phase), in
+; chunks of its own. A run is two whole periods of its row, so entering
+; it at the right pair gives any rotation; it then runs to its end, and
+; what is left over spills into the row above - which is drawn next,
+; because the band is drawn bottom upwards. Only the topmost row's
+; spill has to be put back, and above the band is sky.
+;
+; FOUR PHASES, because the layer moves by pixels and a pixel is half a
+; byte. Compiling the pattern at all four pixel offsets means the entry
+; is (64 - offset/4) and the stack pointer is always the row's right
+; hand end - no odd byte, no second table. It costs twice the memory of
+; two phases, and memory is what a bank of pages is for.
+;
+; THE FRONT LAYER IS SPANS, because the rear layer has to show between
+; its dunes: per row, the runs of dune body and of lit crest, in layer
+; pixels. The Z80 subtracts the offset, splits whatever crosses the
+; screen's edge and draws each one - PUSHes down the middle and a
+; read-modify-write at either end where the edge lands inside a byte.
+; That is the whole price of a layer that moves a pixel at a time and
+; is not opaque: about 45 T-states an edge, twice a span.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+C9_BASE:        EQU CHQ4_SCREEN + C9_TOP * 128
+
+;------------------------------------------------------------------
+; c9_band - the whole band: the rear layer, then the front over it
+;------------------------------------------------------------------
+
+c9_band:
+        DI                      ; SP is about to be the screen
+        LD   (c9_sp),SP
+
+;--- the rear layer, bottom row upwards ---------------------------
+
+        LD   A,(c9_far)
+        LD   B,A
+        AND  3                  ; the phase decides which run a row wants
+        ADD  A,A                ; and nothing else does, so each chunk
+        LD   (c9_ph1+1),A       ; tables its rows once a phase
+        LD   (c9_ph2+1),A
+        LD   A,B
+        SRL  A                  ; and the rest of the offset is the entry:
+        SRL  A                  ; four pixels a pair, counted backwards
+        NEG                     ; because a run fills rightwards to left
+        AND  63
+        ADD  A,A
+        ADD  A,A                ; four bytes an entry
+        LD   (c9_ent),A
+        LD   A,C9_BANK0         ; the first chunk of the rear layer.
+        OUT  (CHQ4_LMPR),A      ; From here to the end of the band the
+c9_ph1: LD   A,0               ; caller's stack is not mapped, so this
+        LD   L,A                ; is a jump and not a call: every RET in
+        LD   H,0                ; between would read the page that is
+        LD   A,(HL)             ; there now
+        INC  HL
+        LD   H,(HL)
+        LD   L,A
+
+        EXX
+        LD   HL,C9_BASE + C9_ROWS * 128     ; the bottom row's right end
+        LD   DE,-128
+        LD   B,C9_ROWS
+        EXX
+c9_r1:
+        LD   E,(HL)             ; this row's table of entry points
+        INC  HL
+        LD   D,(HL)
+        INC  HL
+        LD   A,D
+        OR   E
+        JR   Z,c9_r3            ; a zero for the end of this chunk's rows
+c9_r2:
+        LD   (c9_at),HL
+        LD   A,(c9_ent)
+        ADD  A,E
+        LD   E,A
+        JR   NC,c9_r4
+        INC  D
+c9_r4:
+        EX   DE,HL
+        LD   E,(HL)             ; the DE the run wants where it starts,
+        INC  HL                 ; because a run reloads it only where the
+        LD   D,(HL)             ; colour changes
+        INC  HL
+        LD   A,(HL)
+        INC  HL
+        LD   H,(HL)
+        LD   L,A                ; and where in the run that is
+        PUSH HL
+        POP  IX
+        EXX
+        LD   SP,HL              ; the row's right hand end
+        ADD  HL,DE              ; and the row above it, for next time
+        EXX
+        JP   (IX)               ; the run, which ends JP c9_ret
+
+c9_ret:
+        EXX
+        DJNZ c9_r0
+        EXX
+        JR   c9_rdone
+c9_r0:
+        EXX
+        LD   HL,(c9_at)
+        JP   c9_r1
+
+c9_r3:
+        LD   A,(HL)             ; the chunk that comes after this one, and
+        OUT  (CHQ4_LMPR),A      ; its own table of rows for this phase,
+c9_ph2: LD   A,0               ; which is at the foot of it
+        LD   L,A
+        LD   H,0
+        LD   A,(HL)
+        INC  HL
+        LD   H,(HL)
+        LD   L,A
+        JP   c9_r1
+
+c9_rdone:
+        LD   SP,C9_BASE         ; the top row's spill landed above the
+        LD   DE,C9_SKY          ; band, where the sky is
+        DUP  64
+        PUSH DE
+        EDUP
+        LD   SP,(c9_sp)         ; and the front layer below calls, so it
+                                ; wants a stack rather than a screen
+
+;--- the front layer, over the top of it --------------------------
+
+        LD   HL,c9_spans
+        LD   DE,C9_BASE
+        LD   (c9_row),DE
+        LD   A,C9_ROWS
+        LD   (c9_left),A
+c9_f1:
+        LD   A,(HL)
+        INC  A
+        JR   Z,c9_f4            ; 255 in place of a first pixel ends a row
+        DEC  A
+        LD   D,A
+        INC  HL
+        LD   E,(HL)
+        INC  HL
+        LD   C,(HL)
+        INC  HL
+        PUSH HL
+        LD   A,(c9_near)        ; where it lands, and the period is the
+        LD   B,A                ; screen's width, so the wrap is the
+        LD   A,D                ; subtraction itself
+        SUB  B
+        LD   D,A
+        LD   A,E
+        SUB  B
+        LD   E,A
+        CP   D
+        JR   NC,c9_f2           ; it did not cross the screen's edge
+        PUSH DE                 ; it did: the part at the right hand edge
+        PUSH BC
+        LD   E,255
+        CALL c9_span
+        POP  BC
+        POP  DE
+        LD   D,0                ; and the part that came round to the left
+c9_f2:
+        CALL c9_span
+        POP  HL
+        JR   c9_f1
+c9_f4:
+        INC  HL
+        LD   DE,(c9_row)        ; on down the band a row
+        LD   A,E
+        ADD  A,128
+        LD   E,A
+        JR   NC,c9_f5
+        INC  D
+c9_f5:
+        LD   (c9_row),DE
+        LD   A,(c9_left)
+        DEC  A
+        LD   (c9_left),A
+        JR   NZ,c9_f1
+
+        LD   SP,(c9_sp)
+        LD   A,CHQ4_BANK        ; the caller's stack is in chunk 0, and
+        OUT  (CHQ4_LMPR),A      ; this was called from there
+        EI
+        RET
+
+;------------------------------------------------------------------
+; c9_span - one run of one colour, at pixel precision
+;
+;   D = its first pixel on the screen, E = its last, D <= E
+;   C = the colour, both nibbles     (c9_row) = the row's first byte
+;
+; The two ends are read-modify-writes where the span starts or stops
+; inside a byte; everything between them is PUSHes, and an odd number
+; of bytes leaves one store.
+;------------------------------------------------------------------
+
+c9_span:
+        LD   A,C
+        LD   (c9_col),A
+        LD   A,D
+        AND  1
+        JR   Z,c9_s1
+        LD   A,D                ; it starts inside a byte, whose left
+        SRL  A                  ; pixel is the layer behind it
+        CALL c9_addr
+        LD   A,(HL)
+        AND  0xF0
+        LD   B,A
+        LD   A,C
+        AND  0x0F
+        OR   B
+        LD   (HL),A
+c9_s1:
+        LD   A,E
+        AND  1
+        JR   NZ,c9_s2
+        LD   A,E                ; and it stops inside one, whose right
+        SRL  A                  ; pixel is
+        CALL c9_addr
+        LD   A,(HL)
+        AND  0x0F
+        LD   B,A
+        LD   A,(c9_col)
+        AND  0xF0
+        OR   B
+        LD   (HL),A
+c9_s2:
+        LD   A,D                ; the whole bytes between the two ends.
+        SRL  A                  ; The first is (D + 1) / 2 and D can be
+        LD   B,A                ; 255, which is where a span that came
+        LD   A,D                ; round the screen's edge starts, so it
+        AND  1                  ; is worked out as D/2 + D's odd bit and
+        ADD  A,B                ; comes to 128 rather than to nothing
+        LD   (c9_f0),A
+        LD   A,E
+        OR   A
+        RET  Z                  ; one pixel, and it was an end
+        DEC  A
+        SRL  A
+        LD   (c9_fb),A
+        LD   HL,c9_f0
+        SUB  (HL)
+        RET  C                  ; nothing whole in it at all
+        INC  A
+        LD   (c9_n),A
+        SRL  A                  ; pairs
+        JR   Z,c9_s3
+        NEG
+        ADD  A,64               ; where to enter the fill block
+        LD   IXL,A
+        LD   A,c9_fill >> 8
+        LD   IXH,A
+        LD   A,(c9_fb)
+        INC  A
+        CALL c9_addr
+        LD   A,(c9_col)
+        LD   D,A
+        LD   E,A
+        LD   (c9_ssp),SP
+        LD   SP,HL
+        JP   (IX)               ; the pushes, which end JP c9_sret
+c9_sret:
+        LD   SP,(c9_ssp)
+c9_s3:
+        LD   A,(c9_n)
+        AND  1
+        RET  Z
+        LD   A,(c9_f0)          ; an odd number of bytes leaves one that
+        CALL c9_addr            ; no PUSH can reach
+        LD   A,(c9_col)
+        LD   (HL),A
+        RET
+
+;------------------------------------------------------------------
+; c9_addr - HL = the row's base plus A, which never crosses a page
+; because a row is 128 bytes and starts on a half page
+;------------------------------------------------------------------
+
+c9_addr:
+        LD   HL,(c9_row)
+        ADD  A,L
+        LD   L,A
+        RET  NC
+        INC  H
+        RET
+
+;------------------------------------------------------------------
+; c9_fill - 64 PUSHes, entered at 64 - pairs
+;------------------------------------------------------------------
+
+        ALIGN 256               ; so that an entry is one byte
+c9_fill:
+        DUP  64
+        PUSH DE
+        EDUP
+        JP   c9_sret
+
+c9_far:         DEFB 0          ; the two offsets, in pixels, from the
+c9_near:        DEFB 0          ; caller: one a pixel every three frames
+                                ; and one a pixel a frame
+c9_ent:         DEFS 1
+c9_at:          DEFS 2
+c9_row:         DEFS 2
+c9_left:        DEFS 1
+c9_col:         DEFS 1
+c9_f0:          DEFS 1
+c9_fb:          DEFS 1
+c9_n:           DEFS 1
+c9_sp:          DEFS 2
+c9_ssp:         DEFS 2

@@ -16,25 +16,28 @@ import sys
 os.environ["HARRIER_MINP"] = "1"        # before the model reads the geometry
 
 import chequer8 as C
-import city as T
+import desert as T
 from sam import Sam
 
 CHUNKS = ("harness_chq5c0.asm", "harness_chq5c1.asm",   # the board's bank,
           "harness_chq5c2.asm",                         # cut by band
           "harness_chq5msk0.asm", "harness_chq5msk1.asm",
-          "harness_jetrun.asm")                         # and the pilot
+          "harness_jetrun.asm",                         # the pilot, and
+          "harness_desert0.asm", "harness_desert1.asm")  # the rear layer
 
 
 def main():
     b = Sam("harness_chq8.asm", CHUNKS, screens=(10, 12),
             chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"],
-                                     "CHQ4_SCR": y["CHQ4_SCREEN"]})
+                                     "CHQ4_SCR": y["CHQ4_SCREEN"],
+                                     "C9_RET": y["c9_ret"]})
     s = b.syms
-    want = (s["JET8_BANK"] & 31) * 2
-    got = b.pages[-1] * 2
-    print("  the pilot's page is %d, and JET8_BANK says %d"
-          % (b.pages[-1], s["JET8_BANK"] & 31))
-    assert want == got, "the map and the constant disagree"
+    for name, equ in (("harness_jetrun.asm", "JET8_BANK"),
+                      ("harness_desert0.asm", "C9_BANK0")):
+        page = b.pages[CHUNKS.index(name)]
+        print("  %-22s page %2d, and %s says %2d"
+              % (name, page, equ, s[equ] & 31))
+        assert page == s[equ] & 31, "the map and the constant disagree"
     it = b.call(s["c8_init"])
     print("  c8_init   %d T-states once, the sky into both buffers" % it)
     poses = [(x, z, t, (t // 7) % 3)
@@ -46,7 +49,8 @@ def main():
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], (camz & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["c8_pose"], bytes([pose]))
-        b.poke(s["c7_t"], bytes([t & 0xFF]))
+        b.poke(s["c9_far"], bytes([(t // T.REAR_EVERY) & 0xFF]))
+        b.poke(s["c9_near"], bytes([t & 0xFF]))
         times.append(b.call(s["c8_frame"]))
         got = b.screen(b.shown())
         if got != bytes(C.frame(camx, camz, t, pose)):
@@ -64,13 +68,13 @@ def main():
     print()
     ft = b.call(s["chq4_floor"])
     mt = b.call(s["chq4_msk8"])
-    ct = b.call(s["c7_city"])
+    ct = b.call(s["c9_band"])
     pt = b.call(s["c8_frame"])
     mean = sum(times) / n
     print("  chq4_floor   %7d T-states, %d scanlines of board"
           % (ft, 192 - C.TOP))
     print("  chq4_msk8    %7d T-states, the swap mask a scanline" % mt)
-    print("  c7_city      %7d T-states, %d scanlines of it, two layers"
+    print("  c9_band      %7d T-states, %d scanlines of desert, two layers"
           % (ct, T.ROWS))
     print("  the pilot    %7d T-states, all 96 rows of him, compiled"
           % (pt - ft - mt - ct))

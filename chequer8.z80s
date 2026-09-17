@@ -1,6 +1,6 @@
 ;------------------------------------------------------------------
-; chequer8.z80s - the board, the background and the pilot, all of it
-; repainted every frame
+; chequer8.z80s - the board, a two layer desert and the pilot, all of
+; it repainted every frame
 ;
 ;   c8_init    the board's sky into both buffers, once
 ;   c8_frame   draw from (chq4_camx, chq4_camz, c8_t, c8_pose), and flip
@@ -35,7 +35,7 @@ c8_init:
 c8_frame:
         CALL chq4_msk8
         CALL chq4_floor
-        CALL c7_city            ; the band between the board and the sky
+        CALL c9_band            ; the band between the board and the sky
 
         LD   A,JET8_BANK        ; the pilot's page over the board's bank
         OUT  (CHQ4_LMPR),A

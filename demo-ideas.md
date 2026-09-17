@@ -51,6 +51,7 @@ about which of those it is.
 | `chequer5` | **1 px** | **1 px** | **pixels** | **129,183** | 25 Hz, board to the horizon |
 | `chequer6` | **1 px** | **1 px** | **pixels** | **154,607** | 25 Hz, and a pilot in front of it |
 | `chequer7` | **1 px** | **1 px** | **pixels** | **201,281** | 25 Hz, and a city on the horizon |
+| `chequer8` | **1 px** | **1 px** | **pixels** | **189,528** | 25 Hz, a desert instead, and everything redrawn |
 
 `chequer4` is the one to use: it draws chequer3's screen — the GIFs come
 out byte for byte identical — with the depth alternation in the pixels
@@ -102,6 +103,21 @@ where the pilot divides — a city on rows 81..96 is something that paints
 over him, so 63 of his rows are redrawn a frame rather than 47 — and paid
 for that by compiling his top half into a run with the sky baked in. See
 `chequer7.md`.
+
+**A desert instead, and the pilot compiled.** `chequer8` replaces the city
+with two layers of Super Hang-On desert - pyramids, palms and a far ridge
+behind, a dune ridge in front - scrolling **by pixels**: the rear layer one
+pixel every three frames and the front one a frame, which is 8 and 25 pixels
+a second and reads as distance where the city's whole-byte steps read as
+scenery on rails. The rear layer is compiled, one run of PUSHes a (row,
+phase), so its detail costs memory rather than time; the front is spans over
+it, with a read-modify-write where an edge lands inside a byte.
+
+It also stops drawing anything once per buffer. The pilot is compiled into a
+page of his own - all 96 rows every frame in 14,479 T-states against 46,793
+for 63 rows of stream - which buys back the rule that made a pose change and
+a moving background awkward. Twenty pages of bank, so it wants a 512K SAM.
+See `chequer8.md`.
 
 **The camera in the GIFs.** All five demos now share `stroll()` in
 `tests/mkgif.py`: a slide of two and a half squares either way taking

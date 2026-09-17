@@ -23,7 +23,14 @@ The map is road2's (see road2.z80s):
 
 which is what a MODE 4 screen leaves: 24K of a 32K pair. Chunks are laid
 out two pages at a time from page 0 and step over the buffers, so
-chequer8's six are at 0, 2, 4, 6, 8 and 14.
+chequer8's eight are at 0, 2, 4, 6, 8, 14, 16 and 18.
+
+The machine here is a 512K one, which is what the paging registers can
+address: five bits of page, 32 pages, 512K. A 256K SAM has sixteen
+pages and every one of them is spoken for by the time chequer7's board,
+buffers and pilot are in - so chequer8's desert is the point at which
+these demos stop fitting a base machine, and chequer8.md says what a
+256K version would have to give up.
 """
 import os
 import sys
@@ -45,7 +52,7 @@ STACK = 0x7FF0                  # caller's stack, which lives there because
 
 class Sam:
     def __init__(self, resident, chunks, code_page=5, screens=(4, 6),
-                 code_at=0xE000, ram=256 * 1024, here=None, root=None,
+                 code_at=0xE000, ram=512 * 1024, here=None, root=None,
                  chunk_defines=None):
         """resident goes behind each screen; chunks at pages 0, 2, 4 ...
 
@@ -71,6 +78,10 @@ class Sam:
             p += 2
         for h, p in zip(chunks, self.pages):
             img, syms = assemble(h, here=here, root=root, defines=defs)
+            if (p + 2) * PAGE > len(self.ram):
+                raise SystemExit("%s wants pages %d and %d, and this "
+                                 "machine has %d"
+                                 % (h, p, p + 1, len(self.ram) // PAGE))
             self.ram[p * PAGE:p * PAGE + len(img)] = img
             self.syms.update(syms)
         self.ram[RETADDR] = 0x76                        # HALT, to return to

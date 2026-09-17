@@ -380,134 +380,142 @@ jet8_0:
         PUSH DE
         LD   DE,0x5544
         PUSH DE
-        LD   SP,CHQ4_SCREEN + 9416
-        LD   DE,0x1111
+        LD   A,(CHQ4_SCREEN + 9413)
+        AND  0x0F
+        LD   (CHQ4_SCREEN + 9413),A
+        LD   SP,CHQ4_SCREEN + 9413
+        LD   DE,0x4455
         PUSH DE
-        LD   DE,0x0144
-        PUSH DE
-        LD   DE,0x55EB
-        PUSH DE
-        LD   DE,0xABAA
-        PUSH DE
-        LD   DE,0xAAAA
-        PUSH DE
-        PUSH DE
-        LD   DE,0xBABE
-        PUSH DE
-        LD   DE,0x5544
-        PUSH DE
-        LD   SP,CHQ4_SCREEN + 9544
-        LD   DE,0x1111
-        PUSH DE
-        LD   DE,0x0144
-        PUSH DE
-        LD   DE,0x55EB
-        PUSH DE
-        LD   DE,0xABAA
+        LD   DE,0xEBAB
         PUSH DE
         LD   DE,0xAAAA
         PUSH DE
         PUSH DE
-        LD   DE,0xBABE
+        LD   DE,0xAABA
         PUSH DE
-        LD   DE,0x5544
+        LD   DE,0xBE55
         PUSH DE
-        LD   SP,CHQ4_SCREEN + 9672
-        LD   DE,0x1111
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 9400),A
+        LD   A,(CHQ4_SCREEN + 9541)
+        AND  0x0F
+        LD   (CHQ4_SCREEN + 9541),A
+        LD   SP,CHQ4_SCREEN + 9541
+        LD   DE,0x4455
         PUSH DE
-        LD   DE,0x0144
-        PUSH DE
-        LD   DE,0x55EB
-        PUSH DE
-        LD   DE,0xABAA
-        PUSH DE
-        LD   DE,0xAAAA
-        PUSH DE
-        PUSH DE
-        LD   DE,0xBABE
-        PUSH DE
-        LD   DE,0x5544
-        PUSH DE
-        LD   SP,CHQ4_SCREEN + 9800
-        LD   DE,0x1111
-        PUSH DE
-        LD   DE,0x0144
-        PUSH DE
-        LD   DE,0x55EB
-        PUSH DE
-        LD   DE,0xABAA
+        LD   DE,0xEBAB
         PUSH DE
         LD   DE,0xAAAA
         PUSH DE
         PUSH DE
-        LD   DE,0xBABE
+        LD   DE,0xAABA
         PUSH DE
-        LD   DE,0x5544
+        LD   DE,0xBE55
         PUSH DE
-        LD   SP,CHQ4_SCREEN + 9928
-        LD   DE,0x1111
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 9528),A
+        LD   A,(CHQ4_SCREEN + 9669)
+        AND  0x0F
+        LD   (CHQ4_SCREEN + 9669),A
+        LD   SP,CHQ4_SCREEN + 9669
+        LD   DE,0x4455
         PUSH DE
-        LD   DE,0x0144
-        PUSH DE
-        LD   DE,0x55EB
-        PUSH DE
-        LD   DE,0xABAA
-        PUSH DE
-        LD   DE,0xAAAA
-        PUSH DE
-        PUSH DE
-        LD   DE,0xBABE
-        PUSH DE
-        LD   DE,0x5544
-        PUSH DE
-        LD   SP,CHQ4_SCREEN + 10056
-        LD   DE,0x1111
-        PUSH DE
-        LD   DE,0x0144
-        PUSH DE
-        LD   DE,0x55EB
-        PUSH DE
-        LD   DE,0xABAA
+        LD   DE,0xEBAB
         PUSH DE
         LD   DE,0xAAAA
         PUSH DE
         PUSH DE
-        LD   DE,0xBABE
+        LD   DE,0xAABA
         PUSH DE
-        LD   DE,0x5544
+        LD   DE,0xBE55
         PUSH DE
-        LD   SP,CHQ4_SCREEN + 10184
-        LD   DE,0x1111
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 9656),A
+        LD   A,(CHQ4_SCREEN + 9797)
+        AND  0x0F
+        LD   (CHQ4_SCREEN + 9797),A
+        LD   SP,CHQ4_SCREEN + 9797
+        LD   DE,0x4455
         PUSH DE
-        LD   DE,0x0144
-        PUSH DE
-        LD   DE,0x55EB
-        PUSH DE
-        LD   DE,0xABAA
-        PUSH DE
-        LD   DE,0xAAAA
-        PUSH DE
-        PUSH DE
-        LD   DE,0xBABE
-        PUSH DE
-        LD   DE,0x5544
-        PUSH DE
-        LD   SP,CHQ4_SCREEN + 10312
-        LD   DE,0x1111
-        PUSH DE
-        LD   DE,0x0144
-        PUSH DE
-        LD   DE,0x55EB
-        PUSH DE
-        LD   DE,0xABAA
+        LD   DE,0xEBAB
         PUSH DE
         LD   DE,0xAAAA
         PUSH DE
         PUSH DE
-        LD   DE,0xBABE
+        LD   DE,0xAABA
         PUSH DE
-        LD   DE,0x5544
+        LD   DE,0xBE55
         PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 9784),A
+        LD   A,(CHQ4_SCREEN + 9925)
+        AND  0x0F
+        LD   (CHQ4_SCREEN + 9925),A
+        LD   SP,CHQ4_SCREEN + 9925
+        LD   DE,0x4455
+        PUSH DE
+        LD   DE,0xEBAB
+        PUSH DE
+        LD   DE,0xAAAA
+        PUSH DE
+        PUSH DE
+        LD   DE,0xAABA
+        PUSH DE
+        LD   DE,0xBE55
+        PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 9912),A
+        LD   A,(CHQ4_SCREEN + 10053)
+        AND  0x0F
+        LD   (CHQ4_SCREEN + 10053),A
+        LD   SP,CHQ4_SCREEN + 10053
+        LD   DE,0x4455
+        PUSH DE
+        LD   DE,0xEBAB
+        PUSH DE
+        LD   DE,0xAAAA
+        PUSH DE
+        PUSH DE
+        LD   DE,0xAABA
+        PUSH DE
+        LD   DE,0xBE55
+        PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 10040),A
+        LD   A,(CHQ4_SCREEN + 10181)
+        AND  0x0F
+        LD   (CHQ4_SCREEN + 10181),A
+        LD   SP,CHQ4_SCREEN + 10181
+        LD   DE,0x4455
+        PUSH DE
+        LD   DE,0xEBAB
+        PUSH DE
+        LD   DE,0xAAAA
+        PUSH DE
+        PUSH DE
+        LD   DE,0xAABA
+        PUSH DE
+        LD   DE,0xBE55
+        PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 10168),A
+        LD   A,(CHQ4_SCREEN + 10309)
+        AND  0x0F
+        LD   (CHQ4_SCREEN + 10309),A
+        LD   SP,CHQ4_SCREEN + 10309
+        LD   DE,0x4455
+        PUSH DE
+        LD   DE,0xEBAB
+        PUSH DE
+        LD   DE,0xAAAA
+        PUSH DE
+        PUSH DE
+        LD   DE,0xAABA
+        PUSH DE
+        LD   DE,0xBE55
+        PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 10296),A
         LD   A,(CHQ4_SCREEN + 10437)
         AND  0x0F
         LD   (CHQ4_SCREEN + 10437),A
@@ -1717,133 +1725,109 @@ jet8_1:
         PUSH DE
         LD   DE,0x0411
         PUSH DE
-        LD   SP,CHQ4_SCREEN + 9416
-        LD   DE,0x1140
+        LD   SP,CHQ4_SCREEN + 9415
+        LD   DE,0x4054
         PUSH DE
-        LD   DE,0x54B5
-        PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xB5BE
         PUSH DE
         LD   DE,0xAAAA
         PUSH DE
         PUSH DE
-        LD   DE,0xAAEB
         PUSH DE
-        LD   DE,0x5B45
+        LD   DE,0xEB5B
         PUSH DE
-        LD   DE,0x0411
+        LD   DE,0x4504
         PUSH DE
-        LD   SP,CHQ4_SCREEN + 9544
-        LD   DE,0x1140
+        LD   SP,CHQ4_SCREEN + 9543
+        LD   DE,0x4054
         PUSH DE
-        LD   DE,0x54B5
-        PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xB5BE
         PUSH DE
         LD   DE,0xAAAA
         PUSH DE
         PUSH DE
-        LD   DE,0xAAEB
         PUSH DE
-        LD   DE,0x5B45
+        LD   DE,0xEB5B
         PUSH DE
-        LD   DE,0x0411
+        LD   DE,0x4504
         PUSH DE
-        LD   SP,CHQ4_SCREEN + 9672
-        LD   DE,0x1140
+        LD   SP,CHQ4_SCREEN + 9671
+        LD   DE,0x4054
         PUSH DE
-        LD   DE,0x54B5
-        PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xB5BE
         PUSH DE
         LD   DE,0xAAAA
         PUSH DE
         PUSH DE
-        LD   DE,0xAAEB
         PUSH DE
-        LD   DE,0x5B45
+        LD   DE,0xEB5B
         PUSH DE
-        LD   DE,0x0411
+        LD   DE,0x4504
         PUSH DE
-        LD   SP,CHQ4_SCREEN + 9800
-        LD   DE,0x1140
+        LD   SP,CHQ4_SCREEN + 9799
+        LD   DE,0x4054
         PUSH DE
-        LD   DE,0x54B5
-        PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xB5BE
         PUSH DE
         LD   DE,0xAAAA
         PUSH DE
         PUSH DE
-        LD   DE,0xAAEB
         PUSH DE
-        LD   DE,0x5B45
+        LD   DE,0xEB5B
         PUSH DE
-        LD   DE,0x0411
+        LD   DE,0x4504
         PUSH DE
-        LD   SP,CHQ4_SCREEN + 9928
-        LD   DE,0x1140
+        LD   SP,CHQ4_SCREEN + 9927
+        LD   DE,0x4054
         PUSH DE
-        LD   DE,0x54B5
-        PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xB5BE
         PUSH DE
         LD   DE,0xAAAA
         PUSH DE
         PUSH DE
-        LD   DE,0xAAEB
         PUSH DE
-        LD   DE,0x5B45
+        LD   DE,0xEB5B
         PUSH DE
-        LD   DE,0x0411
+        LD   DE,0x4504
         PUSH DE
-        LD   SP,CHQ4_SCREEN + 10056
-        LD   DE,0x1140
+        LD   SP,CHQ4_SCREEN + 10055
+        LD   DE,0x4054
         PUSH DE
-        LD   DE,0x54B5
-        PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xB5BE
         PUSH DE
         LD   DE,0xAAAA
         PUSH DE
         PUSH DE
-        LD   DE,0xAAEB
         PUSH DE
-        LD   DE,0x5B45
+        LD   DE,0xEB5B
         PUSH DE
-        LD   DE,0x0411
+        LD   DE,0x4504
         PUSH DE
-        LD   SP,CHQ4_SCREEN + 10184
-        LD   DE,0x1140
+        LD   SP,CHQ4_SCREEN + 10183
+        LD   DE,0x4054
         PUSH DE
-        LD   DE,0x54B5
-        PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xB5BE
         PUSH DE
         LD   DE,0xAAAA
         PUSH DE
         PUSH DE
-        LD   DE,0xAAEB
         PUSH DE
-        LD   DE,0x5B45
+        LD   DE,0xEB5B
         PUSH DE
-        LD   DE,0x0411
+        LD   DE,0x4504
         PUSH DE
-        LD   SP,CHQ4_SCREEN + 10312
-        LD   DE,0x1140
+        LD   SP,CHQ4_SCREEN + 10311
+        LD   DE,0x4054
         PUSH DE
-        LD   DE,0x54B5
-        PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xB5BE
         PUSH DE
         LD   DE,0xAAAA
         PUSH DE
         PUSH DE
-        LD   DE,0xAAEB
         PUSH DE
-        LD   DE,0x5B45
+        LD   DE,0xEB5B
         PUSH DE
-        LD   DE,0x0411
+        LD   DE,0x4504
         PUSH DE
         LD   SP,CHQ4_SCREEN + 10439
         LD   DE,0x4054
@@ -3124,10 +3108,11 @@ jet8_2:
         PUSH DE
         LD   DE,0xBE55
         PUSH DE
-        LD   DE,0x4410
-        PUSH DE
-        LD   DE,0x1111
-        PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 9403),A
+        LD   A,(CHQ4_SCREEN + 9402)
+        AND  0xF0
+        LD   (CHQ4_SCREEN + 9402),A
         LD   SP,CHQ4_SCREEN + 9544
         LD   DE,0x4455
         PUSH DE
@@ -3140,10 +3125,11 @@ jet8_2:
         PUSH DE
         LD   DE,0xBE55
         PUSH DE
-        LD   DE,0x4410
-        PUSH DE
-        LD   DE,0x1111
-        PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 9531),A
+        LD   A,(CHQ4_SCREEN + 9530)
+        AND  0xF0
+        LD   (CHQ4_SCREEN + 9530),A
         LD   SP,CHQ4_SCREEN + 9672
         LD   DE,0x4455
         PUSH DE
@@ -3156,10 +3142,11 @@ jet8_2:
         PUSH DE
         LD   DE,0xBE55
         PUSH DE
-        LD   DE,0x4410
-        PUSH DE
-        LD   DE,0x1111
-        PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 9659),A
+        LD   A,(CHQ4_SCREEN + 9658)
+        AND  0xF0
+        LD   (CHQ4_SCREEN + 9658),A
         LD   SP,CHQ4_SCREEN + 9800
         LD   DE,0x4455
         PUSH DE
@@ -3172,10 +3159,11 @@ jet8_2:
         PUSH DE
         LD   DE,0xBE55
         PUSH DE
-        LD   DE,0x4410
-        PUSH DE
-        LD   DE,0x1111
-        PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 9787),A
+        LD   A,(CHQ4_SCREEN + 9786)
+        AND  0xF0
+        LD   (CHQ4_SCREEN + 9786),A
         LD   SP,CHQ4_SCREEN + 9928
         LD   DE,0x4455
         PUSH DE
@@ -3188,10 +3176,11 @@ jet8_2:
         PUSH DE
         LD   DE,0xBE55
         PUSH DE
-        LD   DE,0x4410
-        PUSH DE
-        LD   DE,0x1111
-        PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 9915),A
+        LD   A,(CHQ4_SCREEN + 9914)
+        AND  0xF0
+        LD   (CHQ4_SCREEN + 9914),A
         LD   SP,CHQ4_SCREEN + 10056
         LD   DE,0x4455
         PUSH DE
@@ -3204,10 +3193,11 @@ jet8_2:
         PUSH DE
         LD   DE,0xBE55
         PUSH DE
-        LD   DE,0x4410
-        PUSH DE
-        LD   DE,0x1111
-        PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 10043),A
+        LD   A,(CHQ4_SCREEN + 10042)
+        AND  0xF0
+        LD   (CHQ4_SCREEN + 10042),A
         LD   SP,CHQ4_SCREEN + 10184
         LD   DE,0x4455
         PUSH DE
@@ -3220,10 +3210,11 @@ jet8_2:
         PUSH DE
         LD   DE,0xBE55
         PUSH DE
-        LD   DE,0x4410
-        PUSH DE
-        LD   DE,0x1111
-        PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 10171),A
+        LD   A,(CHQ4_SCREEN + 10170)
+        AND  0xF0
+        LD   (CHQ4_SCREEN + 10170),A
         LD   SP,CHQ4_SCREEN + 10312
         LD   DE,0x4455
         PUSH DE
@@ -3236,10 +3227,11 @@ jet8_2:
         PUSH DE
         LD   DE,0xBE55
         PUSH DE
-        LD   DE,0x4410
-        PUSH DE
-        LD   DE,0x1111
-        PUSH DE
+        LD   A,0x44
+        LD   (CHQ4_SCREEN + 10299),A
+        LD   A,(CHQ4_SCREEN + 10298)
+        AND  0xF0
+        LD   (CHQ4_SCREEN + 10298),A
         LD   SP,CHQ4_SCREEN + 10440
         LD   DE,0x4455
         PUSH DE
