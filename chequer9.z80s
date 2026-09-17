@@ -33,8 +33,9 @@
 ; WHAT THE SWAP MASK DOES ABOUT IT: nothing at all. A scanline's depth
 ; is CAMH * FOCAL / (y - horizon), which is the same function of the
 ; same distance, so the 512 lookup tables are the ones chequer5 built -
-; only longer, 128 rows rather than 77, and copied as far as the
-; horizon says. That is the whole of it: 1,380 T-states, not the 9,300
+; only longer, 115 rows rather than 77, and copied as far as the
+; horizon says. That is the whole of it: 1,450 T-states at the
+; shortest board and 2,042 at the tallest, against the 6,200 to 9,300
 ; that computing the mask a scanline again would have cost.
 ;
 ; AND WHAT MOVES DOWN HAS TO BE PUT BACK. When the horizon drops, rows
@@ -93,14 +94,14 @@ cq9_frame:
         LD   HL,chq4_rows       ; if the board has shrunk since, the rows
         SUB  (HL)               ; it has given up are sky now and nothing
         CALL NZ,cq9_sky         ; else will paint them
-        JR   C,cq9_f1           ; (it grew, and covers its own)
-cq9_f1:
         LD   A,(chq4_rows)
         LD   (cq9_seen),A
 
+        CALL cq9_wipe           ; where he was, if nothing else paints it
         CALL chq4_msk8
         CALL chq4_floor
         CALL c9_band
+        CALL cq9_pilot
 
         IN   A,(CHQ4_HMPR)      ; the flip, which is the hardware's own
         AND  31                 ; record of which buffer is which
@@ -110,6 +111,115 @@ cq9_f1:
         LD   A,C
         XOR  CHQ4_SCR0 ^ CHQ4_SCR1
         OUT  (CHQ4_HMPR),A
+        RET
+
+;------------------------------------------------------------------
+; cq9_wipe - put the sky back where the pilot was
+;
+; He moves, so the box he has left behind has to be cleared - but only
+; the rows of it above the band's top, because the band and the board
+; paint everything below that themselves. Where he was is per buffer,
+; like everything else here that is remembered at all.
+;------------------------------------------------------------------
+
+cq9_wipe:
+        LD   A,(cq9_oy)
+        INC  A
+        RET  Z                  ; he has never been drawn in this buffer
+        DEC  A
+        LD   B,A
+        LD   A,(chq4_rows)      ; the band's top row, which is as far down
+        ADD  A,C9_ROWS          ; as the sky now goes
+        NEG
+        ADD  A,192
+        SUB  B                  ; how many of his rows were above it
+        RET  C                  ; none, and the band covers the lot
+        RET  Z
+        CP   JET_H
+        JR   C,cq9_w1
+        LD   A,JET_H            ; and no more of them than he is tall
+cq9_w1:
+        LD   C,A
+        ADD  A,B
+        DEC  A                  ; the last row to put back
+        LD   H,A
+        LD   L,0
+        SRL  H
+        RR   L
+        LD   A,(cq9_ox)         ; and its right hand end
+        ADD  A,JET_W
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   DE,CHQ4_SCREEN
+        ADD  HL,DE
+        DI                      ; SP is about to be the screen
+        LD   (cq9_sp),SP
+        LD   DE,CHQ4_C1
+        LD   A,C                ; the rows to put back, and a row's step
+        LD   BC,-128
+cq9_w2:
+        LD   SP,HL
+        DUP  JET_W / 2
+        PUSH DE
+        EDUP
+        ADD  HL,BC
+        DEC  A
+        JR   NZ,cq9_w2
+        LD   SP,(cq9_sp)
+        EI
+        RET
+
+;------------------------------------------------------------------
+; cq9_pilot - draw him where he is now
+;
+; His page goes in over the board's bank for the length of it, and the
+; compiled pose is one walk of the stack pointer from the byte after
+; his bottom right corner to his top left - so all this has to do is
+; put SP there. No CALL in between: the caller's stack is not mapped.
+;------------------------------------------------------------------
+
+cq9_pilot:
+        LD   A,(cq9_py)         ; the byte after his bottom right corner
+        ADD  A,JET_H - 1
+        LD   H,A
+        LD   L,0
+        SRL  H
+        RR   L
+        LD   A,(cq9_px)
+        ADD  A,JET_W
+        LD   E,A
+        LD   D,0
+        ADD  HL,DE
+        LD   DE,CHQ4_SCREEN
+        ADD  HL,DE
+        DI
+        LD   (cq9_sp),SP
+        LD   A,JET_BANK         ; his page, over the board's bank
+        OUT  (CHQ4_LMPR),A
+        LD   A,(cq9_pose)
+        ADD  A,A
+        LD   E,A
+        LD   D,JET_POSE >> 8
+        EX   DE,HL              ; DE = his corner, HL = the pose's entry
+        LD   A,(HL)
+        INC  HL
+        LD   H,(HL)
+        LD   L,A
+        EX   DE,HL              ; and back again
+        LD   SP,HL
+        EX   DE,HL
+        JP   (HL)               ; in, and out at cq9_ret
+
+cq9_ret:
+        LD   SP,(cq9_sp)
+        LD   A,CHQ4_BANK        ; the caller's stack is in chunk 0
+        OUT  (CHQ4_LMPR),A
+        EI
+        LD   A,(cq9_px)         ; and this buffer has him here now
+        LD   (cq9_ox),A
+        LD   A,(cq9_py)
+        LD   (cq9_oy),A
         RET
 
 ;------------------------------------------------------------------
@@ -124,7 +234,7 @@ cq9_f1:
 ;------------------------------------------------------------------
 
 cq9_sky:
-        RET  C
+        RET  C                  ; it grew, and covers its own rows
         LD   B,A
         LD   A,(chq4_rows)      ; the band's top row, which is where the
         ADD  A,C9_ROWS          ; sky now has to reach down to
@@ -153,4 +263,9 @@ cq9_hz:         DEFB 0          ; which horizon, 0 to CHQ4_HZN - 1, from
                                 ; the caller: 0 is the tallest board
 cq9_seen:       DEFB 0          ; and how many scanlines of board this
                                 ; buffer has on it, which is per buffer
+cq9_px:         DEFB 56         ; where the pilot is: his left hand byte
+cq9_py:         DEFB 48         ; and his top row, both from the caller
+cq9_pose:       DEFB 1          ; 0 banking left, 1 level, 2 right
+cq9_ox:         DEFB 0          ; and where he is in THIS buffer, which is
+cq9_oy:         DEFB 255        ; what has to be put back: 255 for nowhere
 cq9_sp:         DEFS 2

@@ -106,7 +106,9 @@ bytes happen to be in the page that is there now.
 and they go quickly: a compiled run bank and its lookup tables can be ten of
 them on their own, two buffers are four, and a compiled sprite is one more.
 `chequer8` needs twenty, which is a 512K machine - worth deciding on
-purpose rather than discovering.
+purpose rather than discovering. `chequer9` needs twenty-six, because a
+horizon that moves has to have every square width it can ever show compiled:
+the pages are where the cost of that lands, not the frame.
 
 ## The palette - CLUT (base 248)
 

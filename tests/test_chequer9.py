@@ -20,7 +20,7 @@ import sys
 os.environ["HARRIER_MINP"] = "1"        # chequer9's viewport
 os.environ["HARRIER_HZ"] = "76"
 os.environ["HARRIER_CAMH"] = "308"
-os.environ["DESERT_ROWS"] = "24"  # a shorter band: the board can be tall
+os.environ["DESERT_ROWS"] = "20"  # a shorter band: the board can be tall
 
 import chequer9 as C
 import desert as T
@@ -31,14 +31,29 @@ CHUNKS = ("harness_chq9c0.asm", "harness_chq9c1.asm",   # the board's bank,
           "harness_chq9msk0.asm", "harness_chq9msk1.asm",   # the swap masks
           "harness_chq9c3.asm", "harness_chq9c4.asm",   # and the rest of
           "harness_chq9c5.asm",                         # the bank
-          "harness_desert9_0.asm", "harness_desert9_1.asm")
+          "harness_desert9_0.asm", "harness_desert9_1.asm",
+          "harness_jetmove.asm")                        # and the pilot
+
+
+def corner(i, hz):
+    """Where the pilot is, and which pose, for frame i of the sweep.
+
+    He goes round the four corners of the screen while the horizon
+    walks, which is what the demo does - the difference being that here
+    he takes big steps, so that the sky he leaves behind is a fresh
+    piece of the screen every frame rather than a sliver.
+    """
+    px = (i * 13) % (128 - 16)
+    py = (i * 7) % (192 - 96)
+    return px, py, i % 3
 
 
 def main():
     b = Sam("harness_chq9.asm", CHUNKS, screens=(10, 12),
             chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"],
                                      "CHQ4_SCR": y["CHQ4_SCREEN"],
-                                     "C9_RET": y["c9_ret"]})
+                                     "C9_RET": y["c9_ret"],
+                                     "CQ9_R": y["cq9_ret"]})
     s = b.syms
     print("  %-40s %d, pages %s"
           % ("chunks", len(CHUNKS), ", ".join(str(p) for p in b.pages)))
@@ -51,19 +66,23 @@ def main():
     for i, hz in enumerate(walk):
         camx = -3000 + 211 * i
         camz = 900 * (i % 5)
+        px, py, pose = corner(i, hz)
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], (camz & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["cq9_hz"], bytes([hz]))
+        b.poke(s["cq9_px"], bytes([px]))
+        b.poke(s["cq9_py"], bytes([py]))
+        b.poke(s["cq9_pose"], bytes([pose]))
         times.append(b.call(s["cq9_frame"]))
         got = b.screen(b.shown())
-        want = bytes(C.frame(camx, camz, hz))
+        want = bytes(C.frame(camx, camz, hz, px, py, pose))
         if got != want:
             bad += 1
             if bad <= 3:
                 d = [k for k in range(len(want)) if got[k] != want[k]]
-                print("  PIXEL MISMATCH hz=%d (%d rows) x=%d z=%d: %d bytes, "
-                      "first at %d (y=%d x=%d) got %02X want %02X"
-                      % (hz, C.HORIZONS[hz], camx, camz, len(d), d[0],
+                print("  PIXEL MISMATCH hz=%d (%d rows) x=%d px=%d py=%d: "
+                      "%d bytes, first at %d (y=%d x=%d) got %02X want %02X"
+                      % (hz, C.HORIZONS[hz], camx, px, py, len(d), d[0],
                          d[0] // C.STRIDE, (d[0] % C.STRIDE) * 2,
                          got[d[0]], want[d[0]]))
     print("  %-40s %d frames, %d horizons, %d mismatches"

@@ -782,6 +782,70 @@ what lets the near pyramids pass in front of the far one** - 45 T-states an
 edge, twice a span, and the reason the front layer costs 590 T-states a span
 where the rear layer draws a whole scanline for 1,200.
 
+## A table indexed by distance from the horizon serves every horizon
+
+Moving the horizon looks like it multiplies every table by the number of
+positions it can take, and on a machine with 32 pages that ends the idea
+before it starts. It does not, and the reason is worth keeping:
+
+    a square's width at row y      round(S * (y - horizon) / CAMH)
+    a scanline's depth             CAMH * FOCAL / (y - horizon)
+
+**Both are functions of the row's distance from the horizon and of nothing
+else.** A row 40 scanlines below the horizon is the same row wherever that
+is on the screen. So:
+
+- **the band table is one table**, and a taller board starts further down
+  it, at the band holding the bottom row of the screen. The bands before
+  that one are the ones that would be off the bottom.
+- **the depth-indexed tables are the same tables**, only generated as deep
+  as the deepest board and copied as far as the horizon says. chequer9's
+  swap masks are 512 of them and the copy is 128 `LDI`s entered at
+  `2 * (128 - rows)`: 1,450 T-states at 77 rows of board and 2,042 at 114,
+  against the 6,200 to 9,300 that computing the mask a scanline again would
+  have cost. This was expected to be the bill for a moving horizon and it is
+  the cheapest thing in it.
+- **what does change is the widest square**, because pitching the horizon up
+  brings coarser ground into view. chequer9 compiles up to 96 pixel squares
+  rather than 64: 4,656 bodies against 2,080, which is the whole price and
+  it is paid in pages rather than T-states.
+
+**A horizon is allowed when the screen's bottom row is the last row of its
+band**, because a band is drawn whole - 32 of the 39 rows in chequer9's
+range are, a horizon every scanline or two. Five bytes a horizon say which
+chunk the bottom band is in, where in its table, how many scanlines, and
+the widest square, which is what the phase accumulator is seeded with; that
+last one is a different square at every horizon, so six shifts become a
+shift-and-add multiply.
+
+**And what shrinks has to be put back.** When the horizon rises, the rows
+the board and the band give up are sky, and nothing else paints them. With a
+copy of the resident block behind each buffer, each buffer's record of what
+it was last drawn with is free and needs no keeping in step - and a buffer
+that skipped a step puts back both at once.
+
+## A compiled sprite that can move: walk SP down the whole thing
+
+A compiled sprite with absolute addresses cannot move. The way to make one
+relative on a Z80 is `SP`, because it is the only pointer with an add, and
+the way to keep that cheap is to arrange the whole sprite as **one
+descending walk**: rows bottom upwards, bytes right to left, so every step
+is a subtraction and the caller's only job is to put `SP` at the byte after
+the bottom right corner.
+
+| | |
+|---|---|
+| a run of solid bytes | `PUSH DE` a pair - 5.5 T-states a byte |
+| a single byte | `POP BC / LD C,n / PUSH BC`, which reads its neighbour and writes it back unchanged |
+| one masked byte | `POP BC / LD A,C / AND m / OR v / LD C,A / PUSH BC` |
+| a step | `LD HL,-d / ADD HL,SP / LD SP,HL`, or `DEC SP` where the step is small enough |
+
+chequer9's pilot is 96 rows in **16,116 T-states against the absolute
+version's 14,401** - 12% for being able to put him anywhere on the screen,
+and no `DI` window longer than the sprite itself. He still moves in whole
+bytes sideways: a pixel of horizontal travel would want him compiled at both
+phases and a mask on *every* byte rather than the 110 his outline needs.
+
 ## Every CALL is a bet that the page underneath it has not moved
 
 A `CALL` writes the return address to the stack in whatever page is mapped

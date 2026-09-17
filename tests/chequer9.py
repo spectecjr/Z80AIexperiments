@@ -19,11 +19,12 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ["HARRIER_MINP"] = "1"        # chequer9's viewport: the widest
 os.environ["HARRIER_HZ"] = "76"         # board it can have, which is the
 os.environ["HARRIER_CAMH"] = "308"
-os.environ["DESERT_ROWS"] = "24"  # a shorter band: the board can be tall      # one its bank was built for
+os.environ["DESERT_ROWS"] = "20"  # a shorter band: the board can be tall      # one its bank was built for
 
 import chequer4 as C
 import desert as D
 import harrier as HR
+import jetpack as J
 
 W, H, STRIDE = C.W, C.H, C.STRIDE
 
@@ -52,12 +53,25 @@ def horizons():
 HORIZONS = horizons()
 
 
-def frame(camx, camz, hz=0):
-    """hz is an index into HORIZONS: 0 is the tallest board."""
+def frame(camx, camz, hz=0, px=56, py=48, pose=1):
+    """hz is an index into HORIZONS: 0 is the tallest board.
+
+    px is the pilot's left hand byte and py his top row - he moves in
+    whole bytes sideways, which is two pixels, and in whole scanlines.
+    """
     rows = HORIZONS[hz]
     buf = C.frame(camx, camz, 191 - rows)
     top = H - rows - D.ROWS
     for r, row in enumerate(D.band(*D.offsets(camx))):
         at = (top + r) * STRIDE
         buf[at:at + STRIDE] = row
+    for y, (by, kind) in enumerate(J.rows(J.lean(J.pilot(), pose - 1))):
+        base = (py + y) * STRIDE + px
+        for i, b in enumerate(by):
+            if kind[i] == 1:
+                buf[base + i] = b
+            elif kind[i] == 2:                  # the pilot's left pixel
+                buf[base + i] = b | (buf[base + i] & 0x0F)
+            elif kind[i] == 3:                  # and its right one
+                buf[base + i] = b | (buf[base + i] & 0xF0)
     return buf

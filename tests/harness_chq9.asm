@@ -14,6 +14,7 @@ chq4_band:      EQU 0x0000      ; the bank's bands, at the foot of it
         INCLUDE "chequer9equ.z80s"
         INCLUDE "chequer9hz.z80s"
         INCLUDE "desert9data.z80s"
+        INCLUDE "jetmoveequ.z80s"
         INCLUDE "desert.z80s"
         INCLUDE "chequer9.z80s"
         INCLUDE "chequer4.z80s"

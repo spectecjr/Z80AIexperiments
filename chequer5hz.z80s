@@ -3,7 +3,7 @@
 ; chunk the bottom band is in, where in that chunk's band
 ; table it is, how many scanlines of board there are, and
 ; how wide the widest square is - which is what the phase
-; accumulator is seeded with. Four bytes a horizon, lowest
+; accumulator is seeded with. Five bytes a horizon, lowest
 ; horizon (the tallest board) first.
 
 CHQ4_HZ0:       EQU 96          ; the first horizon here

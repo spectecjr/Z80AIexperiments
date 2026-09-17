@@ -670,6 +670,86 @@ def _chequer8(outdir, seconds=8):
     got, bad, secs = check_gif(p, idx, pal, durs)
     report(p, size, n, durs, secs, got, bad)
 
+
+def chequer9(outdir, seconds=10):
+    """chequer9, in a process of its own: its viewport is not the others'.
+
+    The pilot flies round the four corners of the screen and the
+    horizon follows him - Space Harrier's trick, where the ground takes
+    between 40% and 59% of the display depending on how high the player
+    is. The board, the desert and the parallax all come off that same
+    position.
+    """
+    import os
+    import subprocess
+    env = dict(os.environ, HARRIER_MINP="1", HARRIER_HZ="76",
+               HARRIER_CAMH="308", DESERT_ROWS="20")
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "mkgif.py")
+    subprocess.run([sys.executable, here, "--chequer9", outdir,
+                    str(seconds)], env=env, check=True)
+
+
+def corners(t):
+    """Round the four corners of the screen, a leg at a time, easing in
+    and out of each so that the turns read as turns."""
+    import math
+    legs = ((10, 8), (100, 8), (100, 88), (10, 88))     # byte, row
+    n = len(legs)
+    k = int(t * n) % n
+    u = t * n - int(t * n)
+    u = 0.5 - 0.5 * math.cos(math.pi * min(1.0, u * 1.25))
+    x0, y0 = legs[k]
+    x1, y1 = legs[(k + 1) % n]
+    return round(x0 + (x1 - x0) * u), round(y0 + (y1 - y0) * u)
+
+
+def _chequer9(outdir, seconds=10):
+    """chequer9 at its measured rate: 192,732 T-states a frame, 25 Hz."""
+    import jetpack as J
+    from mkchqdata import sam
+    from mkhrdata import fog as fogtab
+    from sam import Sam
+    import chequer9 as C9
+    b = Sam("harness_chq9.asm",
+            ("harness_chq9c0.asm", "harness_chq9c1.asm",
+             "harness_chq9c2.asm", "harness_chq9msk0.asm",
+             "harness_chq9msk1.asm", "harness_chq9c3.asm",
+             "harness_chq9c4.asm", "harness_chq9c5.asm",
+             "harness_desert9_0.asm", "harness_desert9_1.asm",
+             "harness_jetmove.asm"), screens=(10, 12),
+            chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"],
+                                     "CHQ4_SCR": y["CHQ4_SCREEN"],
+                                     "C9_RET": y["c9_ret"],
+                                     "CQ9_R": y["cq9_ret"]})
+    s = b.syms
+    b.call(s["cq9_init"])
+    fog, haze = fogtab()
+    fixed = {i: sam_rgb(sam(*rgb)) for i, rgb in J.PAL.items()}
+    n, m = int(seconds * 25), len(C9.HORIZONS)
+    frames, ts, last = [], [], 56
+    for t in range(n):
+        px, py = corners(t / n)
+        hz = min(m - 1, max(0, round((m - 1) * (88 - py) / 80)))
+        camx = (px - 56) * 40           # the board and the desert follow
+        b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["chq4_camz"], (26 * t & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["cq9_hz"], bytes([hz]))
+        b.poke(s["cq9_px"], bytes([px]))
+        b.poke(s["cq9_py"], bytes([py]))
+        b.poke(s["cq9_pose"],           # banking the way he is going
+               bytes([1 + (1 if px > last else -1 if px < last else 0)]))
+        last = px
+        ts.append(b.call(s["cq9_frame"]))
+        frames.append(unpack(b.screen(b.shown())))
+    still = [[0] * 192] * n
+    idx, pal = copper(frames, still, fog, haze, fixed)
+    p = "%s/chequer9.gif" % outdir
+    durs = held(ts)
+    size = write_gif(p, idx, pal, durs)
+    got, bad, secs = check_gif(p, idx, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
+
 def zarch(outdir, seconds=8):
     """zarch at its measured rate: 206,012 T-states a frame, 25 Hz.
 
@@ -1111,6 +1191,9 @@ def chequer2(outdir, seconds=8):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--chequer9":
+        _chequer9(sys.argv[2], float(sys.argv[3]))      # its own viewport,
+        raise SystemExit                                # its own process
     if len(sys.argv) > 1 and sys.argv[1] == "--chequer8":
         _chequer8(sys.argv[2], float(sys.argv[3]))      # its own viewport,
         raise SystemExit                                # its own process
@@ -1136,6 +1219,7 @@ if __name__ == "__main__":
     chequer6(d)
     chequer7(d)
     chequer8(d)
+    chequer9(d)
     zarch(d)
     road(d)
     road2(d)

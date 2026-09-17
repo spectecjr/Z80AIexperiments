@@ -15,7 +15,10 @@ of hardware these budgets *do* now take account of is paging: a SAM has
 `.claude/skills/sam-coupe-hardware` has the registers. `chequer8` is the
 first thing here that does not fit a 256K machine: twenty pages of the
 thirty-two LMPR can address, so a 512K SAM. `chequer8.md` says what a 256K
-version would have to give up.
+version would have to give up. `chequer9` takes twenty-six pages and could
+not be cut down to sixteen at all: its run bank alone is 140K, because a
+horizon that moves has to have every square width it can ever show
+compiled.
 
 ---
 
@@ -28,6 +31,7 @@ version would have to give up.
 | `chequer6` | **143,643** steady, 159,388 changing pose | 25 | and a pilot in a jetpack over it, masked, three poses |
 | `chequer7` | 193,921 / **201,281** / 209,572 | 25 | and a two layer city scrolling on the horizon |
 | `chequer8` | 184,932 / **190,655** / 196,121 | 25 | board in the bottom 40%, a two layer desert on it, parallax off the camera |
+| `chequer9` | 164,565 / **194,641** / 218,891 | 25 | the horizon moves with the pilot, 40% to 59% of the screen, one bank for all 32 of them |
 | `zarch` | 195,482 / **208,206** / 215,619 | 25 | Zarch's ground: a chequered plane, turning |
 | `chequer3` | 106,970 / **110,806** / 114,736 | **50** | the same picture, stripes in the palette |
 | `road2` | 104,750 / **112,736** / 118,270 | **50** | the Hang On road, 121% of the screen wide, bank paged |
@@ -39,6 +43,27 @@ version would have to give up.
 | `prism` | 366,000 / **461,171** / 519,000 | 13.0 | the provisional logo, worked out live |
 | `prism`, entropy | 434,299 / **550,669** / 631,969 | 10.9 | the traced artwork, live |
 | `portal` | 400,481 mean | 15 | sector walk, screen-x windows |
+
+**`chequer9` a piece at a time**, measured by disabling each piece in turn
+inside the frame, at the two ends of the horizon's range:
+
+| | 77 rows of board (40%) | 114 rows (59%) |
+|---|---|---|
+| the board (`chq4_floor`) | 97,550 | **148,442** |
+| the swap mask, copied as far as the board goes | 1,450 | 2,042 |
+| the desert, 20 rows, two layers | 49,796 | 49,796 |
+| the pilot, 96 rows, anywhere | 16,116 | 16,116 |
+| the sky he left behind | 0 … **10,794** | 70 |
+| the rows the board gave up, when the horizon drops | 0 … 2,302 | 0 |
+| the horizon table and the flip | 517 | 517 |
+
+The pilot is the same number at both ends because he is compiled as one walk
+of `SP` and draws every row wherever he is: **16,116 against chequer8's
+14,401**, which is what position independence costs. The mask is the finding
+— a moving horizon was expected to cost 6,200 to 9,300 T-states a frame in
+recomputed swap masks and costs a `LDI` a scanline instead, because the
+tables are indexed by depth and depth is a function of the row's distance
+from the horizon. See `chequer9.md`.
 
 ## 1a. The floors, measured
 
