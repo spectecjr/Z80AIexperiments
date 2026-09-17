@@ -746,24 +746,31 @@ worked out in advance:
   an odd byte put back at the end of every row.
 - **Hold two whole periods in the run**, so that entering it at the right
   pair gives any rotation of the pattern.
-- **Let the end spill.** A run cannot stop early, so the pushes left over
-  land in the row above - draw the band bottom upwards and the next row
-  covers them. Only the topmost row's spill has to be put back.
+- **Stop the run where it should stop.** A run entered at *s* has `P - s`
+  pushes left in it and a row wants 64, so the rest spill into the row
+  above - draw the band bottom upwards and the next row covers them, at
+  352 T-states a row on average and 704 in the worst frame. Better: carry
+  the address of the 64th push in the entry, write a `JP` over the three
+  bytes there and put them back afterwards. 144 T-states a row, no spill to
+  repair, and - the part that matters - **the picture's cost stops
+  depending on where it is scrolled to**.
 - **Carry the entry points with the run**: a run reloads `DE` only where the
   colour changes, so an entry is (the `DE` it needs, where to go). Four
   bytes each, 64 of them, a quarter of a K a run.
 
-The bill for chequer8's rear layer: 24 rows at four phases, 45K of bank,
-34,856 T-states a frame - of which about a third is spill, because a run
-entered at *s* makes `128 - s` pushes and only 64 of them land. In exchange,
-**detail is free**: pyramids with two faces, palms, a ridge that undulates,
-a scatter of rocks. Drawn as rectangles at run time, in the city, every one
-of those would have been another rectangle a row.
+The bill for chequer8's rear layer: 32 rows at four phases, 79K of bank,
+45,938 T-states a frame, and a spread of 6,000 between its cheapest frame
+and its dearest. In exchange, **detail is free**: a pyramid with two faces
+and a course of stone in the light, palms, three ridges of dune, a scatter
+of rocks. Drawn as rectangles at run time, in the city, every one of those
+would have been another rectangle a row.
 
 A second layer over the top cannot share any of it, because the two layers
 move at different rates: it goes on as spans, with a read-modify-write at
-either end where the edge lands inside a byte. That is 45 T-states an edge
-and the reason the front layer is the expensive half per pixel.
+either end where the edge lands inside a byte. **That read-modify-write is
+what lets the near pyramids pass in front of the far one** - 45 T-states an
+edge, twice a span, and the reason the front layer costs 590 T-states a span
+where the rear layer draws a whole scanline for 1,200.
 
 ## Every CALL is a bet that the page underneath it has not moved
 

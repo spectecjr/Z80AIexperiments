@@ -51,7 +51,7 @@ about which of those it is.
 | `chequer5` | **1 px** | **1 px** | **pixels** | **129,183** | 25 Hz, board to the horizon |
 | `chequer6` | **1 px** | **1 px** | **pixels** | **154,607** | 25 Hz, and a pilot in front of it |
 | `chequer7` | **1 px** | **1 px** | **pixels** | **201,281** | 25 Hz, and a city on the horizon |
-| `chequer8` | **1 px** | **1 px** | **pixels** | **189,528** | 25 Hz, a desert instead, and everything redrawn |
+| `chequer8` | **1 px** | **1 px** | **pixels** | **189,719** | 25 Hz, 40% of the screen, a desert above it |
 
 `chequer4` is the one to use: it draws chequer3's screen — the GIFs come
 out byte for byte identical — with the depth alternation in the pixels
@@ -104,12 +104,14 @@ over him, so 63 of his rows are redrawn a frame rather than 47 — and paid
 for that by compiling his top half into a run with the sky baked in. See
 `chequer7.md`.
 
-**A desert instead, and the pilot compiled.** `chequer8` replaces the city
-with two layers of Super Hang-On desert - pyramids, palms and a far ridge
-behind, a dune ridge in front - scrolling **by pixels**: the rear layer one
-pixel every three frames and the front one a frame, which is 8 and 25 pixels
-a second and reads as distance where the city's whole-byte steps read as
-scenery on rails. The rear layer is compiled, one run of PUSHes a (row,
+**A desert instead, and the pilot compiled.** `chequer8` gives the board a
+camera of its own - the horizon at row 114, so it takes the bottom 40% of
+the screen - and puts two layers of Super Hang-On desert in the room that
+makes: the great pyramid, a dune field and palms behind, three smaller
+pyramids passing in front of them. Both scroll **by pixels**: the rear layer
+one pixel every three frames and the front one a frame, which is 8 and 25
+pixels a second and reads as distance where the city's whole-byte steps read
+as scenery on rails. The rear layer is compiled, one run of PUSHes a (row,
 phase), so its detail costs memory rather than time; the front is spans over
 it, with a read-modify-write where an edge lands inside a byte.
 

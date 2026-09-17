@@ -28,9 +28,12 @@ import mkchq3data as M3
 
 FULL = C.PTAB[C.TOP] == 1       # the board goes all the way to the horizon
 PRE = M3.PRE                    # which run bank the records point into
-OUT = "chequer%sdata.z80s" % ("5" if FULL else "4")
-MSK = "chequer%smsk%%d.z80s" % ("5" if FULL else "4")
-EQU = "chequer%sequ.z80s" % ("5" if FULL else "4")
+SET = os.environ.get("CHQ_SET", "5" if FULL else "4")   # whose tables
+OUT = "chequer%sdata.z80s" % SET                        # these are: a
+MSK = "chequer%smsk%%d.z80s" % SET                      # demo with a
+EQU = "chequer%sequ.z80s" % SET                         # viewport of
+                                                        # its own has a
+                                                        # set of its own
 C1 = 0x1111                     # the two colour indices, both nibbles
 C2 = 0x2222
 SWAP = 0x33                     # what exchanges them, one byte

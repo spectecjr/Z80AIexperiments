@@ -3,8 +3,8 @@
 ; front layer's spans. The rear layer's rows are tabled in
 ; the chunks themselves, the way the board's bands are.
 
-C9_TOP:         EQU 73          ; the band's first scanline
-C9_ROWS:        EQU 24          ; and how many of them
+C9_TOP:         EQU 83          ; the band's first scanline
+C9_ROWS:        EQU 32          ; and how many of them
 C9_SKY:         EQU 0x1111      ; the board's own sky, a pair
 C9_BANK0:       EQU 0x30        ; the rear layer's first chunk
 
@@ -28,10 +28,18 @@ c9_spans:       ; the front layer, a row at a time:
         DEFB 255
         DEFB 255
         DEFB 255
-        DEFB 85,103,0xCC,255
-        DEFB 79,84,0xCC,85,103,0x44,104,107,0xCC,255
-        DEFB 0,21,0xCC,30,53,0xCC,72,78,0xCC,79,107,0x44,108,111,0xCC,251,255,0xCC,255
-        DEFB 0,21,0x44,22,29,0xCC,30,53,0x44,54,71,0xCC,72,111,0x44,112,115,0xCC,246,250,0xCC,251,255,0x44,255
-        DEFB 0,115,0x44,116,119,0xCC,242,245,0xCC,246,255,0x44,255
-        DEFB 0,119,0x44,120,125,0xCC,142,202,0xCC,238,241,0xCC,242,255,0x44,255
-        DEFB 0,125,0x44,126,141,0xCC,142,202,0x44,203,237,0xCC,238,255,0x44,255
+        DEFB 255
+        DEFB 255
+        DEFB 255
+        DEFB 128,128,0x44,255
+        DEFB 126,127,0xCC,128,130,0x44,255
+        DEFB 36,36,0x44,124,127,0xCC,128,132,0x44,255
+        DEFB 34,35,0xCC,36,38,0x44,122,127,0xCC,128,134,0x44,255
+        DEFB 33,35,0xCC,36,39,0x44,120,127,0xCC,128,136,0x44,206,206,0x44,255
+        DEFB 31,35,0xCC,36,41,0x44,118,127,0xCC,128,138,0x44,204,205,0xCC,206,208,0x44,255
+        DEFB 29,35,0xCC,36,43,0x44,117,127,0xCC,128,139,0x44,203,205,0xCC,206,209,0x44,255
+        DEFB 28,35,0xCC,36,44,0x44,115,127,0xCC,128,141,0x44,201,205,0xCC,206,211,0x44,255
+        DEFB 26,35,0xCC,36,46,0x44,113,127,0xCC,128,143,0x44,199,205,0xCC,206,213,0x44,255
+        DEFB 24,35,0xCC,36,48,0x44,111,127,0xCC,128,145,0x44,197,205,0xCC,206,215,0x44,255
+        DEFB 23,35,0xCC,36,49,0x44,109,127,0xCC,128,147,0x44,196,205,0xCC,206,216,0x44,255
+        DEFB 21,35,0xCC,36,51,0x44,107,127,0xCC,128,149,0x44,194,205,0xCC,206,218,0x44,255

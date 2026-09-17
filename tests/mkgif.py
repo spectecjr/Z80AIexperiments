@@ -607,7 +607,25 @@ def chequer7(outdir, seconds=8):
 
 
 def chequer8(outdir, seconds=8):
-    """chequer8 at its measured rate: 189,528 T-states a frame, 25 Hz.
+    """chequer8, in a process of its own.
+
+    Its viewport is not chequer5's - the horizon is at row 114 rather
+    than 96, which is what gives the board the bottom 40% of the screen
+    - and the geometry is read from the environment when the modules
+    are imported, so it cannot share a process with the demos above.
+    """
+    import os
+    import subprocess
+    env = dict(os.environ, HARRIER_MINP="1", HARRIER_HZ="114",
+               HARRIER_CAMH="308")
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "mkgif.py")
+    subprocess.run([sys.executable, here, "--chequer8",
+                    outdir, str(seconds)], env=env, check=True)
+
+
+def _chequer8(outdir, seconds=8):
+    """chequer8 at its measured rate: 194,191 T-states a frame, 25 Hz.
 
     The board, a two layer desert on the horizon and the pilot, every
     pixel of it drawn from scratch every frame. The rear layer -
@@ -621,10 +639,11 @@ def chequer8(outdir, seconds=8):
     from mkhrdata import fog as fogtab
     from sam import Sam
     b = Sam("harness_chq8.asm",
-            ("harness_chq5c0.asm", "harness_chq5c1.asm",
-             "harness_chq5c2.asm", "harness_chq5msk0.asm",
-             "harness_chq5msk1.asm", "harness_jetrun.asm",
-             "harness_desert0.asm", "harness_desert1.asm"), screens=(10, 12),
+            ("harness_chq8c0.asm", "harness_chq8c1.asm",
+             "harness_chq8c2.asm", "harness_chq8msk0.asm",
+             "harness_chq8msk1.asm", "harness_jetrun.asm",
+             "harness_desert0.asm", "harness_desert1.asm",
+             "harness_desert2.asm"), screens=(10, 12),
             chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"],
                                      "CHQ4_SCR": y["CHQ4_SCREEN"],
                                      "C9_RET": y["c9_ret"]})
@@ -1094,6 +1113,9 @@ def chequer2(outdir, seconds=8):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--chequer8":
+        _chequer8(sys.argv[2], float(sys.argv[3]))      # its own viewport,
+        raise SystemExit                                # its own process
     d = sys.argv[1] if len(sys.argv) > 1 else "/tmp"
     cube(d)
     cubes(d)

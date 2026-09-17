@@ -14,16 +14,19 @@ import os
 import sys
 
 os.environ["HARRIER_MINP"] = "1"        # before the model reads the geometry
+os.environ["HARRIER_HZ"] = "114"        # chequer8's viewport is its own
+os.environ["HARRIER_CAMH"] = "308"
 
 import chequer8 as C
 import desert as T
 from sam import Sam
 
-CHUNKS = ("harness_chq5c0.asm", "harness_chq5c1.asm",   # the board's bank,
-          "harness_chq5c2.asm",                         # cut by band
-          "harness_chq5msk0.asm", "harness_chq5msk1.asm",
+CHUNKS = ("harness_chq8c0.asm", "harness_chq8c1.asm",   # the board's bank,
+          "harness_chq8c2.asm",                         # cut by band
+          "harness_chq8msk0.asm", "harness_chq8msk1.asm",
           "harness_jetrun.asm",                         # the pilot, and
-          "harness_desert0.asm", "harness_desert1.asm")  # the rear layer
+          "harness_desert0.asm", "harness_desert1.asm",  # and the rear
+          "harness_desert2.asm")                         # layer's rows
 
 
 def main():

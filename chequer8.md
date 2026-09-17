@@ -1,20 +1,42 @@
 # chequer8.z80s — design notes
 
-**The board, a two layer desert on the horizon, and the pilot — every pixel
-of it drawn from scratch, every frame.** 189,528 T-states, **79% of a 25 Hz
-frame**, and 212,911 in the worst frame found by sweeping cameras, layer
-offsets and poses.
+**The board over a viewport of its own, a two layer desert standing on it,
+and the pilot — every pixel drawn from scratch, every frame.** 189,719
+T-states, **79% of a 25 Hz frame**, and 197,353 in the worst frame found by
+sweeping cameras, layer offsets and poses.
 
 | | T-states a frame | |
 |---|---|---|
-| `chq4_floor` + `chq4_msk8` (chequer5's paged board, unchanged) | 113,375 | |
-| **the desert** | **61,576** | 24 scanlines, two layers, by pixels |
-| **the pilot** | **14,479** | all 96 rows of him, compiled |
-| the paging and the flip | ~100 | |
-| **`c8_frame`** | **180,981 / 189,528 / 210,166** | **25 Hz** |
+| `chq4_floor` + `chq4_msk8` | 95,640 | 77 scanlines: the bottom 40% |
+| **the desert** | **79,552** | 32 scanlines, two layers, by pixels |
+| **the pilot** | **14,401** | all 96 rows of him, compiled |
+| the paging and the flip | ~130 | |
+| **`c8_frame`** | **184,510 / 189,719 / 196,105** | **25 Hz** |
 
 Bit exact against `tests/chequer8.py` over 260 camera positions, which is a
 whole period of both layers and every pose.
+
+## The board gets the bottom 40%, and a camera of its own
+
+chequer5's camera puts the horizon at row 96, so its board is half the
+screen. chequer8 wants the bottom 40% — more sky for the desert to stand in
+— and gets it by moving the camera rather than by cutting the board short:
+
+    the horizon    row 114 rather than 96, so 77 scanlines of board
+    the camera     308 world units up rather than 380, which keeps a
+                   square 64 pixels wide at the bottom of the screen
+
+The board still runs all the way down to one pixel squares; it is the same
+picture, steeper. Nothing in the routine changed — `tests/harrier.py` takes
+the viewport from the environment now, and `tests/mkchq8data.py` runs the
+same generators over it to produce a set of tables of its own. A run is a
+function of a square's width and nothing else, so the runs are the same
+runs; what comes out different is the bands, the compiled bodies, the swap
+masks and the viewport constants.
+
+It is also **17,000 T-states cheaper**: 94,260 against 111,707, because
+eighteen scanlines of board went away and the ones that went were near the
+horizon, where the squares are narrow and the bands change every row.
 
 ## Nothing is drawn once per buffer any more
 
@@ -67,6 +89,14 @@ The city in chequer7 moved by whole bytes — two pixels at a time, at 50 and
 layer **one pixel every three frames** and the front **one pixel a frame**:
 8 and 25 pixels a second, and the ratio is what the eye reads as distance.
 
+**What is in each layer is the other half of it.** The rear layer has the
+great pyramid, a dune field, palms and a scatter of rocks; the front has
+three smaller pyramids standing nearer — smaller, and in front, which is
+what makes them pass across the great one. Something crossing in front of
+something else at a different rate is the one depth cue that needs neither
+colour nor perspective, and it is the reason the front layer cannot be a
+compiled run: it has to leave the layer behind it showing.
+
 A pixel is half a MODE 4 byte, and that is what it costs.
 
 **The rear layer is compiled, one run of `PUSH`es a (row, phase).** A run
@@ -91,18 +121,30 @@ shadow face, there is a ridge that undulates, a stand of palms, a scatter of
 rocks. The city was rectangles worked out at run time, and every one of
 those would have been another rectangle a row.
 
-**The front layer is spans**, because the rear layer has to show between its
-dunes. It is a heightfield — one dune top a pixel column — which gives per
-row the runs where the dune has already started and the runs where it starts
-on this very row and is lit. The Z80 subtracts the offset, splits whatever
-crosses the screen's edge, and draws each span with `PUSH`es down the middle
-and a read-modify-write at either end where the edge lands inside a byte.
+**And it is stopped where it should stop.** A run entered at *s* has
+`128 - s` pushes left in it and a row wants 64, so the rest used to spill
+into the row above and be thrown away — 352 T-states a row on average and
+704 in the worst frame. Each entry now carries the address of its own 64th
+push, and the row loop writes a `JP` over the three bytes there and puts
+them back afterwards: **144 T-states a row**, and the band's worst frame is
+21,000 cheaper than its average used to be. A picture drawn out of compiled
+runs has a flat cost now, which is what makes the rest of the frame
+predictable.
+
+**The front layer is spans**, because the rear layer has to show between and
+behind its pyramids. Each row of a front pyramid is two runs, a lit face and
+a shadow; the Z80 subtracts the offset, splits whatever crosses the screen's
+edge, and draws each span with `PUSH`es down the middle and a
+read-modify-write at either end where the edge lands inside a byte. **That
+read-modify-write is the masking**, and it is the whole price of a layer
+that is 1-pixel accurate and not opaque: about 45 T-states an edge, twice a
+span.
 
 | | T-states a frame | |
 |---|---|---|
-| the rear layer | 34,856 | 24 rows, of which about a third is spill |
-| the front layer | 26,656 | 32 spans over 860 pixels |
-| **`c9_band`** | **61,511** | **56,130 to 80,880 over a whole period** |
+| the rear layer | 45,938 | 32 rows, and no spill left in it |
+| the front layer | 33,614 | 57 spans, 590 T-states each |
+| **`c9_band`** | **79,552** | **77,489 to 83,664 over a whole period** |
 
 ## This is where a 256K SAM runs out
 
@@ -115,29 +157,32 @@ The map is now:
                        odd page
     14,15              the pilot, compiled
     16,17  18,19       the desert's rear layer, cut by row
+    20,21              and the rest of it
 
-Twenty pages. A 256K machine has sixteen, and chequer7 used every one of
+Twenty-two pages. A 256K machine has sixteen, and chequer7 used every one of
 them. `LMPR` addresses 32, so this wants a **512K SAM** — and that is a
 decision, not an accident, so here is what a 256K version would have to give
-up: the desert at two pixel phases rather than four (22K rather than 45K,
-and an odd byte to put back at the end of each row), and four rows off the
-band. It would fit, and it would be uglier in exactly one place: the row
+up: the desert at two pixel phases rather than four (and an odd byte to put
+back at the end of each row), and a shorter band. It would fit, and it would be uglier in exactly one place: the row
 where the odd byte lands.
 
 ## Invariants
 
-- The order is board, desert, pilot. The board never touches rows 73..96
-  and the desert never touches row 97, so the only ordering that matters is
-  the pilot's, and he is over both.
+- The order is board, desert, pilot. The board never touches rows 83..114
+  and the desert never touches row 115, so the only ordering that matters
+  is the pilot's, and he is over both.
 - **Every `CALL` must be made with the page its return address is in still
   mapped.** `c9_band` pages the rear layer's chunks in and cannot `CALL`
   while they are there; that is why the chunk switch is inlined twice
   rather than being a subroutine, and why `c9_band` puts the board's bank
   back before it returns.
-- The band is drawn **bottom upwards**, because that is what makes the rear
-  layer's spill land in the row that is drawn next.
-- `SP` is the screen for the whole band, so the front layer's own `CALL`s
-  want it put back first — the spill repair leaves it in the screen.
+- The band is drawn **bottom upwards**, which is what the rows are tabled
+  in; nothing spills out of it now that the runs stop where they should.
+- `SP` is the screen for the whole of the rear layer, so the front layer's
+  own `CALL`s want it put back first.
+- The three bytes a row loop writes over a run **must go back before the
+  next row**, and they are kept in `B`, `C` and `A` because the run touches
+  none of the three. `EXX` does touch `BC`, so the restore comes before it.
 - Both layers' periods are 256 pixels, the width of the screen, so the wrap
   is what the subtraction does on its own.
 - The desert's colours are the pilot's — 4, 5, 6, 7 and 12 — because those
@@ -147,19 +192,44 @@ where the odd byte lands.
   like the camera. There is a copy of the resident block behind each buffer
   and nothing in it may carry state.
 
+## What a moving horizon would cost
+
+The next thing this wants is a horizon that moves — the camera pitching as
+the pilot climbs and dives. Most of what is here survives that, and it is
+worth writing down which half does not, because the split is not obvious:
+
+**These do not depend on the horizon at all.** A run is a function of a
+square's width, and a compiled body is a function of a width and a phase —
+neither knows what row it lands on. So the 78K of bank, which is the
+expensive thing to build, is the same bank at every horizon. So is the
+desert: its rows are its own picture, and `SP` puts them wherever the band
+happens to be, so the band slides up and down the screen for nothing.
+
+**These do.** The band table — how many scanlines each square width gets —
+is 64 entries and would have to be built each frame or held one per horizon
+step; it is small either way. `CHQ4_TOP` is baked into the code as fill
+counts and `DUP` lengths, so those become entered-at-an-offset blocks, which
+is what `road2` already does with its stale bands. And the swap masks are
+the real bill: 512 tables of 128 bytes, indexed by depth, and the depth of a
+scanline is exactly what a moving horizon changes. Either they are computed
+per scanline again — 81 T-states a row, which is 6,200 for 77 rows and what
+`chq4_msk8` did before it became a lookup — or there is a set per horizon
+step, which there is not room for. The lookup was worth 6,100 T-states when
+the horizon stood still; it is the first thing a moving one takes back.
+
 ## What is left
 
-- **The rear layer's spill is a third of it.** A run entered at *s* makes
-  `128 - s` pushes and only 64 of them land: 8,448 T-states a frame on
-  average and 16,896 in the worst. Writing a `JP` over the stop point and
-  putting the three bytes back afterwards would cost about 140 a row rather
-  than 352, for a stop address a (row, phase, entry) — 12K more of bank.
-- **`c9_span` costs 833 T-states a span** and only 430 of its bytes are
-  pixels. It passes half its state through memory because it was written to
-  be read; registers and a tighter split of the two ends should halve it.
-- **The board is 60% of the frame and has not been touched since
-  chequer5.** Everything above has moved on; `chq4_msk8`'s four pages of
-  lookup are the next thing to look at.
+- **`c9_span` costs 590 T-states a span** and only about nine of its pixels
+  are bytes. Tightening it once took it from 833; the rest of it is the
+  caller's per-span arithmetic, which could be a table of (first byte,
+  pairs, ends) computed once a frame rather than per span.
+- **The board is half the frame** and has not been touched since chequer5
+  beyond its viewport. 77 scanlines at 94,260 is 1,224 a row, where the row
+  loop itself is about 600.
+- **The sky is 43% of the screen and costs nothing**, which is a waste of a
+  good frame: it is where a sun, a moon or a flight of birds would go for
+  almost nothing, because anything up there is over a background that never
+  moves.
 
     python3 tests/desert.py /tmp/desert.png   # look at the layers, 3x
     python3 tests/mkdesertdata.py             # regenerate the rear layer

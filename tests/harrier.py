@@ -15,10 +15,19 @@ gives way to a haze - which is what distance does to it anyway.
 import os
 
 W, H, STRIDE = 256, 192, 128
-HZ = 96                         # the horizon, and the last sky row
 S = 256                         # a chequer square, world units
 FOCAL = 221
-CAMH = 380
+
+# The viewport is three numbers, and all three come from the environment
+# so that a demo can have one of its own without a second copy of this
+# file. HZ decides how much of the screen the board gets - it is the
+# horizon and the last sky row, so the board is the H - HZ - 1 rows
+# below it - and CAMH, the camera's height in world units, decides how
+# wide a square is down there. chequer8 uses 114 and 308: the board is
+# the bottom 40% of the screen and still 64 pixels a square at the
+# bottom of it.
+HZ = int(os.environ.get("HARRIER_HZ", 96))
+CAMH = int(os.environ.get("HARRIER_CAMH", 380))
 MINP = int(os.environ.get("HARRIER_MINP", 8))    # narrowest square
                                 # drawn, in pixels: 8 leaves haze above
                                 # the board, 1 takes it to the horizon

@@ -52,20 +52,29 @@ def run(by):
     """The pushes for one (row, phase), and where each entry point is.
 
     Push k writes the pattern pair (63 - k) mod 64, so the run is the
-    row twice over, descending - which is the order PUSH writes in. An
-    entry is (the DE it needs, where it is).
+    row twice over, descending - which is the order PUSH writes in.
+
+    An entry is three words: the DE the run needs at that point, where
+    to go, and WHERE TO STOP. A row wants exactly 64 pushes and a run
+    entered at s has 128 - s left in it, so without the third the other
+    64 - s spill into the row above and are thrown away - 22,528
+    T-states in the worst frame. The caller writes a JP over the stop
+    and puts the three bytes back afterwards, which is 144 T-states a
+    row against an average of 352 of spill.
     """
     pairs = [by[2 * i] | (by[2 * i + 1] << 8) for i in range(64)]
-    ops, ent, de = [], [], None
+    ops, offs, de = [], [], None
     for k in range(128):
         v = pairs[(63 - k) % 64]
-        if k < 64:                      # an entry is never past halfway:
-            ent.append((v, sum(len(o) for o in ops)))   # 64 pushes have
-        if v != de:                                     # to be left
+        offs.append(sum(len(o) for o in ops))
+        if v != de:
             ops.append([0x11, v & 255, v >> 8])         # LD DE,nn
             de = v
         ops.append([0xD5])                              # PUSH DE
-    return [b for o in ops for b in o], ent
+    offs.append(sum(len(o) for o in ops))
+    code = [b for o in ops for b in o]
+    ent = [(pairs[(63 - s) % 64], offs[s], offs[s + 64]) for s in range(64)]
+    return code, ent
 
 
 def defb(v, per=16):
@@ -78,7 +87,7 @@ def chunks(rows):
     """Share the rows out, bottom upwards, so a frame walks the bank."""
     out, cur, used = [], [], 0
     for r in rows:
-        want = sum(len(run(pattern(r[1], p))[0]) + 4 * 64 + 3
+        want = sum(len(run(pattern(r[1], p))[0]) + 6 * 64 + 3
                    for p in range(4))
         if used + want > WINDOW - 1024:
             out.append(cur)
@@ -120,15 +129,16 @@ def emit_chunks(here, back):
         for y, px in part:
             for p in range(4):
                 code, ent = run(pattern(px, p))
-                parts.append("\ndes_e%d_%d:      ; row %d, phase %d: DE and"
-                             " where to go, a rotation" % (y, p, y, p))
+                parts.append("\ndes_e%d_%d:      ; row %d, phase %d: the DE"
+                             " it needs, where to go and where to stop"
+                             % (y, p, y, p))
                 parts.append("\n".join(
-                    "        DEFW %d,des_r%d_%d + %d" % (v, y, p, at)
-                    for v, at in ent))
+                    "        DEFW %d,des_r%d_%d + %d,des_r%d_%d + %d"
+                    % (v, y, p, at, y, p, stop) for v, at, stop in ent))
                 parts.append("\ndes_r%d_%d:" % (y, p))
                 parts.append(defb(code))
                 parts.append("        JP C9_RET")
-                n += len(code) + 256 + 3
+                n += len(code) + 384 + 3
         parts.append("\n        ASSERT $ <= 0x%04X       ; the window, less"
                      " the caller's stack" % WINDOW)
         open(os.path.join(here, "desertrun%d.z80s" % k), "w").write(

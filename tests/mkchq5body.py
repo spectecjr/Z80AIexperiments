@@ -37,6 +37,7 @@ import mkchq3data as M3                         # noqa: E402
 import mkchq4data as M4                         # noqa: E402
 
 PRE = M3.PRE                                    # chq5
+SET = os.environ.get("CHQ_SET", "5")            # whose chunks these are
 WINDOW = 0x7F00                 # the 32K LMPR maps, less the caller's stack
 BANK0 = 0x20                    # LMPR for the first chunk: RAM over ROM 0
 BODY = 30                       # bytes a compiled body
@@ -140,11 +141,11 @@ def emit(here):
                 parts.append("        JP %s_ret" % PRE)
         parts.append("\n        ASSERT $ <= 0x%04X       ; the window, less"
                      " the caller's stack" % WINDOW)
-        open(os.path.join(here, "chequer5c%d.z80s" % k), "w").write(
+        open(os.path.join(here, "chequer%sc%d.z80s" % (SET, k)), "w").write(
             "\n".join(parts) + "\n")
     n = sum(p for _, p in band)
-    print("chequer5c*.z80s: %d bodies of %d bytes in %d chunks of %d bands"
-          % (n, BODY, len(cut), len(band) // len(cut)))
+    print("chequer%sc*.z80s: %d bodies of %d bytes in %d chunks of %d bands"
+          % (SET, n, BODY, len(cut), len(band) // len(cut)))
     return len(cut)
 
 
