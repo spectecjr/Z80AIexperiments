@@ -11,7 +11,7 @@ jet_move:       ; banking left, level, right
 JET_W:          EQU 12           ; bytes wide
 JET_H:          EQU 48           ; and scanlines tall
 
-jet_m0:         ; SP is the byte after his bottom right corner
+jet_m0:         ; SP is the byte after the bottom right corner
         LD   HL,-4
         ADD  HL,SP
         LD   SP,HL
@@ -855,7 +855,7 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH DE
         JP   CQ9_RET
 
-jet_m1:         ; SP is the byte after his bottom right corner
+jet_m1:         ; SP is the byte after the bottom right corner
         LD   HL,-4
         ADD  HL,SP
         LD   SP,HL
@@ -1748,7 +1748,7 @@ jet_m1:         ; SP is the byte after his bottom right corner
         PUSH DE
         JP   CQ9_RET
 
-jet_m2:         ; SP is the byte after his bottom right corner
+jet_m2:         ; SP is the byte after the bottom right corner
         LD   HL,-4
         ADD  HL,SP
         LD   SP,HL

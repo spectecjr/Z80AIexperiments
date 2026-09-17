@@ -19,7 +19,8 @@ version would have to give up. `chequer9` takes twenty-four pages and could
 not be cut down to sixteen at all: its run bank alone is 95K, because a
 horizon that moves has to have every square width it can ever show
 compiled, and 17K more of band lists because which of those widths are drawn
-is what a horizon chooses.
+is what a horizon chooses. `chequer10` is twenty-six: two more for eight
+sizes of tree.
 
 ---
 
@@ -33,6 +34,7 @@ is what a horizon chooses.
 | `chequer7` | 193,921 / **201,281** / 209,572 | 25 | and a two layer city scrolling on the horizon |
 | `chequer8` | 184,932 / **190,655** / 196,121 | 25 | board in the bottom 40%, a two layer desert on it, parallax off the camera |
 | `chequer9` | 86,232 / **139,314** / 195,910 | 25 | the horizon moves with the pilot, 10% to 50% of the screen, a four colour board that keeps its scale, no palette changes at all |
+| `chequer10` | 88,358 / **144,254** / 210,517 | 25 | and a tree standing on it, compiled at eight sizes, coming in from the distance |
 | `zarch` | 195,482 / **208,206** / 215,619 | 25 | Zarch's ground: a chequered plane, turning |
 | `chequer3` | 106,970 / **110,806** / 114,736 | **50** | the same picture, stripes in the palette |
 | `road2` | 104,750 / **112,736** / 118,270 | **50** | the Hang On road, 121% of the screen wide, bank paged |
@@ -58,6 +60,26 @@ where that horizon puts him:
 | the sky he left behind | 1,158 | 5,021 |
 | the rows the board gave up, when the horizon drops | 0 … 3,736 | 0 |
 | the horizon table and the flip | 613 | 613 |
+
+**`chequer10` adds one thing to that**, the tree, at the eight sizes it is
+compiled at — measured as what a frame costs with it in against the same
+frame with none:
+
+| the tree | box | bytes to draw | drawn | in the frame |
+|---|---|---|---|---|
+| 13 rows | 4x13 | 24 | 903 | 848 |
+| 27 | 8x27 | 96 | 2,288 | 2,233 |
+| 54 | 12x54 | 260 | 5,070 | 5,015 |
+| 81 | 20x81 | 624 | 10,735 | 10,903 |
+| 105 | 28x105 | 1,060 | 15,833 | 15,778 |
+| 135 | 32x135 | 1,535 | 21,806 | **24,710** |
+
+The last row is dearer in the frame than drawn because that box reaches 19
+scanlines above the band's top, into sky that is painted once — so those
+rows have to be put back when it moves. 5.5 T-states a byte plus the masked
+edges is the floor for a compiled sprite: the largest tree is at 14.2
+T-states a byte drawn, which is 10.1 a byte of its box — 29% of the box is
+air, and air still costs a jump over it.
 | **the frame** | **89,875** | **194,525** |
 
 The pilot is the same number at both ends because he is compiled as one walk
@@ -98,10 +120,11 @@ counts the cycles a frame takes - every opcode fetch, read and write, served
 through the emulator's access callbacks - which is the half of the sum that
 depends on the code rather than on the machine.
 
-| `chequer9`, a frame | cycles | T-states a cycle | of which screen bytes |
+| a frame | cycles | T-states a cycle | of which screen bytes |
 |---|---|---|---|
-| at the tallest board | 49,131 | **3.73** | 15,977 |
-| at the shortest | 23,598 | 3.82 | 6,267 |
+| `chequer9` at the tallest board | 49,131 | **3.73** | 15,977 |
+| `chequer9` at the shortest | 23,598 | 3.82 | 6,267 |
+| `chequer10`, tallest, biggest tree | 56,088 | **3.76** | 18,416 |
 
 Against the floor for each way of moving bytes:
 

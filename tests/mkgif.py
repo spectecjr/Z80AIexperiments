@@ -833,6 +833,117 @@ def _chequer9(outdir, seconds=10):
     got, bad, secs = check_gif(p, idx, pal, durs)
     report(p, size, n, durs, secs, got, bad)
 
+def chequer10(outdir, seconds=10):
+    """chequer10, in a process of its own: chequer9's viewport again."""
+    import os
+    import subprocess
+    env = dict(os.environ, HARRIER_MINP="1", HARRIER_HZ="95",
+               HARRIER_CAMH="308", DESERT_ROWS="20",
+               HARRIER_SKY="15", DESERT_SKY="15",
+               JET_W="24", JET_H="48",
+               CHQ_SWAP="0xBB", JET_PAL="board4",
+               DESERT_PAL="board4")
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                        "mkgif.py")
+    subprocess.run([sys.executable, here, "--chequer10", outdir,
+                    str(seconds)], env=env, check=True)
+
+
+def _chequer10(outdir, seconds=10):
+    """chequer10 at its measured rate: 25 Hz, 210,811 at its worst.
+
+    chequer9's flight with a tree coming in: planted in the world at a
+    depth of 4,400 and closing at the speed the ground scrolls, so it
+    grows through the eight sizes the sprite is compiled at and is gone
+    when its box no longer fits the screen - at which point the next
+    one is planted, on the other side of the camera.
+    """
+    import jetpack as J
+    from mkchqdata import sam
+    from sam import Sam
+    import chequer10 as C10
+    b = Sam("harness_chq10.asm",
+            ("harness_chq9c0.asm", "harness_chq9c1.asm",
+             "harness_chq9c2.asm", "harness_chq9msk0.asm",
+             "harness_chq9msk1.asm", "harness_chq9c3.asm",
+             "harness_chq9c4.asm",
+             "harness_desert9_0.asm", "harness_desert9_1.asm",
+             "harness_jetmove.asm", "harness_tree.asm"), screens=(10, 12),
+            chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"],
+                                     "CHQ4_SCR": y["CHQ4_SCREEN"],
+                                     "C9_RET": y["c9_ret"],
+                                     "CQ9_R": y["cq10_ret"],
+                                     "CQ10_R": y["cq10_ret"]})
+    s = b.syms
+    b.call(s["cq10_init"])
+    pal = {i: sam_rgb(sam(*rgb)) for i, rgb in J.PAL.items()}
+    pal[1] = sam_rgb(sam(7, 7, 5))      # chequer9's palette, whole: the
+    pal[2] = sam_rgb(sam(6, 6, 4))      # board's four sands as two pairs,
+    pal[10] = sam_rgb(sam(5, 5, 3))     # the darker of the second pair in
+    pal[9] = sam_rgb(sam(7, 5, 3))      # the swapped slot
+    pal[13] = sam_rgb(sam(2, 5, 2))     # and the desert's green and shadow,
+    pal[14] = sam_rgb(sam(4, 2, 0))     # which the tree is drawn in too:
+                                        # nothing here costs a new index
+    pal[15] = sam_rgb(sam(2, 4, 4))
+    n, m = int(seconds * 25), len(C10.HORIZONS)
+    step = 80                           # the camera's speed, three times
+                                        # chequer9's: what a tree standing
+                                        # still closes at, and the ground
+                                        # with it
+    far, near, trip = 6800, 650, 77     # a tree's life: planted at a depth
+                                        # that asks for the smallest sprite
+                                        # of the eight, gone when it has
+                                        # filled the bottom of the screen,
+                                        # and (far - near) / step frames in
+                                        # between
+    cam = []                            # where the camera is every frame,
+    for t in range(n):                  # which a tree needs to know before
+        fx, fy = corners(t / n, exact=True)     # it is planted: it is
+        cam.append((int((fx - 56) * 20),        # planted beside where the
+                    min(m - 1, max(0,           # camera WILL be when it
+                        round((m - 1) * fy / 144))), fx, fy))   # arrives,
+                                        # so that the pilot's own panning
+                                        # does not sweep it off the side of
+                                        # the screen on the way in
+    frames, ts, last = [], [], 56
+    tz, side = None, 1
+    for t in range(n):
+        camx, hz, fx, fy = cam[t]
+        camz = step * t
+        px, py = round(fx), round(fy)
+        if tz is None:                  # plant the next one, on the other
+            side = -side                # side of the flight path
+            tz = camz + far
+            tx = cam[min(n - 1, t + trip)][0] + 220 * side
+        at = C10.place(hz, camx, camz, tx, tz)
+        tk, tix, tiy = at if at else (255, 0, 0)
+        if tz - camz < near or (at is None and tz - camz < 3200):
+            tz = None                   # it has arrived, or the camera has
+                                        # panned it off the side
+        b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["chq4_camz"], (camz & 0xFFFF).to_bytes(2, "little"))
+        b.poke(s["cq10_hz"], bytes([hz]))
+        b.poke(s["cq10_px"], bytes([px]))
+        b.poke(s["cq10_py"], bytes([py]))
+        b.poke(s["cq10_pose"],          # banking the way he is going
+               bytes([1 + (1 if px > last else -1 if px < last else 0)]))
+        b.poke(s["cq10_tk"], bytes([tk]))
+        b.poke(s["cq10_tx"], bytes([tix]))
+        b.poke(s["cq10_ty"], bytes([tiy]))
+        last = px
+        ts.append(b.call(s["cq10_frame"]))
+        frames.append(unpack(b.screen(b.shown())))
+    idx, pal = flat(frames, pal)
+    p = "%s/chequer10.gif" % outdir
+    durs = [2 * TICK] * n               # 25 Hz throughout: the worst frame
+                                        # here is 88% of one
+    size = write_gif(p, idx, pal, durs)
+    got, bad, secs = check_gif(p, idx, pal, durs)
+    report(p, size, n, durs, secs, got, bad)
+    print("    %-38s %d / %d / %d T-states"
+          % ("the frames cost", min(ts), sum(ts) // len(ts), max(ts)))
+
+
 def zarch(outdir, seconds=8):
     """zarch at its measured rate: 206,012 T-states a frame, 25 Hz.
 
@@ -1274,6 +1385,9 @@ def chequer2(outdir, seconds=8):
 
 
 if __name__ == "__main__":
+    if len(sys.argv) > 1 and sys.argv[1] == "--chequer10":
+        _chequer10(sys.argv[2], float(sys.argv[3]))     # its own viewport,
+        raise SystemExit                                # its own process
     if len(sys.argv) > 1 and sys.argv[1] == "--chequer9":
         _chequer9(sys.argv[2], float(sys.argv[3]))      # its own viewport,
         raise SystemExit                                # its own process
@@ -1303,6 +1417,7 @@ if __name__ == "__main__":
     chequer7(d)
     chequer8(d)
     chequer9(d)
+    chequer10(d)
     zarch(d)
     road(d)
     road2(d)

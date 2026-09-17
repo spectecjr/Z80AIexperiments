@@ -883,6 +883,57 @@ at 24 and not two. Resampling the bitmap instead eats the one pixel outline
 and the two pixel highlight, which is most of what makes a sprite this size
 read at all.
 
+## A scaled sprite is N compiled sprites, and N is eight
+
+Scaling a masked sprite as it is drawn is the wrong shape of work for a Z80.
+A run of solid bytes through `PUSH` is 5.5 T-states a byte; any scaler worth
+the name is a read, a shift, a merge and a write per byte at four or five
+times that, before it has decided which source row a destination row comes
+from. **So compile it at every size you will use.** The arcades did exactly
+this - Space Harrier's scenery pops from one size to the next as it comes in
+- and at 25 Hz the pop is invisible against the movement.
+
+chequer10's tree is eight sizes, 13 to 135 scanlines, **3,773 bytes for the
+lot**: a quarter of a page, against a scaler that would have been a few
+hundred bytes and several times the T-states every frame. 903 T-states to
+draw the smallest and 21,806 the largest, which is 14.2 a byte drawn - the
+floor for a masked compiled sprite with 7% of its bytes on an edge.
+
+**One walk serves any sprite**, which is the reusable half. `tests/mksprite.py`
+is the descending `SP` walk above, and the pilot's generator and the tree's
+both call it: rows bottom upwards, bytes right to left, `PUSH DE` for runs,
+`POP BC`/mask/`PUSH BC` on the edges. A new object is a picture and a call.
+
+**Nothing clips, and that is the deal.** A walk of `SP` has no idea where the
+screen ends - it writes where it is put - so the caller must know the whole
+box fits. Clipping would mean either a clipped variant of every size or an
+entry point per column, and neither is worth it when the object can simply
+not be drawn: in chequer10 that *is* how a tree leaves, growing until the
+frame it would no longer fit in.
+
+**A variable width fill wants one block entered at an offset.** Two sprites
+of different widths leave boxes of different widths to put the sky back
+into, so the fill is sixteen `PUSH DE` in a row and the caller enters at
+`16 - pairs` through `JP (IX)`: 38 + 11 T-states a pair per row, one routine
+for every box. It is why a sprite's box here is rounded to a whole number of
+`PUSH` pairs - 2, 2, 4, 4, 6, 10, 14, 16 bytes - which costs a pixel column
+of air and saves a general fill.
+
+**And an object on a decimated board stands on the row whose depth matches,
+not on a row computed from its depth.** A shallow board is the deep one with
+scanlines left out, so the depths actually on the screen are a *subset* of
+the deep board's; picking the nearest drawn row is both the only correct
+answer and what keeps the object still relative to the ground while the
+horizon moves.
+
+**Plant it beside where the camera will be, not where it is.** A camera that
+pans - chequer10's follows the pilot across ±900 world units - sweeps a
+distant object sideways across the screen far faster than the object closes,
+so scenery planted beside the camera's current position is off the side of
+the screen long before it arrives. Planting it beside where the camera will
+be when it gets there is one line, and it is the difference between scenery
+you fly past and scenery that never gets close.
+
 ## The copper is the most expensive thing on a SAM, and the pixels are free
 
 Every chequered floor here grades its distance in the palette: two entries
