@@ -52,7 +52,7 @@ about which of those it is.
 | `chequer6` | **1 px** | **1 px** | **pixels** | **154,607** | 25 Hz, and a pilot in front of it |
 | `chequer7` | **1 px** | **1 px** | **pixels** | **201,281** | 25 Hz, and a city on the horizon |
 | `chequer8` | **1 px** | **1 px** | **pixels** | **190,655** | 25 Hz, 40% of the screen, a desert above it |
-| `chequer9` | **1 px** | **1 px** | **pixels** | **194,641** | 25 Hz, the horizon moving between 40% and 59% |
+| `chequer9` | **1 px** | **1 px** | **pixels** | **146,642** | 25 Hz, the horizon moving between 10% and 50% |
 
 `chequer4` is the one to use: it draws chequer3's screen — the GIFs come
 out byte for byte identical — with the depth alternation in the pixels
@@ -125,19 +125,19 @@ for 63 rows of stream - which buys back the rule that made a pose change and
 a moving background awkward. Twenty pages of bank, so it wants a 512K SAM.
 See `chequer8.md`.
 
-**And a horizon that moves.** `chequer9` puts the board between 40% and 59%
-of the screen depending on how high the pilot is flying - Space Harrier's
-trick, where the ground rises to meet the player, and not anything a camera
-could actually do. **One run bank serves all 32 positions of it**, because a
-square's width and a scanline's depth are both functions of the row's
-distance from the horizon and of nothing else: the band table is one table
-entered further down, and the 512 swap mask tables are copied as far as the
-horizon says for 1,450 to 2,042 T-states. The pilot is compiled as one walk
-of `SP` so that he can be anywhere, 16,116 T-states against 14,401 standing
-still, and the desert band is 20 scanlines rather than 32 so that the
-tallest board still fits a 25 Hz frame. 164,565 / 194,641 / 218,891, and
-223,370 in the worst frame of the sweep - 93%. The bank is 140K and the map
-is 26 pages. See `chequer9.md`.
+**And a horizon that moves.** `chequer9` puts the board between 10% of the
+screen and half of it depending on how high the pilot is flying - Space
+Harrier's trick, where the ground rises to meet the player, and not anything
+a camera could actually do. **One run bank serves all 65 positions of it**,
+because a square's width and a scanline's depth are both functions of the
+row's distance from the horizon and of nothing else: the band table is one
+table entered further down, and the 512 swap mask tables are copied as far
+as the horizon says for 522 to 1,754 T-states. The pilot is compiled as one
+walk of `SP` so that he can be anywhere, 16,116 T-states against 14,401
+standing still, and the desert band is 20 scanlines rather than 32.
+90,216 / 146,642 / 193,023, and 199,930 in the worst frame of the sweep -
+83%, with the cheapest frames inside a 50 Hz one. The bank is 95K and the
+map is 22 pages. See `chequer9.md`.
 
 **The camera in the GIFs.** All five demos now share `stroll()` in
 `tests/mkgif.py`: a slide of two and a half squares either way taking

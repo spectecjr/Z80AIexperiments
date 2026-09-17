@@ -37,8 +37,9 @@ sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 import jetpack as J                                     # noqa: E402
 
 W = J.W // 2                    # bytes wide
-BANK = 0x38                     # LMPR: RAM over ROM 0, and the page the
-                                # map has spare past the desert's
+BANK = 0x20 + int(os.environ.get("JET_FIRST", 24))      # LMPR: RAM over
+                                # ROM 0, and the page the map has spare
+                                # past the desert's
 WINDOW = 0x7F00                 # what LMPR maps, less the caller's stack
 
 

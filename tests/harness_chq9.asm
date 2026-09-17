@@ -1,9 +1,9 @@
 ; chequer9, paged: the resident block - the board's code with a horizon
 ; that moves, the desert's, and the frame that ties them together - in the
 ; 8K a MODE 4 screen leaves spare at the end of its odd page, with a copy
-; behind each buffer. The board's bank is six chunks of compiled bodies
-; covering squares up to 96 pixels wide; the desert's rear layer is three
-; more.
+; behind each buffer. The board's bank is four chunks of compiled bodies
+; covering squares up to 80 pixels wide; the desert's rear layer is two
+; more, and the pilot one.
         DEVICE NOSLOT64K
 CHQ4_PAGED:     EQU 1
 CHQ4_DYNHZ:     EQU 1           ; the horizon is a runtime choice

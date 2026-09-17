@@ -4,38 +4,6 @@
 chq4_band:      ; rows, and the pair of records, widest
                 ; square first
         DEFB 1
-        DEFW chq4_rec + 760,chq4_rec + 764
-        DEFB 1
-        DEFW chq4_rec + 752,chq4_rec + 756
-        DEFB 1
-        DEFW chq4_rec + 744,chq4_rec + 748
-        DEFB 1
-        DEFW chq4_rec + 736,chq4_rec + 740
-        DEFB 1
-        DEFW chq4_rec + 728,chq4_rec + 732
-        DEFB 2
-        DEFW chq4_rec + 720,chq4_rec + 724
-        DEFB 1
-        DEFW chq4_rec + 712,chq4_rec + 716
-        DEFB 1
-        DEFW chq4_rec + 704,chq4_rec + 708
-        DEFB 1
-        DEFW chq4_rec + 696,chq4_rec + 700
-        DEFB 1
-        DEFW chq4_rec + 688,chq4_rec + 692
-        DEFB 2
-        DEFW chq4_rec + 680,chq4_rec + 684
-        DEFB 1
-        DEFW chq4_rec + 672,chq4_rec + 676
-        DEFB 1
-        DEFW chq4_rec + 664,chq4_rec + 668
-        DEFB 1
-        DEFW chq4_rec + 656,chq4_rec + 660
-        DEFB 1
-        DEFW chq4_rec + 648,chq4_rec + 652
-        DEFB 2
-        DEFW chq4_rec + 640,chq4_rec + 644
-        DEFB 1
         DEFW chq4_rec + 632,chq4_rec + 636
         DEFB 1
         DEFW chq4_rec + 624,chq4_rec + 628
@@ -358,38 +326,6 @@ chq4_rec:       ; a run's entry points and its values
         DEFW chq5_e79_1,chq4_val + 288
         DEFW chq5_e80_0,chq4_val + 192
         DEFW chq5_e80_1,chq4_val + 224
-        DEFW chq5_e81_0,chq4_val + 256
-        DEFW chq5_e81_1,chq4_val + 288
-        DEFW chq5_e82_0,chq4_val + 64
-        DEFW chq5_e82_1,chq4_val + 320
-        DEFW chq5_e83_0,chq4_val + 256
-        DEFW chq5_e83_1,chq4_val + 288
-        DEFW chq5_e84_0,chq4_val + 192
-        DEFW chq5_e84_1,chq4_val + 224
-        DEFW chq5_e85_0,chq4_val + 256
-        DEFW chq5_e85_1,chq4_val + 288
-        DEFW chq5_e86_0,chq4_val + 64
-        DEFW chq5_e86_1,chq4_val + 320
-        DEFW chq5_e87_0,chq4_val + 256
-        DEFW chq5_e87_1,chq4_val + 288
-        DEFW chq5_e88_0,chq4_val + 192
-        DEFW chq5_e88_1,chq4_val + 224
-        DEFW chq5_e89_0,chq4_val + 256
-        DEFW chq5_e89_1,chq4_val + 288
-        DEFW chq5_e90_0,chq4_val + 64
-        DEFW chq5_e90_1,chq4_val + 320
-        DEFW chq5_e91_0,chq4_val + 256
-        DEFW chq5_e91_1,chq4_val + 288
-        DEFW chq5_e92_0,chq4_val + 192
-        DEFW chq5_e92_1,chq4_val + 224
-        DEFW chq5_e93_0,chq4_val + 256
-        DEFW chq5_e93_1,chq4_val + 288
-        DEFW chq5_e94_0,chq4_val + 64
-        DEFW chq5_e94_1,chq4_val + 320
-        DEFW chq5_e95_0,chq4_val + 256
-        DEFW chq5_e95_1,chq4_val + 288
-        DEFW chq5_e96_0,chq4_val + 192
-        DEFW chq5_e96_1,chq4_val + 224
 
         ALIGN 32
 chq4_val:       ; BC, DE, HL, IX, IY and AF in the order a row
@@ -474,6 +410,3 @@ chq4_ztab:      ; the depth of each row with a board on it,
         DEFW 932,919,907,895,884,872,861,850
         DEFW 840,830,820,810,800,791,782,773
         DEFW 764,756,748,739,731,724,716,709
-        DEFW 701,694,687,680,673,667,660,654
-        DEFW 648,642,636,630,624,618,613,607
-        DEFW 602,597,591

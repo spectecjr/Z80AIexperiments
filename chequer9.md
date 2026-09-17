@@ -1,30 +1,31 @@
 # chequer9.z80s — design notes
 
-**A horizon that moves.** The board takes between 40% and 59% of the screen
-as the pilot climbs and dives — Space Harrier's trick, where the ground rises
-to meet the player — and **one run bank serves every position of it**.
-194,641 T-states on the demo's own path, 218,891 in its worst frame, and
-223,370 in the worst frame of the sweep: **93% of a 25 Hz frame**.
+**A horizon that moves.** The ground rises to meet the pilot: the board is
+10% of the screen when he is at the bottom of it and half the screen when he
+is at the top — Space Harrier's trick — and **one run bank serves all 65
+positions of it**. 146,642 T-states a frame on the demo's own path, 193,023
+in its worst frame, and 199,930 in the worst frame of the sweep: **83% of a
+25 Hz frame**, where the cheapest frames fit inside a 50 Hz one.
 
 | | T-states a frame | |
 |---|---|---|
-| **the board** | **97,550 … 148,442** | 77 scanlines (40%) to 114 (59%) |
-| the swap mask | 1,450 … 2,042 | copied as far down as the board goes |
+| **the board** | **23,480 … 123,107** | 19 scanlines (10%) to 96 (50%) |
+| the swap mask | 522 … 1,754 | copied as far down as the board goes |
 | **the desert** | **49,796** | 20 scanlines, two layers, by pixels |
 | **the pilot** | **16,116** | 96 rows, anywhere on the screen |
-| the sky he left behind | 0 … 10,794 | the rows of his old box above the band |
-| the rows the board gave up | 0 … 2,302 | when the horizon drops |
-| the horizon table and the flip | 517 | |
-| **`cq9_frame`** | **164,565 / 194,641 / 218,891** | **25 Hz** |
+| the sky he left behind | 3,655 … 9,705 | the rows of his old box above the band |
+| the rows the board gave up | 0 … 3,736 | when the horizon drops |
+| the horizon table and the flip | 542 | |
+| **`cq9_frame`** | **90,216 / 146,642 / 193,023** | **25 Hz** |
 
-Bit exact against `tests/chequer9.py` over 64 frames: every one of the 32
+Bit exact against `tests/chequer9.py` over 130 frames: every one of the 65
 horizons twice, walked up the screen and back down, with the camera moving
 and the pilot in a different place and a different pose every frame.
 
 ## One bank serves every horizon, which is the whole finding
 
 The thing to expect was that a moving horizon meant a set of tables per
-horizon, and there is no room for 32 of anything this size. It does not,
+horizon, and there is no room for 65 of anything this size. It does not,
 and the reason is worth stating plainly:
 
     a square's width at row y      round(S * (y - horizon) / CAMH)
@@ -39,22 +40,24 @@ before that one are the ones that would be off the bottom.
 
 What that costs at run time is a table lookup. Five bytes a horizon in
 `chequer9hz.z80s`: the chunk to page in, where in that chunk's band table to
-start, how many scanlines that is, and the widest square. 517 T-states with
-the flip in it.
+start, how many scanlines that is, and the widest square. 542 T-states with
+the flip in it — and a 16-bit index, because 65 horizons at five bytes each
+is past what a byte will hold.
 
-What it costs in memory is that the board now has to be compiled for the
+What it costs in memory is that the board has to be compiled for the
 *deepest* board it can ever have. Pitching the horizon up brings coarser
-ground into view, so the widest square goes from 64 pixels to 96:
-**4,656 compiled bodies in six chunks against chequer8's 2,080 in three**.
+ground into view, so the widest square goes from 64 pixels to 80:
+**3,240 compiled bodies in four chunks against chequer8's 2,080 in three**.
 That is the real price of a moving horizon and it is paid in pages.
 
 ## A horizon is allowed when the bottom row is the last row of its band
 
 A band is drawn whole — one entry into a compiled run, one count — so the
-board cannot end in the middle of one. That makes some horizons impossible:
-**32 of the 39 rows between 40% and 59% are allowed**, which is a horizon
-every scanline or two. The demo takes the pilot's height, maps it onto those
-32 and never asks for a row that is not in the table.
+board cannot end in the middle of one. **65 of the 78 rows between 10% and
+50% are allowed**: near the horizon a band is a scanline or two, so nearly
+every row is, and it is the wide bands at the bottom of the screen that rule
+out runs of them. The demo takes the pilot's height, maps it onto those 65
+and never asks for a row that is not in the table.
 
 Allowing every row would want a band that can be entered part way *and*
 stopped part way, which the runs can do (the desert's already stop where
@@ -65,20 +68,20 @@ and the saving is one scanline of accuracy in where the ground begins.
 
 This was the part expected to be the bill. chequer5's swap masks are 512
 tables indexed by depth, and the depth of a scanline is exactly what a
-moving horizon changes; `chequer8.md` predicted either 9,300 T-states a
-frame to compute the mask per scanline again, or a set of tables per horizon
-step, which does not fit.
+moving horizon changes; `chequer8.md` predicted either thousands of
+T-states a frame to compute the mask per scanline again, or a set of tables
+per horizon step, which does not fit.
 
 Neither. The tables are indexed by *depth*, and the depth of a row is that
 same function of `y - horizon` — so they are the tables chequer5 built, only
-generated 115 rows deep rather than 77, and **copied as far as the horizon
+generated 96 rows deep rather than 77, and **copied as far as the horizon
 says**. The copy is 128 `LDI`s entered at `2 * (128 - rows)`:
 
 | | T-states |
 |---|---|
-| the copy, 77 rows of board | 1,450 |
-| the copy, 114 rows | 2,042 |
-| computing the mask a scanline again | 6,200 … 9,300 |
+| the copy, 19 rows of board | 522 |
+| the copy, 96 rows | 1,754 |
+| computing the mask a scanline again | 1,539 … 7,776 |
 
 The one thing that genuinely became per-horizon is the phase accumulator's
 seed, which is the widest square times the camera — a different square at
@@ -117,11 +120,14 @@ the picture *shrinks*, because then nothing paints the rows it has given up:
 
 - **the board and the band.** When the horizon drops, the rows between the
   band's old top and its new one are sky now. `cq9_sky` fills them,
-  `DUP 64 / PUSH DE` a row, 0 to 2,302 T-states.
+  `DUP 64 / PUSH DE` a row — and `PUSH` walks down through memory, which is
+  up the screen, which is exactly where those rows are.
 - **the pilot.** The box he was in last frame is sky above the band's top
-  and painted below it, so `cq9_wipe` puts back only the rows above:
-  nothing when he is low, 10,794 T-states when he is at the top of a short
-  board and all 96 of his rows are over sky.
+  and painted below it, so `cq9_wipe` puts back only the rows above: 3,655
+  to 9,705 T-states over the demo's path, and 11,885 at its ceiling, where
+  all 96 of his rows are over sky. The coupling keeps it off that ceiling —
+  he is high only when the board is tall — which is worth knowing, because
+  it is the one place where the two halves of the demo fight each other.
 
 **Both are per buffer, and that is free.** The paged map keeps a copy of the
 resident block behind each screen, so `cq9_seen` and `cq9_ox`/`cq9_oy` are
@@ -129,12 +135,12 @@ each buffer's own record of what it was last drawn with — no pair of
 variables to keep in step, and a buffer that skipped a horizon step puts
 back both of them at once.
 
-## The desert is twenty scanlines now, and that is a budget decision
+## The desert is twenty scanlines, and that is a budget decision
 
 chequer8's band is 32 scanlines and costs 79,758 T-states, which is fine
-under a 77-row board and impossible under a 114-row one. So chequer9's is
-20: the same two layers, the same picture generator with `DESERT_ROWS`
-turned down, the pyramids scaled to the band they are in.
+under a 77-row board and was not under a 114-row one. So chequer9's is 20:
+the same two layers, the same picture generator with `DESERT_ROWS` turned
+down, the pyramids scaled to the band they are in.
 
 | | T-states a frame | |
 |---|---|---|
@@ -147,20 +153,26 @@ wherever the band happens to be, so sliding it up and down the screen costs
 nothing at all. That was the prediction in `chequer8.md` and it is the one
 part of this that arrived free.
 
+It is also, now, **the largest fixed cost in the frame** — more than twice
+the board at the 10% horizon, where the whole frame is 97,620. The board
+having become cheap is what leaves 39,000 T-states spare in the worst frame,
+and putting the band back up to 26 or 28 scanlines is what that headroom is
+for.
+
 ## The map
 
     0,1  2,3  4,5      the board's run bank, the widest bands
-    6,7  8,9           the swap mask tables, 512 of them, 115 rows deep
+    6,7  8,9           the swap mask tables, 512 of them, 96 rows deep
     10,11  12,13       the two buffers, each with the resident code in
                        the 8K a MODE 4 screen leaves at the end of its
                        odd page
-    14,15  16,17  18,19    the rest of the run bank, up to 96 pixel squares
-    20,21  22,23       the desert's rear layer, cut by row
-    24,25              the pilot, compiled and position independent
+    14,15              the rest of the run bank, up to 80 pixel squares
+    16,17  18,19       the desert's rear layer, cut by row
+    20,21              the pilot, compiled and position independent
 
-Twenty-six of the thirty-two pages `LMPR` can address — a 512K SAM, and
-**this is the first thing here that would not fit in 256K even by giving
-things up**: the bank alone is 140K of compiled bodies.
+Twenty-two of the thirty-two pages `LMPR` can address, so a 512K SAM. The
+bank is 95K of compiled bodies, which is what a 256K machine would have to
+find somewhere.
 
 ## Invariants
 
@@ -183,15 +195,18 @@ things up**: the bank alone is 140K of compiled bodies.
 
 ## What is left
 
-- **The board is 68% of the tallest frame** and is chequer5's row loop with
-  a bigger bank behind it. 114 scanlines at 148,442 is 1,302 a row, where
-  the row loop itself is about 600; the rest is the band dispatch, and at
-  96 pixel squares a band is 20 rows for one dispatch.
+- **The frame varies by a factor of two**, 90,216 to 193,023, which is more
+  than anything else here. Held at 25 Hz that is up to 60% of a frame doing
+  nothing; the cheap end is inside a 50 Hz frame, so a demo that ran at 50 Hz
+  while the pilot was low and dropped to 25 Hz as he climbed would be
+  honest — and the line interrupt makes the switch, not a guess.
+- **The desert is the fixed cost now.** 49,796 T-states whatever the horizon
+  does, against a board that falls to 23,480. Widening the band is the
+  obvious thing to spend the headroom on.
 - **`cq9_wipe` fills a 16-byte-wide box** and the pilot is drawn over most of
   it a moment later. Filling only the rows he no longer covers would want
-  the intersection of two boxes and would save most of the 10,794 in the
-  worst case — where the budget is tightest, since he is high exactly when
-  the board is tall.
+  the intersection of two boxes and would save most of the 9,705 it costs
+  at its worst on the demo's path.
 - **The front layer is still spans at pixel precision**, which is the
   standing decision from chequer8: forcing its offset even would make every
   span whole bytes and save about 5,000 T-states, and would cost the layer

@@ -44,6 +44,9 @@ PAGES = [0, 2, 4, 14, 16, 18,   # and the pages the chunks go in, stepping
          20, 22, 24, 26, 28, 30]    # over the swap masks at 6 and 8 and
                                     # the two screens at 10 and 12
 BODY = 30                       # bytes a compiled body
+ROWS0 = int(os.environ.get("CHQ_ROWS0", 77))    # the shortest board a
+ROWS1 = int(os.environ.get("CHQ_ROWS1", 114))   # horizon may give, and
+                                                # the tallest
 
 
 def body(p, ph, which):
@@ -113,15 +116,16 @@ def horizons(here, cut):
     the ones that would be off the bottom of the screen.
 
     A horizon is allowed when the screen's bottom row is the last row
-    of its band, because a band is drawn whole - 32 of the 39 rows
-    between 40% and 60% of the screen are, which is a horizon every
-    scanline or two.
+    of its band, because a band is drawn whole. Which rows those are
+    depends on where the bands fall: near the horizon a band is a
+    scanline or two, so most rows are allowed, and the wide bands at
+    the bottom of the screen rule out a run of rows each.
     """
     out, rows = [], sum(n for n, _ in M4.bands())
     for k, part in enumerate(cut):
         at = 0
         for n, p in part:
-            if 77 <= rows <= 114:                       # 40% to 60% board
+            if ROWS0 <= rows <= ROWS1:                  # the range asked for
                 out.append((191 - rows, BANK0 + PAGES[k], at, rows, p))
             rows -= n
             at += 3

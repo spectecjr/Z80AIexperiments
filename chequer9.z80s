@@ -5,11 +5,11 @@
 ;   cq9_frame    draw from (chq4_camx, chq4_camz, cq9_hz), and flip
 ;
 ; chequer8's board is the bottom 40% of the screen and stays there.
-; This one's horizon moves between row 114 and row 77 - between 40% of
-; the screen and 59% of it - the way Space Harrier's does when the
-; player flies up and down: not because the camera is doing anything a
-; camera could do, but because it puts the ground where the eye wants
-; it.
+; This one's horizon moves between row 172 and row 95 - the board taking
+; 10% of the screen when the pilot is at the bottom of it and half the
+; screen when he is at the top - the way Space Harrier's ground rises to
+; meet the player: not because the camera is doing anything a camera
+; could do, but because it puts the ground where the eye wants it.
 ;
 ; ONE BANK SERVES EVERY HORIZON. A square's width at row y is
 ; round(S * (y - horizon) / CAMH), which depends on the row's distance
@@ -19,13 +19,15 @@
 ; that holds the bottom row of the screen. The bands before that one
 ; would be off the bottom.
 ;
-; The bank goes up to 96 pixel squares rather than 64, because pitching
-; the horizon up brings coarser ground into view: 4,656 compiled bodies
-; in six chunks, against chequer8's 2,080 in three.
+; The bank goes up to 80 pixel squares rather than 64, because pitching
+; the horizon up brings coarser ground into view: 3,240 compiled bodies
+; in four chunks, against chequer8's 2,080 in three.
 ;
 ; A HORIZON IS ALLOWED WHEN THE SCREEN'S BOTTOM ROW IS THE LAST ROW OF
-; ITS BAND, because a band is drawn whole. 32 of the 39 rows in the
-; range are, which is a horizon every scanline or two, and the table in
+; ITS BAND, because a band is drawn whole. 65 of the 78 rows in the
+; range are - near the horizon a band is a scanline or two, so nearly
+; every row is, and it is the wide bands at the bottom of the screen
+; that rule out runs of them. The table in
 ; chequer9hz.z80s has them: the chunk to page in, where in its band
 ; table to start, how many scanlines that is, and the widest square,
 ; which is what the phase accumulator is seeded with.
@@ -33,10 +35,10 @@
 ; WHAT THE SWAP MASK DOES ABOUT IT: nothing at all. A scanline's depth
 ; is CAMH * FOCAL / (y - horizon), which is the same function of the
 ; same distance, so the 512 lookup tables are the ones chequer5 built -
-; only longer, 115 rows rather than 77, and copied as far as the
-; horizon says. That is the whole of it: 1,450 T-states at the
-; shortest board and 2,042 at the tallest, against the 6,200 to 9,300
-; that computing the mask a scanline again would have cost.
+; only longer, 96 rows rather than 77, and copied as far as the horizon
+; says. That is the whole of it: 522 T-states at the shortest board and
+; 1,754 at the tallest, against the 1,500 to 7,800 that computing the
+; mask a scanline again would have cost.
 ;
 ; AND WHAT MOVES DOWN HAS TO BE PUT BACK. When the horizon drops, rows
 ; that held board or desert become sky, and nothing else paints there.
@@ -59,14 +61,15 @@ cq9_init:
 ;------------------------------------------------------------------
 
 cq9_frame:
-        LD   A,(cq9_hz)         ; five bytes a horizon, lowest first
+        LD   A,(cq9_hz)         ; five bytes a horizon, lowest first -
+        LD   L,A                ; and there are 65 of them, so the index
+        LD   H,0                ; does not fit in a byte
         LD   E,A
-        ADD  A,A
-        ADD  A,A
-        ADD  A,E
-        LD   E,A
-        LD   D,0
-        LD   HL,chq4_hztab
+        LD   D,H
+        ADD  HL,HL
+        ADD  HL,HL
+        ADD  HL,DE
+        LD   DE,chq4_hztab
         ADD  HL,DE
         LD   A,(HL)             ; the chunk the bottom band is in
         LD   (chq4_bnk0),A

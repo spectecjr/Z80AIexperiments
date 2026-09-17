@@ -801,18 +801,24 @@ is on the screen. So:
 - **the depth-indexed tables are the same tables**, only generated as deep
   as the deepest board and copied as far as the horizon says. chequer9's
   swap masks are 512 of them and the copy is 128 `LDI`s entered at
-  `2 * (128 - rows)`: 1,450 T-states at 77 rows of board and 2,042 at 114,
-  against the 6,200 to 9,300 that computing the mask a scanline again would
+  `2 * (128 - rows)`: 522 T-states at 19 rows of board and 1,754 at 96,
+  against the 1,500 to 7,800 that computing the mask a scanline again would
   have cost. This was expected to be the bill for a moving horizon and it is
   the cheapest thing in it.
 - **what does change is the widest square**, because pitching the horizon up
-  brings coarser ground into view. chequer9 compiles up to 96 pixel squares
-  rather than 64: 4,656 bodies against 2,080, which is the whole price and
-  it is paid in pages rather than T-states.
+  brings coarser ground into view. chequer9's board is half the screen at
+  its tallest, so it compiles up to 80 pixel squares rather than 64: 3,240
+  bodies against 2,080, which is the whole price and it is paid in pages
+  rather than T-states.
+- **and the index stops fitting in a byte.** 65 horizons at five bytes each
+  is 325, so the lookup is `ADD HL,HL` twice and an `ADD HL,DE` rather than
+  the `ADD A,A` chain a shorter table allowed.
 
 **A horizon is allowed when the screen's bottom row is the last row of its
-band**, because a band is drawn whole - 32 of the 39 rows in chequer9's
-range are, a horizon every scanline or two. Five bytes a horizon say which
+band**, because a band is drawn whole - 65 of the 78 rows in chequer9's
+range are. Near the horizon a band is a scanline or two, so nearly every row
+is allowed; it is the wide bands at the bottom of the screen, twenty
+scanlines to a band, that rule out runs of them. Five bytes a horizon say which
 chunk the bottom band is in, where in its table, how many scanlines, and
 the widest square, which is what the phase accumulator is seeded with; that
 last one is a different square at every horizon, so six shifts become a

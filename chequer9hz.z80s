@@ -6,135 +6,267 @@
 ; accumulator is seeded with. Five bytes a horizon, lowest
 ; horizon (the tallest board) first.
 
-CHQ4_HZ0:       EQU 77          ; the first horizon here
-CHQ4_HZN:       EQU 32          ; and how many there are
+CHQ4_HZ0:       EQU 95          ; the first horizon here
+CHQ4_HZN:       EQU 65          ; and how many there are
 
 chq4_hztab:
-        DEFB 0x20       ; horizon 77: 114 scanlines, widest square 95
-        DEFW chq4_band + 3
-        DEFB 114
-        DEFB 96
-        DEFB 0x20       ; horizon 78: 113 scanlines, widest square 94
-        DEFW chq4_band + 6
-        DEFB 113
-        DEFB 95
-        DEFB 0x20       ; horizon 79: 112 scanlines, widest square 93
-        DEFW chq4_band + 9
-        DEFB 112
-        DEFB 94
-        DEFB 0x20       ; horizon 80: 111 scanlines, widest square 92
-        DEFW chq4_band + 12
-        DEFB 111
-        DEFB 93
-        DEFB 0x20       ; horizon 81: 110 scanlines, widest square 91
-        DEFW chq4_band + 15
-        DEFB 110
-        DEFB 92
-        DEFB 0x20       ; horizon 83: 108 scanlines, widest square 90
-        DEFW chq4_band + 18
-        DEFB 108
-        DEFB 91
-        DEFB 0x20       ; horizon 84: 107 scanlines, widest square 89
-        DEFW chq4_band + 21
-        DEFB 107
-        DEFB 90
-        DEFB 0x20       ; horizon 85: 106 scanlines, widest square 88
-        DEFW chq4_band + 24
-        DEFB 106
-        DEFB 89
-        DEFB 0x20       ; horizon 86: 105 scanlines, widest square 87
-        DEFW chq4_band + 27
-        DEFB 105
-        DEFB 88
-        DEFB 0x22       ; horizon 87: 104 scanlines, widest square 86
+        DEFB 0x20       ; horizon 95: 96 scanlines, widest square 80
         DEFW chq4_band + 0
-        DEFB 104
-        DEFB 87
-        DEFB 0x22       ; horizon 89: 102 scanlines, widest square 85
-        DEFW chq4_band + 3
-        DEFB 102
-        DEFB 86
-        DEFB 0x22       ; horizon 90: 101 scanlines, widest square 84
-        DEFW chq4_band + 6
-        DEFB 101
-        DEFB 85
-        DEFB 0x22       ; horizon 91: 100 scanlines, widest square 83
-        DEFW chq4_band + 9
-        DEFB 100
-        DEFB 84
-        DEFB 0x22       ; horizon 92: 99 scanlines, widest square 82
-        DEFW chq4_band + 12
-        DEFB 99
-        DEFB 83
-        DEFB 0x22       ; horizon 93: 98 scanlines, widest square 81
-        DEFW chq4_band + 15
-        DEFB 98
-        DEFB 82
-        DEFB 0x22       ; horizon 95: 96 scanlines, widest square 80
-        DEFW chq4_band + 18
         DEFB 96
         DEFB 81
-        DEFB 0x22       ; horizon 96: 95 scanlines, widest square 79
-        DEFW chq4_band + 21
+        DEFB 0x20       ; horizon 96: 95 scanlines, widest square 79
+        DEFW chq4_band + 3
         DEFB 95
         DEFB 80
-        DEFB 0x22       ; horizon 97: 94 scanlines, widest square 78
-        DEFW chq4_band + 24
+        DEFB 0x20       ; horizon 97: 94 scanlines, widest square 78
+        DEFW chq4_band + 6
         DEFB 94
         DEFB 79
-        DEFB 0x22       ; horizon 98: 93 scanlines, widest square 77
-        DEFW chq4_band + 27
+        DEFB 0x20       ; horizon 98: 93 scanlines, widest square 77
+        DEFW chq4_band + 9
         DEFB 93
         DEFB 78
-        DEFB 0x22       ; horizon 99: 92 scanlines, widest square 76
-        DEFW chq4_band + 30
+        DEFB 0x20       ; horizon 99: 92 scanlines, widest square 76
+        DEFW chq4_band + 12
         DEFB 92
         DEFB 77
-        DEFB 0x24       ; horizon 101: 90 scanlines, widest square 75
-        DEFW chq4_band + 0
+        DEFB 0x20       ; horizon 101: 90 scanlines, widest square 75
+        DEFW chq4_band + 15
         DEFB 90
         DEFB 76
-        DEFB 0x24       ; horizon 102: 89 scanlines, widest square 74
-        DEFW chq4_band + 3
+        DEFB 0x20       ; horizon 102: 89 scanlines, widest square 74
+        DEFW chq4_band + 18
         DEFB 89
         DEFB 75
-        DEFB 0x24       ; horizon 103: 88 scanlines, widest square 73
-        DEFW chq4_band + 6
+        DEFB 0x20       ; horizon 103: 88 scanlines, widest square 73
+        DEFW chq4_band + 21
         DEFB 88
         DEFB 74
-        DEFB 0x24       ; horizon 104: 87 scanlines, widest square 72
-        DEFW chq4_band + 9
+        DEFB 0x20       ; horizon 104: 87 scanlines, widest square 72
+        DEFW chq4_band + 24
         DEFB 87
         DEFB 73
-        DEFB 0x24       ; horizon 105: 86 scanlines, widest square 71
-        DEFW chq4_band + 12
+        DEFB 0x20       ; horizon 105: 86 scanlines, widest square 71
+        DEFW chq4_band + 27
         DEFB 86
         DEFB 72
-        DEFB 0x24       ; horizon 107: 84 scanlines, widest square 70
-        DEFW chq4_band + 15
+        DEFB 0x20       ; horizon 107: 84 scanlines, widest square 70
+        DEFW chq4_band + 30
         DEFB 84
         DEFB 71
-        DEFB 0x24       ; horizon 108: 83 scanlines, widest square 69
-        DEFW chq4_band + 18
+        DEFB 0x20       ; horizon 108: 83 scanlines, widest square 69
+        DEFW chq4_band + 33
         DEFB 83
         DEFB 70
-        DEFB 0x24       ; horizon 109: 82 scanlines, widest square 68
-        DEFW chq4_band + 21
+        DEFB 0x22       ; horizon 109: 82 scanlines, widest square 68
+        DEFW chq4_band + 0
         DEFB 82
         DEFB 69
-        DEFB 0x24       ; horizon 110: 81 scanlines, widest square 67
-        DEFW chq4_band + 24
+        DEFB 0x22       ; horizon 110: 81 scanlines, widest square 67
+        DEFW chq4_band + 3
         DEFB 81
         DEFB 68
-        DEFB 0x24       ; horizon 111: 80 scanlines, widest square 66
-        DEFW chq4_band + 27
+        DEFB 0x22       ; horizon 111: 80 scanlines, widest square 66
+        DEFW chq4_band + 6
         DEFB 80
         DEFB 67
-        DEFB 0x24       ; horizon 113: 78 scanlines, widest square 65
-        DEFW chq4_band + 30
+        DEFB 0x22       ; horizon 113: 78 scanlines, widest square 65
+        DEFW chq4_band + 9
         DEFB 78
         DEFB 66
-        DEFB 0x24       ; horizon 114: 77 scanlines, widest square 64
-        DEFW chq4_band + 33
+        DEFB 0x22       ; horizon 114: 77 scanlines, widest square 64
+        DEFW chq4_band + 12
         DEFB 77
         DEFB 65
+        DEFB 0x22       ; horizon 115: 76 scanlines, widest square 63
+        DEFW chq4_band + 15
+        DEFB 76
+        DEFB 64
+        DEFB 0x22       ; horizon 116: 75 scanlines, widest square 62
+        DEFW chq4_band + 18
+        DEFB 75
+        DEFB 63
+        DEFB 0x22       ; horizon 118: 73 scanlines, widest square 61
+        DEFW chq4_band + 21
+        DEFB 73
+        DEFB 62
+        DEFB 0x22       ; horizon 119: 72 scanlines, widest square 60
+        DEFW chq4_band + 24
+        DEFB 72
+        DEFB 61
+        DEFB 0x22       ; horizon 120: 71 scanlines, widest square 59
+        DEFW chq4_band + 27
+        DEFB 71
+        DEFB 60
+        DEFB 0x22       ; horizon 121: 70 scanlines, widest square 58
+        DEFW chq4_band + 30
+        DEFB 70
+        DEFB 59
+        DEFB 0x22       ; horizon 122: 69 scanlines, widest square 57
+        DEFW chq4_band + 33
+        DEFB 69
+        DEFB 58
+        DEFB 0x22       ; horizon 124: 67 scanlines, widest square 56
+        DEFW chq4_band + 36
+        DEFB 67
+        DEFB 57
+        DEFB 0x22       ; horizon 125: 66 scanlines, widest square 55
+        DEFW chq4_band + 39
+        DEFB 66
+        DEFB 56
+        DEFB 0x24       ; horizon 126: 65 scanlines, widest square 54
+        DEFW chq4_band + 0
+        DEFB 65
+        DEFB 55
+        DEFB 0x24       ; horizon 127: 64 scanlines, widest square 53
+        DEFW chq4_band + 3
+        DEFB 64
+        DEFB 54
+        DEFB 0x24       ; horizon 128: 63 scanlines, widest square 52
+        DEFW chq4_band + 6
+        DEFB 63
+        DEFB 53
+        DEFB 0x24       ; horizon 130: 61 scanlines, widest square 51
+        DEFW chq4_band + 9
+        DEFB 61
+        DEFB 52
+        DEFB 0x24       ; horizon 131: 60 scanlines, widest square 50
+        DEFW chq4_band + 12
+        DEFB 60
+        DEFB 51
+        DEFB 0x24       ; horizon 132: 59 scanlines, widest square 49
+        DEFW chq4_band + 15
+        DEFB 59
+        DEFB 50
+        DEFB 0x24       ; horizon 133: 58 scanlines, widest square 48
+        DEFW chq4_band + 18
+        DEFB 58
+        DEFB 49
+        DEFB 0x24       ; horizon 134: 57 scanlines, widest square 47
+        DEFW chq4_band + 21
+        DEFB 57
+        DEFB 48
+        DEFB 0x24       ; horizon 136: 55 scanlines, widest square 46
+        DEFW chq4_band + 24
+        DEFB 55
+        DEFB 47
+        DEFB 0x24       ; horizon 137: 54 scanlines, widest square 45
+        DEFW chq4_band + 27
+        DEFB 54
+        DEFB 46
+        DEFB 0x24       ; horizon 138: 53 scanlines, widest square 44
+        DEFW chq4_band + 30
+        DEFB 53
+        DEFB 45
+        DEFB 0x24       ; horizon 139: 52 scanlines, widest square 43
+        DEFW chq4_band + 33
+        DEFB 52
+        DEFB 44
+        DEFB 0x24       ; horizon 140: 51 scanlines, widest square 42
+        DEFW chq4_band + 36
+        DEFB 51
+        DEFB 43
+        DEFB 0x24       ; horizon 142: 49 scanlines, widest square 41
+        DEFW chq4_band + 39
+        DEFB 49
+        DEFB 42
+        DEFB 0x24       ; horizon 143: 48 scanlines, widest square 40
+        DEFW chq4_band + 42
+        DEFB 48
+        DEFB 41
+        DEFB 0x24       ; horizon 144: 47 scanlines, widest square 39
+        DEFW chq4_band + 45
+        DEFB 47
+        DEFB 40
+        DEFB 0x24       ; horizon 145: 46 scanlines, widest square 38
+        DEFW chq4_band + 48
+        DEFB 46
+        DEFB 39
+        DEFB 0x24       ; horizon 146: 45 scanlines, widest square 37
+        DEFW chq4_band + 51
+        DEFB 45
+        DEFB 38
+        DEFB 0x24       ; horizon 148: 43 scanlines, widest square 36
+        DEFW chq4_band + 54
+        DEFB 43
+        DEFB 37
+        DEFB 0x2E       ; horizon 149: 42 scanlines, widest square 35
+        DEFW chq4_band + 0
+        DEFB 42
+        DEFB 36
+        DEFB 0x2E       ; horizon 150: 41 scanlines, widest square 34
+        DEFW chq4_band + 3
+        DEFB 41
+        DEFB 35
+        DEFB 0x2E       ; horizon 151: 40 scanlines, widest square 33
+        DEFW chq4_band + 6
+        DEFB 40
+        DEFB 34
+        DEFB 0x2E       ; horizon 152: 39 scanlines, widest square 32
+        DEFW chq4_band + 9
+        DEFB 39
+        DEFB 33
+        DEFB 0x2E       ; horizon 154: 37 scanlines, widest square 31
+        DEFW chq4_band + 12
+        DEFB 37
+        DEFB 32
+        DEFB 0x2E       ; horizon 155: 36 scanlines, widest square 30
+        DEFW chq4_band + 15
+        DEFB 36
+        DEFB 31
+        DEFB 0x2E       ; horizon 156: 35 scanlines, widest square 29
+        DEFW chq4_band + 18
+        DEFB 35
+        DEFB 30
+        DEFB 0x2E       ; horizon 157: 34 scanlines, widest square 28
+        DEFW chq4_band + 21
+        DEFB 34
+        DEFB 29
+        DEFB 0x2E       ; horizon 158: 33 scanlines, widest square 27
+        DEFW chq4_band + 24
+        DEFB 33
+        DEFB 28
+        DEFB 0x2E       ; horizon 160: 31 scanlines, widest square 26
+        DEFW chq4_band + 27
+        DEFB 31
+        DEFB 27
+        DEFB 0x2E       ; horizon 161: 30 scanlines, widest square 25
+        DEFW chq4_band + 30
+        DEFB 30
+        DEFB 26
+        DEFB 0x2E       ; horizon 162: 29 scanlines, widest square 24
+        DEFW chq4_band + 33
+        DEFB 29
+        DEFB 25
+        DEFB 0x2E       ; horizon 163: 28 scanlines, widest square 23
+        DEFW chq4_band + 36
+        DEFB 28
+        DEFB 24
+        DEFB 0x2E       ; horizon 164: 27 scanlines, widest square 22
+        DEFW chq4_band + 39
+        DEFB 27
+        DEFB 23
+        DEFB 0x2E       ; horizon 166: 25 scanlines, widest square 21
+        DEFW chq4_band + 42
+        DEFB 25
+        DEFB 22
+        DEFB 0x2E       ; horizon 167: 24 scanlines, widest square 20
+        DEFW chq4_band + 45
+        DEFB 24
+        DEFB 21
+        DEFB 0x2E       ; horizon 168: 23 scanlines, widest square 19
+        DEFW chq4_band + 48
+        DEFB 23
+        DEFB 20
+        DEFB 0x2E       ; horizon 169: 22 scanlines, widest square 18
+        DEFW chq4_band + 51
+        DEFB 22
+        DEFB 19
+        DEFB 0x2E       ; horizon 170: 21 scanlines, widest square 17
+        DEFW chq4_band + 54
+        DEFB 21
+        DEFB 18
+        DEFB 0x2E       ; horizon 172: 19 scanlines, widest square 16
+        DEFW chq4_band + 57
+        DEFB 19
+        DEFB 17

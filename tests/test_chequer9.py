@@ -4,11 +4,11 @@
     pip install z80
     python3 tests/test_chequer9.py
 
-The horizon runs from row 114 to row 77 - 40% of the screen to 59% -
-and every one of the 32 positions in between is drawn and compared
-whole, at several cameras each. One run bank serves all of them,
-because a square's width depends on the row's distance from the
-horizon and not on the row.
+The horizon runs from row 172 to row 95 - the board taking 10% of the
+screen to 50% of it - and every one of the 65 positions in between is
+drawn and compared whole, at a different camera each. One run bank
+serves all of them, because a square's width depends on the row's
+distance from the horizon and not on the row.
 
 The sweep also walks the horizon up and down rather than jumping about,
 because a board that shrinks leaves rows behind it that nothing else
@@ -18,7 +18,7 @@ import os
 import sys
 
 os.environ["HARRIER_MINP"] = "1"        # chequer9's viewport
-os.environ["HARRIER_HZ"] = "76"
+os.environ["HARRIER_HZ"] = "95"
 os.environ["HARRIER_CAMH"] = "308"
 os.environ["DESERT_ROWS"] = "20"  # a shorter band: the board can be tall
 
@@ -29,8 +29,7 @@ from sam import Sam
 CHUNKS = ("harness_chq9c0.asm", "harness_chq9c1.asm",   # the board's bank,
           "harness_chq9c2.asm",                         # widest bands first
           "harness_chq9msk0.asm", "harness_chq9msk1.asm",   # the swap masks
-          "harness_chq9c3.asm", "harness_chq9c4.asm",   # and the rest of
-          "harness_chq9c5.asm",                         # the bank
+          "harness_chq9c3.asm",                         # and the rest of it
           "harness_desert9_0.asm", "harness_desert9_1.asm",
           "harness_jetmove.asm")                        # and the pilot
 

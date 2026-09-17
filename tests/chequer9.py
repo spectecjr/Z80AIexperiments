@@ -6,20 +6,26 @@ with one thing added and one taken away: the horizon is a parameter,
 and the pilot is not here yet.
 
 WHICH HORIZONS ARE ALLOWED. A band of the board is drawn whole, so the
-bottom row of the screen has to be the last row of its band. 32 of the
-39 rows between 40% and 60% of the screen are, which is a horizon every
-scanline or two; they are numbered here as the Z80 numbers them, from
-the tallest board down, because that is the order the table in
-chequer9hz.z80s is in.
+bottom row of the screen has to be the last row of its band. 65 of the
+78 rows between 10% of the screen and 50% of it are - near the horizon
+a band is a scanline or two, so nearly every row is allowed, and it is
+the wide bands at the bottom of the screen that rule out runs of them.
+They are numbered here as the Z80 numbers them, from the tallest board
+down, because that is the order the table in chequer9hz.z80s is in.
 """
 import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 os.environ["HARRIER_MINP"] = "1"        # chequer9's viewport: the widest
-os.environ["HARRIER_HZ"] = "76"         # board it can have, which is the
-os.environ["HARRIER_CAMH"] = "308"
-os.environ["DESERT_ROWS"] = "20"  # a shorter band: the board can be tall      # one its bank was built for
+os.environ["HARRIER_HZ"] = "95"         # board it can have, which is the
+os.environ["HARRIER_CAMH"] = "308"      # one its bank was built for
+os.environ["DESERT_ROWS"] = "20"        # and a shorter band than
+                                        # chequer8's, so that the tallest
+                                        # board still fits the frame
+ROWS0, ROWS1 = 19, 96                   # the range of boards a horizon
+                                        # may give: 10% of the screen to
+                                        # 50% of it
 
 import chequer4 as C
 import desert as D
@@ -44,7 +50,7 @@ def horizons():
             run, last = 1, p
     bands.append(run)
     for n in bands:
-        if 77 <= rows <= 114:
+        if ROWS0 <= rows <= ROWS1:
             out.append(rows)
         rows -= n
     return out

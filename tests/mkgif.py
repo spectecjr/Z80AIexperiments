@@ -675,10 +675,11 @@ def chequer9(outdir, seconds=10):
     """chequer9, in a process of its own: its viewport is not the others'.
 
     The pilot flies round the four corners of the screen and the
-    horizon follows him - Space Harrier's trick, where the ground takes
-    between 40% and 59% of the display depending on how high the player
-    is. The board, the desert and the parallax all come off that same
-    position.
+    horizon follows him - Space Harrier's trick, where the ground rises
+    to meet the player. At the bottom of the screen he is low and the
+    board is 10% of the display; at the top of it he is high, looking
+    further down, and the board is half the display. The desert and the
+    parallax come off that same position.
     """
     import os
     import subprocess
@@ -694,7 +695,7 @@ def corners(t):
     """Round the four corners of the screen, a leg at a time, easing in
     and out of each so that the turns read as turns."""
     import math
-    legs = ((10, 8), (100, 8), (100, 88), (10, 88))     # byte, row
+    legs = ((10, 0), (100, 0), (100, 96), (10, 96))     # byte, row
     n = len(legs)
     k = int(t * n) % n
     u = t * n - int(t * n)
@@ -705,7 +706,12 @@ def corners(t):
 
 
 def _chequer9(outdir, seconds=10):
-    """chequer9 at its measured rate: 192,732 T-states a frame, 25 Hz."""
+    """chequer9 at its measured rate: 146,642 T-states a frame.
+
+    Its frames are held for what they cost, and they vary more than any
+    other demo here: 90,216 T-states at the 10% board, which is inside a
+    50 Hz frame, to 193,023 at the 50% one.
+    """
     import jetpack as J
     from mkchqdata import sam
     from mkhrdata import fog as fogtab
@@ -715,7 +721,6 @@ def _chequer9(outdir, seconds=10):
             ("harness_chq9c0.asm", "harness_chq9c1.asm",
              "harness_chq9c2.asm", "harness_chq9msk0.asm",
              "harness_chq9msk1.asm", "harness_chq9c3.asm",
-             "harness_chq9c4.asm", "harness_chq9c5.asm",
              "harness_desert9_0.asm", "harness_desert9_1.asm",
              "harness_jetmove.asm"), screens=(10, 12),
             chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"],
@@ -730,7 +735,7 @@ def _chequer9(outdir, seconds=10):
     frames, ts, last = [], [], 56
     for t in range(n):
         px, py = corners(t / n)
-        hz = min(m - 1, max(0, round((m - 1) * (88 - py) / 80)))
+        hz = min(m - 1, max(0, round((m - 1) * py / 96)))
         camx = (px - 56) * 40           # the board and the desert follow
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], (26 * t & 0xFFFF).to_bytes(2, "little"))

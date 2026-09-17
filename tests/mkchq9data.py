@@ -4,10 +4,10 @@
     python3 tests/mkchq9data.py
 
 chequer8's horizon is row 114 and stays there. chequer9's moves between
-row 114 and row 77 - 40% of the screen to 59% - so its tables are
-generated from the *deepest* board it can ever have, the one whose
-horizon is at row 76, and every shallower board is a piece of the same
-tables:
+row 172 and row 95 - the board taking 10% of the screen to 50% of it -
+so its tables are generated from the *deepest* board it can ever have,
+the one whose horizon is at row 95, and every shallower board is a
+piece of the same tables:
 
     the bands       a square's width at row y is
                     round(S * (y - horizon) / CAMH), a function of the
@@ -22,10 +22,10 @@ tables:
     the horizons    which of the 39 rows in the range are allowed, and
                     where each one enters the band table
 
-The widest square goes to 96 pixels rather than 64, because pitching
-the horizon up brings coarser ground into view: 4,656 compiled bodies
-in six chunks against chequer8's 2,080 in three, which is the price of
-a horizon that moves and is paid in memory.
+The widest square goes to 80 pixels rather than 64, because pitching
+the horizon up brings coarser ground into view - the board is half the
+screen at its tallest. That is what a horizon that moves costs, and it
+is paid in memory rather than in T-states.
 
 The desert and the pilot come out of here too, because they have to
 agree with the board about the viewport and about which pages are
@@ -41,18 +41,22 @@ import subprocess
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-VIEW = {"HARRIER_HZ": "76",     # the deepest board: 115 scanlines, of
-        "HARRIER_CAMH": "308",  # which 114 are ever drawn, and squares
-        "HARRIER_MINP": "1",    # up to 96 pixels wide at the bottom
-        "CHQ_SET": "9"}
+VIEW = {"HARRIER_HZ": "95",     # the deepest board: 96 scanlines, half
+        "HARRIER_CAMH": "308",  # the screen, and squares up to 80 pixels
+        "HARRIER_MINP": "1",    # wide at the bottom of it
+        "CHQ_SET": "9",
+        "CHQ_ROWS0": "19",      # and the range of boards a horizon may
+        "CHQ_ROWS1": "96"}      # give: 10% of the screen to 50%
 SAND = {"DESERT_ROWS": "20",    # a shorter band than chequer8's, so that
         "DESERT_SET": "9",      # the tallest board still fits the frame,
-        "DESERT_FIRST": "20"}   # and past the board's chunks in the map
+        "DESERT_FIRST": "16"}   # and past the board's chunks in the map
+JET = {"JET_FIRST": "20"}       # the pilot goes past the desert's
 
 
 def main():
     for script, extra in (("mkchq4data.py", {}), ("mkchq5body.py", {}),
-                          ("mkdesertdata.py", SAND), ("mkjetmove.py", {})):
+                          ("mkdesertdata.py", SAND),
+                          ("mkjetmove.py", JET)):
         env = dict(os.environ, **VIEW, **extra)
         r = subprocess.run([sys.executable, os.path.join(HERE, script)],
                            env=env)

@@ -21,7 +21,7 @@ des_t0:         ; this chunk's rows at phase 0, bottom upwards
         DEFW des_e10_0
         DEFW des_e9_0
         DEFW 0
-        DEFB 0x36       ; and the chunk that comes after
+        DEFB 0x32       ; and the chunk that comes after
 
 des_t1:         ; this chunk's rows at phase 1, bottom upwards
         DEFW des_e19_1
@@ -36,7 +36,7 @@ des_t1:         ; this chunk's rows at phase 1, bottom upwards
         DEFW des_e10_1
         DEFW des_e9_1
         DEFW 0
-        DEFB 0x36       ; and the chunk that comes after
+        DEFB 0x32       ; and the chunk that comes after
 
 des_t2:         ; this chunk's rows at phase 2, bottom upwards
         DEFW des_e19_2
@@ -51,7 +51,7 @@ des_t2:         ; this chunk's rows at phase 2, bottom upwards
         DEFW des_e10_2
         DEFW des_e9_2
         DEFW 0
-        DEFB 0x36       ; and the chunk that comes after
+        DEFB 0x32       ; and the chunk that comes after
 
 des_t3:         ; this chunk's rows at phase 3, bottom upwards
         DEFW des_e19_3
@@ -66,7 +66,7 @@ des_t3:         ; this chunk's rows at phase 3, bottom upwards
         DEFW des_e10_3
         DEFW des_e9_3
         DEFW 0
-        DEFB 0x36       ; and the chunk that comes after
+        DEFB 0x32       ; and the chunk that comes after
 
 des_e19_0:      ; row 19, phase 0: the DE it needs, where to go and where to stop
         DEFW 21845,des_r19_0 + 0,des_r19_0 + 181
