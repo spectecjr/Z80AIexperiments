@@ -169,7 +169,16 @@ in front - and one flat sky. He is 24x48 and 8,056 T-states.
 81%, with 109 of the GIF's 250 frames inside a 50 Hz one. The bank is 95K
 and 17K of lists, and the map is 24 pages. See `chequer9.md`.
 
-**The camera in the GIFs.** All five demos now share `stroll()` in
+**chequer9's camera is the pilot**, not `stroll()`: the board and the desert
+both come off his horizontal position, twenty world units a byte he moves.
+That is half what it was - the board's widest square went from 64 pixels to
+80 when the horizon started moving, and a square's width is exactly how far
+the bottom row slides for a whole square of camera, so the same coupling
+read faster over the same ground. At its peak the bottom row now travels
+**18.8 pixels a frame** where it travelled 37.5, which is still above the 12
+that read as a lurch below; a quarter of the original would put it at 9.4.
+
+**The camera in the GIFs.** All five earlier demos share `stroll()` in
 `tests/mkgif.py`: a slide of two and a half squares either way taking
 eight seconds, and a walk forwards of five squares a second. At the
 bottom of the screen the board slides sideways at most **3 pixels a

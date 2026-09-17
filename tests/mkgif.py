@@ -782,7 +782,16 @@ def _chequer9(outdir, seconds=10):
     for t in range(n):
         px, py = corners(t / n)
         hz = min(m - 1, max(0, round((m - 1) * py / 144)))
-        camx = (px - 56) * 40           # the board and the desert follow
+        camx = (px - 56) * 20           # the board and the desert follow,
+                                        # at half the rate they used to:
+                                        # the board's widest square went
+                                        # from 64 pixels to 80 when the
+                                        # horizon started moving, and a
+                                        # square's width is exactly how far
+                                        # the bottom row slides for a whole
+                                        # square of camera, so the same
+                                        # camera read faster over the same
+                                        # ground
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], (26 * t & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["cq9_hz"], bytes([hz]))
