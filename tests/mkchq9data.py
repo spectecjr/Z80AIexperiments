@@ -48,6 +48,10 @@ VIEW = {"HARRIER_HZ": "95",     # the deepest board: 96 scanlines, half
         "CHQ_ROWS0": "19",      # and the range of boards a horizon may
         "CHQ_ROWS1": "96",      # give: 10% of the screen to 50%
         "CHQ_DYNHZ": "1",       # every one of which gets a band list
+        "CHQ_SWAP": "0xBB",     # four colours on the board: what
+                                # exchanges its two carries a third bit,
+                                # so the odd rows of squares come out in a
+                                # darker pair
         "HARRIER_SKY": "15"}    # and a flat sky, in an index of its own:
                                 # nothing in this demo changes a palette
                                 # entry by scanline, because a SAM
@@ -58,7 +62,9 @@ SAND = {"DESERT_ROWS": "20",    # a shorter band than chequer8's, so that
         "DESERT_SKY": "15"}     # with a flat sky, in an index of its own
 JET = {"JET_FIRST": "22",       # the pilot goes past the desert's, and
        "JET_W": "24",           # is 24x48 here rather than the 32x96 the
-       "JET_H": "48"}           # demos with a pilot who stands still use
+       "JET_H": "48",           # demos with a pilot who stands still use
+       "JET_PAL": "board4"}     # and gives up a grey for the board's
+                                # second pair
 
 
 def main():

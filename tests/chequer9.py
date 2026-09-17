@@ -17,6 +17,10 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+os.environ["CHQ_SWAP"] = "0xBB"         # a board in four colours: the
+os.environ["JET_PAL"] = "board4"        # odd rows of squares are drawn in
+                                        # a second, darker pair, which is
+                                        # a band a square row
 os.environ["JET_W"] = "24"              # a smaller pilot: 24x48 where
 os.environ["JET_H"] = "48"              # chequer6 to 8 have him 32x96
 os.environ["HARRIER_SKY"] = "15"        # a flat sky, in an index of its

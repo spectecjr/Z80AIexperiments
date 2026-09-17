@@ -52,7 +52,7 @@ about which of those it is.
 | `chequer6` | **1 px** | **1 px** | **pixels** | **154,607** | 25 Hz, and a pilot in front of it |
 | `chequer7` | **1 px** | **1 px** | **pixels** | **201,281** | 25 Hz, and a city on the horizon |
 | `chequer8` | **1 px** | **1 px** | **pixels** | **190,655** | 25 Hz, 40% of the screen, a desert above it |
-| `chequer9` | **1 px** | **1 px** | **pixels** | **141,182** | 25 Hz, the horizon moving between 10% and 50%, and no palette at all |
+| `chequer9` | **1 px** | **1 px** | **pixels** | **141,182** | 25 Hz, a four colour board, the horizon moving between 10% and 50%, no palette changes at all |
 
 `chequer4` is the one to use: it draws chequer3's screen — the GIFs come
 out byte for byte identical — with the depth alternation in the pixels
@@ -144,9 +144,17 @@ walks the mask table the same way.
 **And there is no palette left.** The distance fade and the graded sky were
 both a copper, which on a SAM is a line interrupt a scanline: about a
 quarter of the frame, and interrupts enabled, which a routine drawing
-through `SP` cannot have. So the board is two flat greens, the sky is one
-blue in an index of its own, and the geometry carries the distance on its
-own. The pilot is 24x48 now, and 8,066 T-states.
+through `SP` cannot have. So the sky is one flat teal in an index of its
+own, and the geometry carries the distance.
+
+**The board is four colours, though, and they cost nothing.** The swap that
+exchanges its two is an XOR over six register values and one edge byte, so a
+swap constant carrying a third bit - `0xBB` rather than `0x33` - draws the
+odd rows of squares in two indices the even rows never use: a pale pair and
+a darker one, banding as they scroll in, which is Space Harrier's ground.
+Same T-states to the digit, two more palette indices, and sixteen is all
+there are - so the pilot's two dark greys are one grey now. He is 24x48 and
+8,066 T-states.
 
 85,994 / 141,182 / 194,389, and 191,352 in the worst frame of the sweep -
 81%, with 109 of the GIF's 250 frames inside a 50 Hz one. The bank is 95K

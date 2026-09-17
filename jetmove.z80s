@@ -37,34 +37,9 @@ jet_m0:         ; SP is the byte after his bottom right corner
         AND  0x0F
         LD   C,A
         PUSH BC
-        LD   DE,0xAA0A
+        LD   DE,0x3303
         PUSH DE
-        LD   DE,0xA0AA
-        PUSH DE
-        DEC  SP
-        POP  BC
-        LD   A,C
-        AND  0xF0
-        LD   C,A
-        PUSH BC
-        LD   HL,-123
-        ADD  HL,SP
-        LD   SP,HL
-        POP  BC
-        LD   A,C
-        AND  0x0F
-        LD   C,A
-        PUSH BC
-        DEC  SP
-        POP  BC
-        LD   C,0xAA
-        PUSH BC
-        DEC  SP
-        POP  BC
-        LD   A,C
-        AND  0xF0
-        LD   C,A
-        PUSH BC
+        LD   DE,0x3033
         PUSH DE
         DEC  SP
         POP  BC
@@ -82,7 +57,32 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH BC
         DEC  SP
         POP  BC
-        LD   C,0xAA
+        LD   C,0x33
+        PUSH BC
+        DEC  SP
+        POP  BC
+        LD   A,C
+        AND  0xF0
+        LD   C,A
+        PUSH BC
+        PUSH DE
+        DEC  SP
+        POP  BC
+        LD   A,C
+        AND  0xF0
+        LD   C,A
+        PUSH BC
+        LD   HL,-123
+        ADD  HL,SP
+        LD   SP,HL
+        POP  BC
+        LD   A,C
+        AND  0x0F
+        LD   C,A
+        PUSH BC
+        DEC  SP
+        POP  BC
+        LD   C,0x33
         PUSH BC
         DEC  SP
         POP  BC
@@ -98,7 +98,7 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH BC
         DEC  SP
         POP  BC
-        LD   C,0xAA
+        LD   C,0x33
         PUSH BC
         DEC  SP
         POP  BC
@@ -444,13 +444,13 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x0400
         PUSH DE
-        LD   DE,0xACCA
+        LD   DE,0x3CC3
         PUSH DE
         LD   DE,0x5455
         PUSH DE
-        LD   DE,0x45AC
+        LD   DE,0x453C
         PUSH DE
-        LD   DE,0xCA00
+        LD   DE,0xC300
         PUSH DE
         DEC  SP
         POP  BC
@@ -474,15 +474,15 @@ jet_m0:         ; SP is the byte after his bottom right corner
         AND  0xF0
         LD   C,A
         PUSH BC
-        LD   DE,0xA04A
+        LD   DE,0x3043
         PUSH DE
         LD   DE,0x5555
         PUSH DE
-        LD   DE,0x55A4
+        LD   DE,0x5534
         PUSH DE
         DEC  SP
         POP  BC
-        LD   C,0x0A
+        LD   C,0x03
         PUSH BC
         DEC  SP
         POP  BC
@@ -504,11 +504,11 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x0400
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
         PUSH DE
-        LD   DE,0xAA00
+        LD   DE,0x3300
         PUSH DE
         DEC  SP
         POP  BC
@@ -519,12 +519,12 @@ jet_m0:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x4055
         PUSH DE
-        LD   DE,0xA0AA
+        LD   DE,0x3033
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
-        LD   DE,0xAA0A
+        LD   DE,0x3303
         PUSH DE
         DEC  SP
         POP  BC
@@ -537,7 +537,7 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH DE
         LD   DE,0xB5BE
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
         LD   DE,0xEB5B
@@ -553,7 +553,7 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH DE
         LD   DE,0xB5BE
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
         LD   DE,0xEB5B
@@ -572,11 +572,11 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x54B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B45
         PUSH DE
@@ -590,11 +590,11 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x54B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B45
         PUSH DE
@@ -608,29 +608,11 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
-        PUSH DE
-        LD   DE,0x5B44
-        PUSH DE
-        LD   HL,-118
-        ADD  HL,SP
-        LD   SP,HL
-        POP  BC
-        LD   A,C
-        AND  0x0F
-        LD   C,A
-        PUSH BC
-        LD   DE,0x44B5
-        PUSH DE
-        LD   DE,0xBEAA
-        PUSH DE
-        LD   DE,0xAAAA
-        PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -644,29 +626,11 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
-        PUSH DE
-        LD   DE,0x5B44
-        PUSH DE
-        LD   HL,-118
-        ADD  HL,SP
-        LD   SP,HL
-        POP  BC
-        LD   A,C
-        AND  0x0F
-        LD   C,A
-        PUSH BC
-        LD   DE,0x44B5
-        PUSH DE
-        LD   DE,0xBEAA
-        PUSH DE
-        LD   DE,0xAAAA
-        PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -680,11 +644,47 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0x33EB
+        PUSH DE
+        LD   DE,0x5B44
+        PUSH DE
+        LD   HL,-118
+        ADD  HL,SP
+        LD   SP,HL
+        POP  BC
+        LD   A,C
+        AND  0x0F
+        LD   C,A
+        PUSH BC
+        LD   DE,0x44B5
+        PUSH DE
+        LD   DE,0xBE33
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0x33EB
+        PUSH DE
+        LD   DE,0x5B44
+        PUSH DE
+        LD   HL,-118
+        ADD  HL,SP
+        LD   SP,HL
+        POP  BC
+        LD   A,C
+        AND  0x0F
+        LD   C,A
+        PUSH BC
+        LD   DE,0x44B5
+        PUSH DE
+        LD   DE,0xBE33
         PUSH DE
         LD   DE,0xBBBB
         PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -698,29 +698,11 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
-        PUSH DE
-        LD   DE,0x5B44
-        PUSH DE
-        LD   HL,-118
-        ADD  HL,SP
-        LD   SP,HL
-        POP  BC
-        LD   A,C
-        AND  0x0F
-        LD   C,A
-        PUSH BC
-        LD   DE,0x44B5
-        PUSH DE
-        LD   DE,0xBEBA
-        PUSH DE
-        LD   DE,0xBBBB
-        PUSH DE
-        LD   DE,0xABEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -734,11 +716,11 @@ jet_m0:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEBA
+        LD   DE,0xBEB3
         PUSH DE
         LD   DE,0xBBBB
         PUSH DE
-        LD   DE,0xABEB
+        LD   DE,0x3BEB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -750,44 +732,62 @@ jet_m0:         ; SP is the byte after his bottom right corner
         AND  0x0F
         LD   C,A
         PUSH BC
-        LD   DE,0x44A5
+        LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0xBEB3
         PUSH DE
         LD   DE,0xBBBB
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3BEB
         PUSH DE
-        LD   DE,0x5A44
+        LD   DE,0x5B44
+        PUSH DE
+        LD   HL,-118
+        ADD  HL,SP
+        LD   SP,HL
+        POP  BC
+        LD   A,C
+        AND  0x0F
+        LD   C,A
+        PUSH BC
+        LD   DE,0x4435
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0xBBBB
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0x5344
         PUSH DE
         LD   HL,-118
         ADD  HL,SP
         LD   SP,HL
         LD   DE,0x0000
         PUSH DE
-        LD   DE,0xBBA4
+        LD   DE,0xBB34
         PUSH DE
         LD   DE,0x5555
         PUSH DE
-        LD   DE,0xAABB
+        LD   DE,0x33BB
         PUSH DE
         LD   DE,0x0000
         PUSH DE
         LD   HL,-120
         ADD  HL,SP
         LD   SP,HL
-        LD   DE,0x00AA
+        LD   DE,0x0033
         PUSH DE
-        LD   DE,0x9999
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAA00
+        LD   DE,0x3300
         PUSH DE
         LD   HL,-123
         ADD  HL,SP
         LD   SP,HL
-        LD   DE,0x9099
+        LD   DE,0x3033
         PUSH DE
-        LD   DE,0x9909
+        LD   DE,0x3303
         PUSH DE
         LD   HL,-124
         ADD  HL,SP
@@ -797,7 +797,7 @@ jet_m0:         ; SP is the byte after his bottom right corner
         AND  0x0F
         LD   C,A
         PUSH BC
-        LD   DE,0x9999
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
         DEC  SP
@@ -882,34 +882,9 @@ jet_m1:         ; SP is the byte after his bottom right corner
         AND  0x0F
         LD   C,A
         PUSH BC
-        LD   DE,0xAA0A
+        LD   DE,0x3303
         PUSH DE
-        LD   DE,0xA0AA
-        PUSH DE
-        DEC  SP
-        POP  BC
-        LD   A,C
-        AND  0xF0
-        LD   C,A
-        PUSH BC
-        LD   HL,-123
-        ADD  HL,SP
-        LD   SP,HL
-        POP  BC
-        LD   A,C
-        AND  0x0F
-        LD   C,A
-        PUSH BC
-        DEC  SP
-        POP  BC
-        LD   C,0xAA
-        PUSH BC
-        DEC  SP
-        POP  BC
-        LD   A,C
-        AND  0xF0
-        LD   C,A
-        PUSH BC
+        LD   DE,0x3033
         PUSH DE
         DEC  SP
         POP  BC
@@ -927,7 +902,32 @@ jet_m1:         ; SP is the byte after his bottom right corner
         PUSH BC
         DEC  SP
         POP  BC
-        LD   C,0xAA
+        LD   C,0x33
+        PUSH BC
+        DEC  SP
+        POP  BC
+        LD   A,C
+        AND  0xF0
+        LD   C,A
+        PUSH BC
+        PUSH DE
+        DEC  SP
+        POP  BC
+        LD   A,C
+        AND  0xF0
+        LD   C,A
+        PUSH BC
+        LD   HL,-123
+        ADD  HL,SP
+        LD   SP,HL
+        POP  BC
+        LD   A,C
+        AND  0x0F
+        LD   C,A
+        PUSH BC
+        DEC  SP
+        POP  BC
+        LD   C,0x33
         PUSH BC
         DEC  SP
         POP  BC
@@ -943,7 +943,7 @@ jet_m1:         ; SP is the byte after his bottom right corner
         PUSH BC
         DEC  SP
         POP  BC
-        LD   C,0xAA
+        LD   C,0x33
         PUSH BC
         DEC  SP
         POP  BC
@@ -1299,13 +1299,13 @@ jet_m1:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x4000
         PUSH DE
-        LD   DE,0xC0AA
+        LD   DE,0xC033
         PUSH DE
         LD   DE,0x4C55
         PUSH DE
         LD   DE,0x55C4
         PUSH DE
-        LD   DE,0xAA0C
+        LD   DE,0x330C
         PUSH DE
         LD   DE,0x0004
         PUSH DE
@@ -1320,11 +1320,11 @@ jet_m1:         ; SP is the byte after his bottom right corner
         AND  0x0F
         LD   C,A
         PUSH BC
-        LD   DE,0xAA54
+        LD   DE,0x3354
         PUSH DE
         LD   DE,0x5555
         PUSH DE
-        LD   DE,0x45AA
+        LD   DE,0x4533
         PUSH DE
         DEC  SP
         POP  BC
@@ -1339,12 +1339,12 @@ jet_m1:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x4000
         PUSH DE
-        LD   DE,0xA0AA
+        LD   DE,0x3033
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
-        LD   DE,0xAA0A
+        LD   DE,0x3303
         PUSH DE
         LD   DE,0x0004
         PUSH DE
@@ -1353,12 +1353,12 @@ jet_m1:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x4055
         PUSH DE
-        LD   DE,0xA0AA
+        LD   DE,0x3033
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
-        LD   DE,0xAA0A
+        LD   DE,0x3303
         PUSH DE
         LD   DE,0x5504
         PUSH DE
@@ -1369,7 +1369,7 @@ jet_m1:         ; SP is the byte after his bottom right corner
         PUSH DE
         LD   DE,0xB5BE
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
         LD   DE,0xEB5B
@@ -1383,7 +1383,7 @@ jet_m1:         ; SP is the byte after his bottom right corner
         PUSH DE
         LD   DE,0xB5BE
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
         LD   DE,0xEB5B
@@ -1400,11 +1400,11 @@ jet_m1:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x54B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B45
         PUSH DE
@@ -1424,11 +1424,11 @@ jet_m1:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x54B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B45
         PUSH DE
@@ -1448,35 +1448,11 @@ jet_m1:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
-        PUSH DE
-        LD   DE,0x5B44
-        PUSH DE
-        DEC  SP
-        POP  BC
-        LD   A,C
-        AND  0xF0
-        LD   C,A
-        PUSH BC
-        LD   HL,-117
-        ADD  HL,SP
-        LD   SP,HL
-        POP  BC
-        LD   A,C
-        AND  0x0F
-        LD   C,A
-        PUSH BC
-        LD   DE,0x44B5
-        PUSH DE
-        LD   DE,0xBEAA
-        PUSH DE
-        LD   DE,0xAAAA
-        PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -1496,35 +1472,11 @@ jet_m1:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
-        PUSH DE
-        LD   DE,0x5B44
-        PUSH DE
-        DEC  SP
-        POP  BC
-        LD   A,C
-        AND  0xF0
-        LD   C,A
-        PUSH BC
-        LD   HL,-117
-        ADD  HL,SP
-        LD   SP,HL
-        POP  BC
-        LD   A,C
-        AND  0x0F
-        LD   C,A
-        PUSH BC
-        LD   DE,0x44B5
-        PUSH DE
-        LD   DE,0xBEAA
-        PUSH DE
-        LD   DE,0xAAAA
-        PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -1544,11 +1496,59 @@ jet_m1:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0x33EB
+        PUSH DE
+        LD   DE,0x5B44
+        PUSH DE
+        DEC  SP
+        POP  BC
+        LD   A,C
+        AND  0xF0
+        LD   C,A
+        PUSH BC
+        LD   HL,-117
+        ADD  HL,SP
+        LD   SP,HL
+        POP  BC
+        LD   A,C
+        AND  0x0F
+        LD   C,A
+        PUSH BC
+        LD   DE,0x44B5
+        PUSH DE
+        LD   DE,0xBE33
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0x33EB
+        PUSH DE
+        LD   DE,0x5B44
+        PUSH DE
+        DEC  SP
+        POP  BC
+        LD   A,C
+        AND  0xF0
+        LD   C,A
+        PUSH BC
+        LD   HL,-117
+        ADD  HL,SP
+        LD   SP,HL
+        POP  BC
+        LD   A,C
+        AND  0x0F
+        LD   C,A
+        PUSH BC
+        LD   DE,0x44B5
+        PUSH DE
+        LD   DE,0xBE33
         PUSH DE
         LD   DE,0xBBBB
         PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -1568,35 +1568,11 @@ jet_m1:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
-        PUSH DE
-        LD   DE,0x5B44
-        PUSH DE
-        DEC  SP
-        POP  BC
-        LD   A,C
-        AND  0xF0
-        LD   C,A
-        PUSH BC
-        LD   HL,-117
-        ADD  HL,SP
-        LD   SP,HL
-        POP  BC
-        LD   A,C
-        AND  0x0F
-        LD   C,A
-        PUSH BC
-        LD   DE,0x44B5
-        PUSH DE
-        LD   DE,0xBEBA
-        PUSH DE
-        LD   DE,0xBBBB
-        PUSH DE
-        LD   DE,0xABEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -1616,11 +1592,11 @@ jet_m1:         ; SP is the byte after his bottom right corner
         PUSH BC
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEBA
+        LD   DE,0xBEB3
         PUSH DE
         LD   DE,0xBBBB
         PUSH DE
-        LD   DE,0xABEB
+        LD   DE,0x3BEB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -1638,15 +1614,39 @@ jet_m1:         ; SP is the byte after his bottom right corner
         AND  0x0F
         LD   C,A
         PUSH BC
-        LD   DE,0x44A5
+        LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0xBEB3
         PUSH DE
         LD   DE,0xBBBB
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3BEB
         PUSH DE
-        LD   DE,0x5A44
+        LD   DE,0x5B44
+        PUSH DE
+        DEC  SP
+        POP  BC
+        LD   A,C
+        AND  0xF0
+        LD   C,A
+        PUSH BC
+        LD   HL,-117
+        ADD  HL,SP
+        LD   SP,HL
+        POP  BC
+        LD   A,C
+        AND  0x0F
+        LD   C,A
+        PUSH BC
+        LD   DE,0x4435
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0xBBBB
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0x5344
         PUSH DE
         DEC  SP
         POP  BC
@@ -1659,29 +1659,29 @@ jet_m1:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x0000
         PUSH DE
-        LD   DE,0xBBA4
+        LD   DE,0xBB34
         PUSH DE
         LD   DE,0x5555
         PUSH DE
-        LD   DE,0xAABB
+        LD   DE,0x33BB
         PUSH DE
         LD   DE,0x0000
         PUSH DE
         LD   HL,-120
         ADD  HL,SP
         LD   SP,HL
-        LD   DE,0x00AA
+        LD   DE,0x0033
         PUSH DE
-        LD   DE,0x9999
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAA00
+        LD   DE,0x3300
         PUSH DE
         LD   HL,-123
         ADD  HL,SP
         LD   SP,HL
-        LD   DE,0x9099
+        LD   DE,0x3033
         PUSH DE
-        LD   DE,0x9909
+        LD   DE,0x3303
         PUSH DE
         LD   HL,-124
         ADD  HL,SP
@@ -1691,7 +1691,7 @@ jet_m1:         ; SP is the byte after his bottom right corner
         AND  0x0F
         LD   C,A
         PUSH BC
-        LD   DE,0x9999
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
         DEC  SP
@@ -1776,34 +1776,9 @@ jet_m2:         ; SP is the byte after his bottom right corner
         AND  0x0F
         LD   C,A
         PUSH BC
-        LD   DE,0xAA0A
+        LD   DE,0x3303
         PUSH DE
-        LD   DE,0xA0AA
-        PUSH DE
-        DEC  SP
-        POP  BC
-        LD   A,C
-        AND  0xF0
-        LD   C,A
-        PUSH BC
-        LD   HL,-123
-        ADD  HL,SP
-        LD   SP,HL
-        POP  BC
-        LD   A,C
-        AND  0x0F
-        LD   C,A
-        PUSH BC
-        DEC  SP
-        POP  BC
-        LD   C,0xAA
-        PUSH BC
-        DEC  SP
-        POP  BC
-        LD   A,C
-        AND  0xF0
-        LD   C,A
-        PUSH BC
+        LD   DE,0x3033
         PUSH DE
         DEC  SP
         POP  BC
@@ -1821,7 +1796,32 @@ jet_m2:         ; SP is the byte after his bottom right corner
         PUSH BC
         DEC  SP
         POP  BC
-        LD   C,0xAA
+        LD   C,0x33
+        PUSH BC
+        DEC  SP
+        POP  BC
+        LD   A,C
+        AND  0xF0
+        LD   C,A
+        PUSH BC
+        PUSH DE
+        DEC  SP
+        POP  BC
+        LD   A,C
+        AND  0xF0
+        LD   C,A
+        PUSH BC
+        LD   HL,-123
+        ADD  HL,SP
+        LD   SP,HL
+        POP  BC
+        LD   A,C
+        AND  0x0F
+        LD   C,A
+        PUSH BC
+        DEC  SP
+        POP  BC
+        LD   C,0x33
         PUSH BC
         DEC  SP
         POP  BC
@@ -1837,7 +1837,7 @@ jet_m2:         ; SP is the byte after his bottom right corner
         PUSH BC
         DEC  SP
         POP  BC
-        LD   C,0xAA
+        LD   C,0x33
         PUSH BC
         DEC  SP
         POP  BC
@@ -2180,13 +2180,13 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x0400
         PUSH DE
-        LD   DE,0xACCA
+        LD   DE,0x3CC3
         PUSH DE
         LD   DE,0x5455
         PUSH DE
-        LD   DE,0x45AC
+        LD   DE,0x453C
         PUSH DE
-        LD   DE,0xCA00
+        LD   DE,0xC300
         PUSH DE
         DEC  SP
         POP  BC
@@ -2210,15 +2210,15 @@ jet_m2:         ; SP is the byte after his bottom right corner
         AND  0xF0
         LD   C,A
         PUSH BC
-        LD   DE,0xA04A
+        LD   DE,0x3043
         PUSH DE
         LD   DE,0x5555
         PUSH DE
-        LD   DE,0x55A4
+        LD   DE,0x5534
         PUSH DE
         DEC  SP
         POP  BC
-        LD   C,0x0A
+        LD   C,0x03
         PUSH BC
         DEC  SP
         POP  BC
@@ -2241,11 +2241,11 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x0400
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
         PUSH DE
-        LD   DE,0xAA00
+        LD   DE,0x3300
         PUSH DE
         DEC  SP
         POP  BC
@@ -2260,30 +2260,13 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   HL,-116
         ADD  HL,SP
         LD   SP,HL
-        LD   DE,0x55A0
+        LD   DE,0x5530
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
         PUSH DE
-        LD   DE,0x0A55
-        PUSH DE
-        DEC  SP
-        POP  BC
-        LD   C,0x04
-        PUSH BC
-        LD   HL,-117
-        ADD  HL,SP
-        LD   SP,HL
-        LD   DE,0x54B5
-        PUSH DE
-        LD   DE,0xBEAA
-        PUSH DE
-        LD   DE,0xAAAA
-        PUSH DE
-        LD   DE,0xAAEB
-        PUSH DE
-        LD   DE,0x5B45
+        LD   DE,0x0355
         PUSH DE
         DEC  SP
         POP  BC
@@ -2294,11 +2277,11 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x54B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B45
         PUSH DE
@@ -2311,11 +2294,28 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x54B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
+        PUSH DE
+        LD   DE,0x5B45
+        PUSH DE
+        DEC  SP
+        POP  BC
+        LD   C,0x04
+        PUSH BC
+        LD   HL,-117
+        ADD  HL,SP
+        LD   SP,HL
+        LD   DE,0x54B5
+        PUSH DE
+        LD   DE,0xBE33
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B45
         PUSH DE
@@ -2330,11 +2330,11 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x54B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B45
         PUSH DE
@@ -2349,30 +2349,11 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
-        PUSH DE
-        LD   DE,0x5B44
-        PUSH DE
-        DEC  SP
-        POP  BC
-        LD   A,C
-        AND  0xF0
-        LD   C,A
-        PUSH BC
-        LD   HL,-117
-        ADD  HL,SP
-        LD   SP,HL
-        LD   DE,0x44B5
-        PUSH DE
-        LD   DE,0xBEAA
-        PUSH DE
-        LD   DE,0xAAAA
-        PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -2387,30 +2368,11 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
-        PUSH DE
-        LD   DE,0x5B44
-        PUSH DE
-        DEC  SP
-        POP  BC
-        LD   A,C
-        AND  0xF0
-        LD   C,A
-        PUSH BC
-        LD   HL,-117
-        ADD  HL,SP
-        LD   SP,HL
-        LD   DE,0x44B5
-        PUSH DE
-        LD   DE,0xBEAA
-        PUSH DE
-        LD   DE,0xAAAA
-        PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -2425,11 +2387,49 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0x33EB
+        PUSH DE
+        LD   DE,0x5B44
+        PUSH DE
+        DEC  SP
+        POP  BC
+        LD   A,C
+        AND  0xF0
+        LD   C,A
+        PUSH BC
+        LD   HL,-117
+        ADD  HL,SP
+        LD   SP,HL
+        LD   DE,0x44B5
+        PUSH DE
+        LD   DE,0xBE33
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0x33EB
+        PUSH DE
+        LD   DE,0x5B44
+        PUSH DE
+        DEC  SP
+        POP  BC
+        LD   A,C
+        AND  0xF0
+        LD   C,A
+        PUSH BC
+        LD   HL,-117
+        ADD  HL,SP
+        LD   SP,HL
+        LD   DE,0x44B5
+        PUSH DE
+        LD   DE,0xBE33
         PUSH DE
         LD   DE,0xBBBB
         PUSH DE
-        LD   DE,0xAAEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -2444,30 +2444,11 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEAA
+        LD   DE,0xBE33
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAAEB
-        PUSH DE
-        LD   DE,0x5B44
-        PUSH DE
-        DEC  SP
-        POP  BC
-        LD   A,C
-        AND  0xF0
-        LD   C,A
-        PUSH BC
-        LD   HL,-117
-        ADD  HL,SP
-        LD   SP,HL
-        LD   DE,0x44B5
-        PUSH DE
-        LD   DE,0xBEBA
-        PUSH DE
-        LD   DE,0xBBBB
-        PUSH DE
-        LD   DE,0xABEB
+        LD   DE,0x33EB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -2482,11 +2463,11 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xBEBA
+        LD   DE,0xBEB3
         PUSH DE
         LD   DE,0xBBBB
         PUSH DE
-        LD   DE,0xABEB
+        LD   DE,0x3BEB
         PUSH DE
         LD   DE,0x5B44
         PUSH DE
@@ -2499,15 +2480,34 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   HL,-117
         ADD  HL,SP
         LD   SP,HL
-        LD   DE,0x44A5
+        LD   DE,0x44B5
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0xBEB3
         PUSH DE
         LD   DE,0xBBBB
         PUSH DE
-        LD   DE,0xAAAA
+        LD   DE,0x3BEB
         PUSH DE
-        LD   DE,0x5A44
+        LD   DE,0x5B44
+        PUSH DE
+        DEC  SP
+        POP  BC
+        LD   A,C
+        AND  0xF0
+        LD   C,A
+        PUSH BC
+        LD   HL,-117
+        ADD  HL,SP
+        LD   SP,HL
+        LD   DE,0x4435
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0xBBBB
+        PUSH DE
+        LD   DE,0x3333
+        PUSH DE
+        LD   DE,0x5344
         PUSH DE
         DEC  SP
         POP  BC
@@ -2520,29 +2520,29 @@ jet_m2:         ; SP is the byte after his bottom right corner
         LD   SP,HL
         LD   DE,0x0000
         PUSH DE
-        LD   DE,0xBBA4
+        LD   DE,0xBB34
         PUSH DE
         LD   DE,0x5555
         PUSH DE
-        LD   DE,0xAABB
+        LD   DE,0x33BB
         PUSH DE
         LD   DE,0x0000
         PUSH DE
         LD   HL,-120
         ADD  HL,SP
         LD   SP,HL
-        LD   DE,0x00AA
+        LD   DE,0x0033
         PUSH DE
-        LD   DE,0x9999
+        LD   DE,0x3333
         PUSH DE
-        LD   DE,0xAA00
+        LD   DE,0x3300
         PUSH DE
         LD   HL,-123
         ADD  HL,SP
         LD   SP,HL
-        LD   DE,0x9099
+        LD   DE,0x3033
         PUSH DE
-        LD   DE,0x9909
+        LD   DE,0x3303
         PUSH DE
         LD   HL,-124
         ADD  HL,SP
@@ -2552,7 +2552,7 @@ jet_m2:         ; SP is the byte after his bottom right corner
         AND  0x0F
         LD   C,A
         PUSH BC
-        LD   DE,0x9999
+        LD   DE,0x3333
         PUSH DE
         PUSH DE
         DEC  SP

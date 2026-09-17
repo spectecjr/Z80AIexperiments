@@ -36,7 +36,16 @@ EQU = "chequer%sequ.z80s" % SET                         # viewport of
                                                         # set of its own
 C1 = 0x1111                     # the two colour indices, both nibbles
 C2 = 0x2222
-SWAP = 0x33                     # what exchanges them, one byte
+SWAP = int(os.environ.get("CHQ_SWAP", "0x33"), 0)
+                                # what exchanges them, one byte - and, if
+                                # it carries a bit the two colours do not,
+                                # what makes the board FOUR colours: the
+                                # rows of squares at an odd depth are
+                                # drawn in a second pair, so the
+                                # checkerboard comes in bands. It costs
+                                # two palette indices and not one
+                                # T-state, because the complement of a
+                                # value set was always there
 SKY = int(os.environ.get("HARRIER_SKY", 1))     # and the sky: the board's
                                 # own first colour where a copper grades
                                 # the two apart by scanline, and an index

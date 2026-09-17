@@ -905,14 +905,22 @@ and 2 and the sky was also 1 - one index meaning sky above the horizon and
 near ground below it, which only a per-scanline palette can pull off. With
 the palette sitting still they have to differ, so the sky gets index 15.
 
-**And what a baked fade would cost is also indices.** A band already picks
-its six values from a table, so a band drawn in a different pair of colours
-is the same number of T-states - the fade could come back in the pixels for
-nothing at run time. But MODE 4 has sixteen colours, the pilot uses twelve of
-them, the board two and the sky one: exactly one spare, which is one more
-step of depth and not a gradient. That is the whole argument, and it is why
-the answer to "can we have the fade back" is a palette budget rather than a
-frame budget.
+**And what colour in the pixels costs is indices, not T-states.** A band
+already picks its six values from a table, so a band drawn in a different
+pair of colours is the same number of T-states. chequer9 spends that on a
+**four colour board**: the mask byte a scanline is `0x00` or `CHQ4_SWAP`,
+the row loop XORs the row's last byte with it and takes bit 4 as the offset
+to the value set's complement - and the complement is that set XOR the same
+constant. So a swap constant with a third bit in it, `0xBB` rather than
+`0x33`, sends the odd rows of squares into two indices the even rows never
+use: `1 ^ 0xB = 10` and `2 ^ 0xB = 9`, the checker keeps its offset, and the
+whole row comes out a shade down. Space Harrier's banded ground, for no
+T-states and no table.
+
+What it costs is that MODE 4 has sixteen colours and they were all spoken
+for: the pilot had twelve, the board two, the sky one. His two dark greys
+are one grey now. **That is the shape of every colour decision on this
+machine** - the frame budget is not the binding one.
 
 ## Every CALL is a bet that the page underneath it has not moved
 

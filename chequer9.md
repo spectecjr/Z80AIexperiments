@@ -1,7 +1,7 @@
 # chequer9.z80s — design notes
 
-**A horizon that moves, over a board that does not tilt, in sixteen colours
-that never change.** The ground rises to meet the pilot — 10% of the screen
+**A horizon that moves, over a four colour board that does not tilt, in
+sixteen colours that never change.** The ground rises to meet the pilot — 10% of the screen
 when he is at the bottom of it, half the screen when he is at the top — and
 the square at the bottom of the screen is the same size at every one of the
 78 horizons, because a shallower board is the same picture with scanlines
@@ -12,7 +12,7 @@ fit inside a 50 Hz one.**
 
 | | T-states a frame | |
 |---|---|---|
-| **the board** | **28,670 … 124,064** | 19 scanlines (10%) to 96 (50%) |
+| **the board** | **28,670 … 124,064** | 19 scanlines (10%) to 96 (50%), four colours |
 | the swap mask | 1,354 … 6,205 | the deep board's, with the same rows left out |
 | **the desert** | **49,796** | 20 scanlines, two layers, by pixels |
 | **the pilot** | **8,066** | 24x48, anywhere on the screen |
@@ -96,10 +96,8 @@ which a routine drawing through `SP` with the stack pointed at the screen
 cannot have.
 
 So chequer9 does without: **one palette, sixteen colours, for the whole
-screen and every frame.** The board is two flat greens, the sky is one blue,
-and the only depth cue left is the geometry — which turns out to be enough,
-because the square sizes and the parity alternation do the work the fade was
-decorating.
+screen and every frame.** The sky is one flat teal and the board is four
+flat sands.
 
 It costs an index. The board's two colours are 1 and 2 and the sky *was* 1 —
 one index meaning sky above the horizon and near ground below it, which only
@@ -107,12 +105,44 @@ a per-scanline palette can pull off. With the palette sitting still they
 have to be different colours, so the sky is index 15 and `CHQ4_SKYC` comes
 with the viewport, alongside what the topmost run spills into.
 
-**What the fade would cost to have back.** Nothing at run time: a band
-already chooses its six values from a table, so a band drawn in a different
-pair of colours is the same number of T-states. It wants *indices*, and the
-count is tight — the pilot has 12 of the 16, the board 2, the sky 1, and
-exactly one is spare. One more step of depth colour would fit; a gradient
-would want the pilot to give up two or three.
+## Four colours on the board, for nothing at all
+
+A Space Harrier ground is not two colours, it is two *pairs*: the rows of
+squares alternate between a light pair and a darker one, so the board bands
+as it scrolls in. That is free here, and the reason is worth keeping:
+
+    the mask byte a scanline is 0x00, or CHQ4_SWAP where the depth is odd
+    the row loop XORs the row's last byte with it
+    and takes bit 4 of it as the offset to the value set's complement,
+    which is that set XOR the same constant
+
+**The swap was only ever an XOR**, applied to a set of six register values
+and one edge byte. Give it a third bit — `0xBB` rather than `0x33` — and the
+odd rows of squares come out in two indices the even rows never use:
+
+| | even rows of squares | odd rows |
+|---|---|---|
+| the light square | 1, pale cream | 9, a darker cream |
+| the dark square | 2, sand | 10, a darker sand |
+
+`1 ^ 0xB = 10` and `2 ^ 0xB = 9`, so a swapped row draws 10 where an even one
+draws 1: the checker keeps its offset and the whole row is a shade down.
+**Not one extra T-state** — 94,054 and 191,352 at the two ends, the same
+numbers the two colour board measured — and not one extra byte of table,
+because the complement of every value set was already there. All it costs is
+two palette indices.
+
+**Which is what made it expensive.** Sixteen colours is sixteen colours: the
+pilot had twelve, the board two and the sky one. Four for the board means
+the pilot gives one up, so his two dark greys — the helmet's shadow and the
+jetpack's body — became one grey at index 3, and 9 and 10 went to the board.
+At 24x48 that is a distinction of about four pixels.
+
+**And it is why the desert is red.** The band borrows the pilot's suit
+colours because there were never any indices for a desert of its own; with
+the board now sand, those reds are the loudest thing on the screen. Making
+it sand as well wants indices that do not exist — or a pilot who is not a
+person in a red suit.
 
 ## The pilot is 24x48 now
 
@@ -206,6 +236,9 @@ Twenty-four of the thirty-two pages `LMPR` can address, so a 512K SAM.
 
 ## What is left
 
+- **The desert borrows the pilot's suit** for its colours, which is why it
+  is red under a sand board. It wants three or four indices of its own and
+  there are none; the only source is the pilot, who is down to eleven.
 - **The desert is half the shallow frame** and does not vary with the
   horizon. Now that the board falls to 28,670 there is room to widen the
   band back towards chequer8's 32 scanlines — about 2,500 T-states a row.

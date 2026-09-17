@@ -28,8 +28,17 @@ AW, AH = 32, 96                 # chequer6, 7 and 8 have him at the size
 CLEAR = -1
 
 BLACK, SUIT_D, SUIT_M, SUIT_L = 0, 4, 5, 6
-SKIN, HELM, HELM_D = 7, 8, 9
-MET_D, MET_L, FLAME, CORE, SHINE = 10, 11, 12, 13, 14
+SKIN, HELM = 7, 8
+MET_L, FLAME, CORE, SHINE = 11, 12, 13, 14
+if os.environ.get("JET_PAL") == "board4":
+    MET_D = HELM_D = 3          # a board in four colours wants 9 and 10
+else:                           # for the pair it draws its odd rows of
+    MET_D, HELM_D = 10, 9       # squares in, so the pilot's two dark
+                                # greys become one and move to 3. Sixteen
+                                # colours is sixteen colours: his twelve,
+                                # the board's four and a flat sky do not
+                                # fit, and this is the one of his that
+                                # costs least
 
 
 def blank():
@@ -192,8 +201,10 @@ def lean(px, way):
 # kind that survives the trip through mkchqdata.sam unchanged.
 PAL = {BLACK: (0, 0, 0), SUIT_D: (2, 0, 0), SUIT_M: (6, 0, 0),
        SUIT_L: (7, 3, 3), SKIN: (7, 5, 3), HELM: (6, 6, 6),
-       HELM_D: (0, 2, 4), MET_D: (2, 2, 2), MET_L: (4, 4, 4),
-       FLAME: (7, 3, 1), CORE: (7, 7, 1), SHINE: (7, 7, 7)}
+       HELM_D: (0, 2, 4), MET_L: (4, 4, 4),
+       FLAME: (7, 3, 1), CORE: (7, 7, 1), SHINE: (7, 7, 7),
+       MET_D: (2, 2, 2)}       # last, so that where the two dark greys
+                               # are one index it is this grey they are
 
 
 def main():

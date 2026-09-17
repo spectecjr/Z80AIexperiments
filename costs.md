@@ -32,7 +32,7 @@ is what a horizon chooses.
 | `chequer6` | **143,643** steady, 159,388 changing pose | 25 | and a pilot in a jetpack over it, masked, three poses |
 | `chequer7` | 193,921 / **201,281** / 209,572 | 25 | and a two layer city scrolling on the horizon |
 | `chequer8` | 184,932 / **190,655** / 196,121 | 25 | board in the bottom 40%, a two layer desert on it, parallax off the camera |
-| `chequer9` | 85,994 / **141,182** / 194,389 | 25 | the horizon moves with the pilot, 10% to 50% of the screen, the board keeps its scale, no palette at all |
+| `chequer9` | 85,994 / **141,182** / 194,389 | 25 | the horizon moves with the pilot, 10% to 50% of the screen, a four colour board that keeps its scale, no palette changes at all |
 | `zarch` | 195,482 / **208,206** / 215,619 | 25 | Zarch's ground: a chequered plane, turning |
 | `chequer3` | 106,970 / **110,806** / 114,736 | **50** | the same picture, stripes in the palette |
 | `road2` | 104,750 / **112,736** / 118,270 | **50** | the Hang On road, 121% of the screen wide, bank paged |
@@ -51,7 +51,7 @@ where that horizon puts him:
 
 | | 19 rows of board (10%) | 96 rows (50%) |
 |---|---|---|
-| the board (`chq4_floor`) | 28,670 | **124,064** |
+| the board (`chq4_floor`), four colours | 28,670 | **124,064** |
 | the swap mask, gathered out of the deep board's | 1,354 | 6,205 |
 | the desert, 20 rows, two layers | 49,796 | 49,796 |
 | the pilot, 24x48, anywhere | 8,066 | 8,066 |
@@ -73,8 +73,16 @@ half of that trade is 17K of band lists, one per horizon, because which
 bands are drawn is no longer a contiguous slice of one table.
 
 And the desert, which does not know where the horizon is, is now the largest
-fixed cost in the frame: 49,796 against a board that falls to 28,670. See
-`chequer9.md`.
+fixed cost in the frame: 49,796 against a board that falls to 28,670.
+
+**The board's second pair of colours is free**, and worth recording as a
+number that did not move: 94,054 and 191,352 at the two ends of the horizon
+with two colours, and 94,054 and 191,352 with four. The swap that exchanges
+the board's two colours is an XOR over six register values and one edge
+byte, so a swap constant with a third bit in it (`0xBB` rather than `0x33`)
+draws the odd rows of squares in two indices the even rows never use - a
+band a square row, which is what Space Harrier's ground does. It costs two
+palette indices, and sixteen is all there are. See `chequer9.md`.
 
 ## 1a. The floors, measured
 

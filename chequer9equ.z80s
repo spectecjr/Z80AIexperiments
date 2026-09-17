@@ -4,7 +4,7 @@
 CHQ4_HZ:        EQU 95
 CHQ4_TOP:       EQU 96          ; first row with a board
 CHQ4_HAZE:      EQU 51          ; and what is above it
-CHQ4_SWAP:      EQU 51          ; exchanges the two colours
+CHQ4_SWAP:      EQU 187          ; exchanges the two colours
 CHQ4_ABOVE:     EQU 255          ; and what the top run spills
                                 ; into, haze or sky
 CHQ4_SKYC:      EQU 0xFFFF      ; the sky, both nibbles of

@@ -31,7 +31,13 @@ W, H, STRIDE = HR.W, HR.H, HR.STRIDE
 HZ, S, HAZE = HR.HZ, HR.S, HR.HAZE
 PTAB, ZTAB, TOP = HR.PTAB, HR.ZTAB, HR.TOP
 WIDTHS = sorted(set(p for p in PTAB if p))
-SWAP = 0x33                     # exchanges index 1 and 2 in both nibbles
+SWAP = int(os.environ.get("CHQ_SWAP", "0x33"), 0)
+                                # exchanges index 1 and 2 in both nibbles,
+                                # and with a third bit in it puts the odd
+                                # rows of squares in a second pair of
+                                # colours as well - a band a square row,
+                                # which is what Space Harrier's ground
+                                # does
 
 
 def line(p, phi, par):
