@@ -868,7 +868,7 @@ the bottom right corner.
 | one masked byte | `POP BC / LD A,C / AND m / OR v / LD C,A / PUSH BC` |
 | a step | `LD HL,-d / ADD HL,SP / LD SP,HL`, or `DEC SP` where the step is small enough |
 
-chequer9's pilot is **8,066 T-states at 24x48 and 16,116 at 32x96**, against
+chequer9's pilot is **8,056 T-states at 24x48 and 16,116 at 32x96**, against
 14,401 for the absolute version of the same 32x96 sprite - 12% for being
 able to put him anywhere on the screen, and no `DI` window longer than the
 sprite itself. He still moves in whole bytes sideways: a pixel of horizontal
@@ -930,8 +930,12 @@ for: the pilot had twelve, the board two, the sky one. His two dark greys
 are one grey now. **That is the shape of every colour decision on this
 machine** - the frame budget is not the binding one. It also pays twice: the
 desert band used to borrow the pilot's suit for its sand, and now takes the
-board's four instead - the rear layer in the pale pair, the near pyramids in
-the dark one, which is aerial perspective for nothing.
+board's four instead - the great pyramid in the pale pair, the dune field in
+the dark one, which is aerial perspective for nothing - plus two more the
+pilot gave up, for green palms and a deep shadow on the near pyramids. The
+sprite lost its flame's bright core and its white highlights to pay for
+them: about ten pixels at 24x48, against a horizon that now reads as the
+same place as the ground.
 
 ## Every CALL is a bet that the page underneath it has not moved
 

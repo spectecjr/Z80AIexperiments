@@ -755,15 +755,20 @@ def _chequer9(outdir, seconds=10):
     pal = {i: sam_rgb(sam(*rgb)) for i, rgb in J.PAL.items()}
     pal[1] = sam_rgb(sam(7, 7, 5))      # the board's four sands, as two
     pal[2] = sam_rgb(sam(6, 6, 4))      # PAIRS rather than four steps of
-    pal[10] = sam_rgb(sam(6, 4, 2))     # one ramp: 1 and 2 are a shade
-    pal[9] = sam_rgb(sam(5, 3, 1))      # apart, 9 and 10 are a shade apart,
-                                        # and the two pairs are far apart.
-                                        # What alternates across the screen
-                                        # is then quiet and what alternates
-                                        # INTO it is loud, which is what
-                                        # makes the board read as bands
-                                        # rolling towards the player rather
-                                        # than as columns running away.
+    pal[10] = sam_rgb(sam(7, 5, 3))     # one ramp: 1 and 2 are a shade
+    pal[9] = sam_rgb(sam(6, 4, 2))      # apart, 9 and 10 are a shade apart,
+                                        # and the pairs are a step and a
+                                        # half apart - enough that what
+                                        # alternates INTO the screen is
+                                        # louder than what alternates
+                                        # across it, which is what makes
+                                        # the board read as bands rolling
+                                        # towards the player rather than as
+                                        # columns running away, and no
+                                        # louder than that.
+    pal[13] = sam_rgb(sam(2, 5, 2))     # and the desert's own two: green
+    pal[14] = sam_rgb(sam(4, 2, 0))     # for the palms, and a deep shadow
+                                        # for the near pyramids
     pal[15] = sam_rgb(sam(2, 4, 4))     # under one flat teal sky
     n, m = int(seconds * 25), len(C9.HORIZONS)
     frames, ts, last = [], [], 56

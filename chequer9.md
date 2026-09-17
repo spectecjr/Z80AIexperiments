@@ -5,8 +5,8 @@ sixteen colours that never change.** The ground rises to meet the pilot — 10% 
 when he is at the bottom of it, half the screen when he is at the top — and
 the square at the bottom of the screen is the same size at every one of the
 78 horizons, because a shallower board is the same picture with scanlines
-left out rather than a squeezed copy of it. 141,182 T-states a frame on the
-demo's own path, 194,389 in its worst frame, and 191,352 in the worst frame
+left out rather than a squeezed copy of it. 141,242 T-states a frame on the
+demo's own path, 194,449 in its worst frame, and 191,412 in the worst frame
 of the sweep: **81% of a 25 Hz frame, and 109 of the 250 frames in the GIF
 fit inside a 50 Hz one.**
 
@@ -14,12 +14,12 @@ fit inside a 50 Hz one.**
 |---|---|---|
 | **the board** | **28,670 … 124,064** | 19 scanlines (10%) to 96 (50%), four colours |
 | the swap mask | 1,354 … 6,205 | the deep board's, with the same rows left out |
-| **the desert** | **49,796** | 20 scanlines, two layers, by pixels |
-| **the pilot** | **8,066** | 24x48, anywhere on the screen |
+| **the desert** | **49,866** | 20 scanlines, two layers, by pixels |
+| **the pilot** | **8,056** | 24x48, anywhere on the screen |
 | the sky he left behind | 1,158 … 5,021 | the rows of his old box above the band |
 | the rows the board gave up | 0 … 3,736 | when the horizon drops |
 | the horizon table and the flip | 613 | |
-| **`cq9_frame`** | **85,994 / 141,182 / 194,389** | **25 Hz** |
+| **`cq9_frame`** | **86,054 / 141,242 / 194,449** | **25 Hz** |
 
 Bit exact against `tests/chequer9.py` over 156 frames: every one of the 78
 horizons twice, walked up the screen and back down, with the camera moving
@@ -122,24 +122,30 @@ odd rows of squares come out in two indices the even rows never use:
 
 | | even rows of squares | odd rows |
 |---|---|---|
-| one square | 1, pale cream | 10, tan |
+| one square | 1, pale cream | 10, sand |
 | the next | 2, a shade down | 9, a shade down again |
 
 `1 ^ 0xB = 10` and `2 ^ 0xB = 9`, so a swapped row draws 10 where an even one
 draws 1: the checker keeps its offset and the whole row is a band darker.
-**Not one extra T-state** — 94,054 and 191,352 at the two ends, the same
-numbers the two colour board measured — and not one extra byte of table,
-because the complement of every value set was already there. All it costs is
-two palette indices.
+**Not one extra T-state** — the board measures 28,670 and 124,064 at the two
+ends of the horizon, which is what it measured in two colours — and not one
+extra byte of table, because the complement of every value set was already
+there. All it costs is two palette indices.
 
 **The four have to be two pairs, not four steps of one ramp.** Spread them
 evenly and the board reads as columns running away to the horizon rather
 than as bands rolling in, because in perspective a column of squares is one
 long converging wedge and a row of them is a thin strip: the eye follows the
 wedges. So the contrast has to go the other way round from the obvious — 1
-and 2 a shade apart, 9 and 10 a shade apart, and the two pairs far apart.
-Then what alternates across the screen is quiet, what alternates into it is
-loud, and the ground bands the way Space Harrier's does.
+and 2 a shade apart, 9 and 10 a shade apart, and the pairs a step and a half
+apart. Then what alternates across the screen is quiet, what alternates into
+it is loud, and the ground bands the way Space Harrier's does.
+
+It wants to be **only just** loud enough. In luma the four are 247 and 210,
+196 and 159: 37 across a band and 51 between them. Pull the pairs further
+apart than that and the ground starts to strobe as it scrolls, because the
+bands are a square row deep and a square row is three scanlines at the
+horizon.
 
 **Which is what made it expensive.** Sixteen colours is sixteen colours: the
 pilot had twelve, the board two and the sky one. Four for the board means
@@ -149,11 +155,19 @@ At 24x48 that is a distinction of about four pixels.
 
 **And it is what the desert is drawn in.** The band used to borrow the
 pilot's suit, because there were never any indices for a desert of its own;
-now there are four sands on the screen and it uses those — the rear layer in
-the pale pair, the front pyramids in the dark one, which is the aerial
+now there are four sands on the screen and it uses those — the great pyramid
+in the pale pair, the dune field in the dark one, which is the aerial
 perspective it wanted anyway and costs nothing, because they are indices the
-screen already has. The desert and the ground are the same four colours,
-which is why the horizon reads as one place.
+screen already has. The desert and the ground are the same colours, which is
+why the horizon reads as one place rather than as two pictures meeting.
+
+**Two more came out of the pilot for it.** The flame's bright core is the
+flame now and the white highlights are the helmet's own grey — about ten
+pixels of a 24x48 sprite — and 13 and 14 went to the band: green for the
+palms, and a deep brown for the near pyramids' shadow faces, which is what
+makes them read as standing *in front of* the great one rather than as more
+sand. Nine indices for the pilot, four for the board, six for the desert
+(four of them the board's), one sky.
 
 ## The pilot is 24x48 now
 
@@ -161,7 +175,7 @@ He is drawn from profiles — a list of (row, left, right) that the rows
 between interpolate — so he has a size rather than a bitmap: the numbers
 stay in the 32x96 grid they were tuned in and are scaled on the way past,
 with spans scaled by their ends so that a four pixel arm at 32 wide is three
-pixels at 24 and not two. **8,066 T-states against 16,116**, and a quarter
+pixels at 24 and not two. **8,056 T-states against 16,116**, and a quarter
 the pixels.
 
 He is still compiled as **one descending walk of `SP`** — rows bottom
@@ -203,18 +217,18 @@ puts them wherever the band happens to be.
 
 | | T-states a frame | |
 |---|---|---|
-| the rear layer | 35,866 | 20 rows, compiled, four phases |
-| the front layer | 13,930 | 33 spans |
-| **`c9_band`** | **49,796** | |
+| the rear layer | 37,238 | 20 rows, compiled, four phases |
+| the front layer | 12,628 … 13,930 | 33 spans, and more where one wraps the screen's edge |
+| **`c9_band`** | **49,866** | |
 
-Its colours are the board's now: the great pyramid, the dunes and the palms
-in the pale pair, the three near pyramids in the dark one. Five roles into
-four indices, so the dune shadows and the near pyramids' shadow faces share
-one — which is only visible where a near pyramid stands in front of a dune
-shadow, and its lit face is beside it.
+Its colours are the board's, plus two: the great pyramid and the dune crests
+in the pale pair, the dune field in the dark one, green palms, and the near
+pyramids with a lit face out of the board's sands against a deep brown
+shadow of their own. Six indices for the band, four of which the ground is
+already drawn in.
 
-At the 10% horizon the whole frame is 89,657 T-states and the desert is
-49,796 of it — **more than the board, the pilot and both fills together.**
+At the 10% horizon the whole frame is 89,717 T-states and the desert is
+49,866 of it — **more than the board, the pilot and both fills together.**
 It is the one thing in the frame that does not know where the horizon is.
 
 ## The map
@@ -256,7 +270,7 @@ Twenty-four of the thirty-two pages `LMPR` can address, so a 512K SAM.
 - **The desert is half the shallow frame** and does not vary with the
   horizon. Now that the board falls to 28,670 there is room to widen the
   band back towards chequer8's 32 scanlines — about 2,500 T-states a row.
-- **The frame varies by more than a factor of two**, 85,994 to 194,389. The
+- **The frame varies by more than a factor of two**, 86,054 to 194,449. The
   cheap end is inside a 50 Hz frame, so a demo that ran at 50 Hz while the
   pilot was low and dropped to 25 Hz as he climbed would be honest, and the
   line interrupt makes that switch rather than a guess.

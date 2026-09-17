@@ -52,7 +52,7 @@ about which of those it is.
 | `chequer6` | **1 px** | **1 px** | **pixels** | **154,607** | 25 Hz, and a pilot in front of it |
 | `chequer7` | **1 px** | **1 px** | **pixels** | **201,281** | 25 Hz, and a city on the horizon |
 | `chequer8` | **1 px** | **1 px** | **pixels** | **190,655** | 25 Hz, 40% of the screen, a desert above it |
-| `chequer9` | **1 px** | **1 px** | **pixels** | **141,182** | 25 Hz, a four colour board, the horizon moving between 10% and 50%, no palette changes at all |
+| `chequer9` | **1 px** | **1 px** | **pixels** | **141,242** | 25 Hz, a four colour board, the horizon moving between 10% and 50%, no palette changes at all |
 
 `chequer4` is the one to use: it draws chequer3's screen — the GIFs come
 out byte for byte identical — with the depth alternation in the pixels
@@ -157,13 +157,15 @@ column of squares in perspective is a long converging wedge and a row of
 them is a thin strip - spread them evenly and the eye follows the wedges
 instead of the bands.
 
-Same T-states to the digit, two more palette indices, and sixteen is all
-there are: the pilot's two dark greys are one grey now, and the desert band,
-which used to borrow his suit for its sand, is drawn in the board's own four
-instead - the rear layer pale, the near pyramids dark, which is the aerial
-perspective it wanted anyway. He is 24x48 and 8,066 T-states.
+Same T-states to the digit, and what it costs is palette. Sixteen is all
+there are, so the pilot pays for the whole scene: his two dark greys are one
+grey, his flame's bright core is the flame, his white highlights are the
+helmet's grey. Nine indices for him, four for the board, six for the desert
+- four of them the board's, so the horizon reads as the same place as the
+ground, plus green palms and a deep brown shadow that puts the near pyramids
+in front - and one flat sky. He is 24x48 and 8,056 T-states.
 
-85,994 / 141,182 / 194,389, and 191,352 in the worst frame of the sweep -
+86,054 / 141,242 / 194,449, and 191,412 in the worst frame of the sweep -
 81%, with 109 of the GIF's 250 frames inside a 50 Hz one. The bank is 95K
 and 17K of lists, and the map is 24 pages. See `chequer9.md`.
 

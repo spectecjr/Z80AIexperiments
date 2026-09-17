@@ -32,13 +32,17 @@ SKIN, HELM = 7, 8
 MET_L, FLAME, CORE, SHINE = 11, 12, 13, 14
 if os.environ.get("JET_PAL") == "board4":
     MET_D = HELM_D = 3          # a board in four colours wants 9 and 10
-else:                           # for the pair it draws its odd rows of
-    MET_D, HELM_D = 10, 9       # squares in, so the pilot's two dark
-                                # greys become one and move to 3. Sixteen
-                                # colours is sixteen colours: his twelve,
-                                # the board's four and a flat sky do not
-                                # fit, and this is the one of his that
-                                # costs least
+    CORE = FLAME                # for the pair it draws its odd rows of
+    SHINE = HELM                # squares in, and the desert wants 13 and
+else:                           # 14 for a lit face and a shadow of its
+    MET_D, HELM_D = 10, 9       # own. Sixteen colours is sixteen
+                                # colours, so the pilot pays: his two
+                                # dark greys are one grey at 3, the
+                                # flame's bright core is the flame, and
+                                # the white highlights are the helmet's
+                                # own grey. Nine indices for a 24x48
+                                # sprite, and about ten pixels of him
+                                # know the difference
 
 
 def blank():
@@ -199,12 +203,14 @@ def lean(px, way):
 # A SAM colour is two bits a gun and a bright bit the three of them
 # share, so a triple whose parts are all even, or all odd, is the only
 # kind that survives the trip through mkchqdata.sam unchanged.
-PAL = {BLACK: (0, 0, 0), SUIT_D: (2, 0, 0), SUIT_M: (6, 0, 0),
-       SUIT_L: (7, 3, 3), SKIN: (7, 5, 3), HELM: (6, 6, 6),
-       HELM_D: (0, 2, 4), MET_L: (4, 4, 4),
-       FLAME: (7, 3, 1), CORE: (7, 7, 1), SHINE: (7, 7, 7),
-       MET_D: (2, 2, 2)}       # last, so that where the two dark greys
-                               # are one index it is this grey they are
+PAL = {}
+for _i, _rgb in ((HELM_D, (0, 2, 4)), (CORE, (7, 7, 1)), (SHINE, (7, 7, 7)),
+                 (BLACK, (0, 0, 0)), (SUIT_D, (2, 0, 0)), (SUIT_M, (6, 0, 0)),
+                 (SUIT_L, (7, 3, 3)), (SKIN, (7, 5, 3)), (MET_L, (4, 4, 4)),
+                 (HELM, (6, 6, 6)), (FLAME, (7, 3, 1)), (MET_D, (2, 2, 2))):
+    PAL[_i] = _rgb             # the ones that can be merged away first,
+                               # so that where two share an index it is
+                               # the keeper's colour they share
 
 
 def main():

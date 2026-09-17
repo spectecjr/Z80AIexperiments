@@ -55,15 +55,21 @@ SKY = int(os.environ.get("DESERT_SKY", 1))      # the board's own sky
                                 # rest of the sky - or an index of its own
                                 # where the sky is flat. The rest are
 if os.environ.get("DESERT_PAL") == "board4":
-    LIT, SAND, DARK = 1, 2, 9   # the board's own four sands, where the
-    FLIT, FDARK = 10, 9         # board has four: the rear layer in the
-                                # pale pair the near rows of squares are
-                                # drawn in and the front pyramids in the
-                                # darker pair from the far rows, which is
-                                # aerial perspective and costs nothing
-                                # because they are indices the screen
-                                # already has
+    LIT, SAND, DARK = 1, 2, 9   # the board's own four sands, so that the
+    FLIT, FDARK = 10, 14        # ground and the horizon are one place -
+    PALM = 13                   # plus two the pilot gave up. The rear
+                                # layer is the board's pale pair and its
+                                # dune field the dark one, which is
+                                # aerial perspective for nothing; the
+                                # near pyramids get a deep shadow of
+                                # their own, which is what makes them
+                                # read as being in front rather than as
+                                # more sand; and the palms are green,
+                                # because a desert with something growing
+                                # in it is a desert and not a beach
 else:
+    PALM = 5                    # and where they are not, the palms are
+                                # the dune field's own colour
     LIT, SAND, DARK = 7, 6, 5   # the pilot's, which are fixed. The great
     FLIT, FDARK = 12, 4         # pyramid is pale sand with a dull rose
                                 # shadow - aerial perspective, the far
@@ -128,11 +134,11 @@ def pyramid(px, cx, half, high, base, lit, shade, course=0):
 def palm(px, x, h):
     """A palm: a trunk and four fronds, in silhouette."""
     for r in range(GROUND, GROUND - h, -1):
-        px[r][x % PERIOD] = DARK
+        px[r][x % PERIOD] = PALM
     top = GROUND - h
     for d, k in ((-3, 1), (-2, 0), (2, 0), (3, 1)):
-        px[(top + k) % ROWS][(x + d) % PERIOD] = DARK
-        px[top % ROWS][(x + d // 2) % PERIOD] = DARK
+        px[(top + k) % ROWS][(x + d) % PERIOD] = PALM
+        px[top % ROWS][(x + d // 2) % PERIOD] = PALM
 
 
 def rear():
@@ -224,7 +230,7 @@ def main(path):
     import jetpack as J
     pal = {SKY: (30, 90, 200)}
     pal.update({i: tuple(v * 255 // 7 for v in J.PAL[i])
-                for i in (LIT, SAND, DARK, FLIT, FDARK)})
+                for i in (LIT, SAND, DARK, FLIT, FDARK, PALM)})
     n, z = 6, 3
     im = Image.new("RGB", (PERIOD * z, (ROWS + 1) * z * n))
     p = im.load()

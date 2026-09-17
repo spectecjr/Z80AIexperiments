@@ -32,7 +32,7 @@ is what a horizon chooses.
 | `chequer6` | **143,643** steady, 159,388 changing pose | 25 | and a pilot in a jetpack over it, masked, three poses |
 | `chequer7` | 193,921 / **201,281** / 209,572 | 25 | and a two layer city scrolling on the horizon |
 | `chequer8` | 184,932 / **190,655** / 196,121 | 25 | board in the bottom 40%, a two layer desert on it, parallax off the camera |
-| `chequer9` | 85,994 / **141,182** / 194,389 | 25 | the horizon moves with the pilot, 10% to 50% of the screen, a four colour board that keeps its scale, no palette changes at all |
+| `chequer9` | 86,054 / **141,242** / 194,449 | 25 | the horizon moves with the pilot, 10% to 50% of the screen, a four colour board that keeps its scale, no palette changes at all |
 | `zarch` | 195,482 / **208,206** / 215,619 | 25 | Zarch's ground: a chequered plane, turning |
 | `chequer3` | 106,970 / **110,806** / 114,736 | **50** | the same picture, stripes in the palette |
 | `road2` | 104,750 / **112,736** / 118,270 | **50** | the Hang On road, 121% of the screen wide, bank paged |
@@ -53,15 +53,15 @@ where that horizon puts him:
 |---|---|---|
 | the board (`chq4_floor`), four colours | 28,670 | **124,064** |
 | the swap mask, gathered out of the deep board's | 1,354 | 6,205 |
-| the desert, 20 rows, two layers | 49,796 | 49,796 |
-| the pilot, 24x48, anywhere | 8,066 | 8,066 |
+| the desert, 20 rows, two layers | 49,866 | 49,866 |
+| the pilot, 24x48, anywhere | 8,056 | 8,056 |
 | the sky he left behind | 1,158 | 5,021 |
 | the rows the board gave up, when the horizon drops | 0 … 3,736 | 0 |
 | the horizon table and the flip | 613 | 613 |
-| **the frame** | **89,657** | **193,765** |
+| **the frame** | **89,717** | **193,825** |
 
 The pilot is the same number at both ends because he is compiled as one walk
-of `SP` and draws every row wherever he is: **8,066 at 24x48, against 16,116
+of `SP` and draws every row wherever he is: **8,056 at 24x48, against 16,116
 at 32x96** and chequer8's 14,401 for a 32x96 pilot who cannot move at all.
 
 The mask is where the geometry shows up. A shallow board is the deep board
@@ -73,18 +73,20 @@ half of that trade is 17K of band lists, one per horizon, because which
 bands are drawn is no longer a contiguous slice of one table.
 
 And the desert, which does not know where the horizon is, is now the largest
-fixed cost in the frame: 49,796 against a board that falls to 28,670.
+fixed cost in the frame: 49,866 against a board that falls to 28,670.
 
 **The board's second pair of colours is free**, and worth recording as a
-number that did not move: 94,054 and 191,352 at the two ends of the horizon
-with two colours, and 94,054 and 191,352 with four. The swap that exchanges
+number that did not move: 28,670 and 124,064 at the two ends of the horizon
+with two colours, and 28,670 and 124,064 with four. The swap that exchanges
 the board's two colours is an XOR over six register values and one edge
 byte, so a swap constant with a third bit in it (`0xBB` rather than `0x33`)
 draws the odd rows of squares in two indices the even rows never use - a
 band a square row, which is what Space Harrier's ground does. It costs two
-palette indices, and sixteen is all there are: the pilot's two dark greys
-are one grey now, and the desert band, which used to borrow his suit,
-is drawn in the board's four sands instead. See `chequer9.md`.
+palette indices, and sixteen is all there are - so the pilot pays: his two
+dark greys are one grey, his flame's bright core is the flame and his white
+highlights are the helmet's grey, which leaves him nine. The board has four,
+the desert six (four of them the board's, plus green palms and a deep shadow
+for the near pyramids), and the sky one. See `chequer9.md`.
 
 ## 1a. The floors, measured
 
