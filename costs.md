@@ -27,7 +27,7 @@ version would have to give up.
 | `chequer5` | 109,825 / **113,659** / 117,621 | **50** | the same routine, board to the horizon, bank paged |
 | `chequer6` | **143,643** steady, 159,388 changing pose | 25 | and a pilot in a jetpack over it, masked, three poses |
 | `chequer7` | 193,921 / **201,281** / 209,572 | 25 | and a two layer city scrolling on the horizon |
-| `chequer8` | 184,902 / **190,678** / 196,373 | 25 | board in the bottom 40%, a two layer desert on it, parallax off the camera |
+| `chequer8` | 184,932 / **190,655** / 196,121 | 25 | board in the bottom 40%, a two layer desert on it, parallax off the camera |
 | `zarch` | 195,482 / **208,206** / 215,619 | 25 | Zarch's ground: a chequered plane, turning |
 | `chequer3` | 106,970 / **110,806** / 114,736 | **50** | the same picture, stripes in the palette |
 | `road2` | 104,750 / **112,736** / 118,270 | **50** | the Hang On road, 121% of the screen wide, bank paged |

@@ -9,8 +9,9 @@
 ; lengths of depth; the front layer three smaller pyramids at 16, which
 ; pass in front of them. Both offsets are worked out from the camera's
 ; own camx, so the scenery moves with the board rather than drifting
-; past it: at the camera's fastest that is a pixel a frame for the front
-; layer and a pixel every three for the rear.
+; past it: at the camera's fastest that is two pixels a frame for the
+; front layer and one for the rear, the front being the same number
+; shifted one place less.
 ;
 ; THE REAR LAYER IS COMPILED, one run of PUSHes a (row, phase), in
 ; chunks of its own. A run is two whole periods of its row, so entering
@@ -54,18 +55,16 @@ c9_band:
 ;--- where the two layers stand, from the camera ------------------
 
         LD   HL,(chq4_camx)     ; a layer at depth Z moves FOCAL * camx / Z
-        SRA  H                  ; pixels when the camera slides, so a depth
-        RR   L                  ; of 16 focal lengths is a shift of four
-        SRA  H                  ; and one of 64 is a shift of six - and the
-        RR   L                  ; scenery is tied to the board under it
-        SRA  H                  ; rather than drifting past on a counter
-        RR   L
-        SRA  H
-        RR   L
-        LD   A,L
-        LD   (c9_near),A
-        SRA  H
-        RR   L
+        LD   D,H                ; pixels when the camera slides, so where
+        LD   E,L                ; the layers stand is camx divided by their
+        ADD  HL,HL              ; depth in focal lengths - 10.7 for the
+        ADD  HL,DE              ; front one and 21.3 for the rear, which is
+        DUP  5                  ; three times camx shifted five places and
+        SRA  H                  ; six. The front layer is the same number
+        RR   L                  ; one shift less, so it is exactly twice
+        EDUP                    ; the rear however the camera moves, and
+        LD   A,L                ; the scenery is tied to the board under it
+        LD   (c9_near),A        ; rather than drifting past on a counter
         SRA  H
         RR   L
         LD   A,L

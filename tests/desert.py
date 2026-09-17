@@ -9,16 +9,17 @@ of the screen - and the sky, holding two layers that scroll at
 different speeds:
 
     the REAR layer   sky, the great pyramid, a dune field, palms and
-                     rocks, at 64 focal lengths of depth
-    the FRONT layer  three smaller pyramids standing nearer, at 16
+                     rocks, at 21 focal lengths of depth
+    the FRONT layer  three smaller pyramids standing nearer, at 10.7 -
+                     half the depth, so exactly twice the motion
 
 BOTH ARE DRIVEN BY THE CAMERA, not by a frame counter: a layer at depth
 Z shifts by FOCAL * camx / Z pixels when the camera slides sideways, so
-the offsets are the camera's own camx shifted right by six and by four.
-Slide the camera right and the board's squares go left, the pyramids go
-left more slowly, and the great one behind them more slowly still. At
-the camera's fastest that is a pixel a frame for the front layer and a
-pixel every three frames for the rear.
+the offsets are the camera's own camx, tripled and shifted right by six
+and by five. Slide the camera right and the board's squares go left, the
+front pyramids go left half as fast, and the great one behind them half
+as fast again. At the camera's fastest that is two pixels a frame for
+the front layer and one for the rear.
 
 THE FRONT PYRAMIDS OVERLAP THE REAR LAYER, which is the whole point of
 them: something passing in front of something else at a different rate
@@ -54,16 +55,18 @@ FLIT, FDARK = 12, 4             # pyramid is pale sand with a dull rose
                                 # darkest red there is, because nearer
                                 # means more contrast, not more detail
 
-FAR_SHIFT, NEAR_SHIFT = 6, 4    # how deep the two layers are, as a shift:
-                                # a layer at depth Z moves FOCAL * camx / Z
-                                # pixels when the camera slides, so depths
-                                # of 64 and 16 focal lengths - 14,144 and
-                                # 3,536 world units - are a shift of six
-                                # and a shift of four. At the camera's
-                                # fastest that is a pixel a frame for the
-                                # near layer and a pixel every three for
-                                # the far one, which is where those rates
-                                # came from in the first place
+FAR_SHIFT, NEAR_SHIFT = 6, 5    # how deep the two layers are: a layer at
+                                # depth Z moves FOCAL * camx / Z pixels
+                                # when the camera slides, and camx times
+                                # three shifted by six and by five is a
+                                # depth of 4,715 and 2,357 world units -
+                                # 21.3 and 10.7 focal lengths. At the
+                                # camera's fastest, twenty world units a
+                                # frame, that is a pixel a frame for the
+                                # rear layer and two for the front, and
+                                # the front is exactly twice the rear
+                                # because it is the same number shifted
+                                # one place less
 GROUND = 24                     # the rear layer's own horizon, in rows
 
 
@@ -78,7 +81,7 @@ def offsets(camx):
 
     The Z80 keeps the low byte of each, so this does too.
     """
-    return (camx >> FAR_SHIFT) & 0xFF, (camx >> NEAR_SHIFT) & 0xFF
+    return (3 * camx >> FAR_SHIFT) & 0xFF, (3 * camx >> NEAR_SHIFT) & 0xFF
 
 
 def lcg(s):

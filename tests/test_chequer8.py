@@ -70,9 +70,9 @@ def main():
     n = len(poses)
     print("  %-40s %4d camera positions, %d mismatches"
           % ("Z80 against the model, pixels", n, bad))
-    print("  %-40s %d of the far layer, %d of the near"
-          % ("periods of parallax swept", 16384 >> T.FAR_SHIFT >> 8,
-             16384 >> T.NEAR_SHIFT >> 8))
+    print("  %-40s %d of the rear layer, %d of the front"
+          % ("periods of parallax swept",
+             3 * 16384 >> T.FAR_SHIFT >> 8, 3 * 16384 >> T.NEAR_SHIFT >> 8))
     print()
     ft = b.call(s["chq4_floor"])
     mt = b.call(s["chq4_msk8"])

@@ -1,17 +1,17 @@
 # chequer8.z80s — design notes
 
 **The board over a viewport of its own, a two layer desert standing on it,
-and the pilot — every pixel drawn from scratch, every frame.** 190,678
-T-states, **79% of a 25 Hz frame**, and 196,373 in the worst frame found by
+and the pilot — every pixel drawn from scratch, every frame.** 190,655
+T-states, **79% of a 25 Hz frame**, and 196,121 in the worst frame found by
 sweeping cameras and poses.
 
 | | T-states a frame | |
 |---|---|---|
 | `chq4_floor` + `chq4_msk8` | 95,591 | 77 scanlines: the bottom 40% |
-| **the desert** | **79,684** | 32 scanlines, two layers, by pixels |
+| **the desert** | **79,758** | 32 scanlines, two layers, by pixels |
 | **the pilot** | **14,401** | all 96 rows of him, compiled |
-| the paging and the flip | ~1,000 | including the parallax arithmetic |
-| **`c8_frame`** | **184,902 / 190,678 / 196,373** | **25 Hz** |
+| the paging and the flip | ~900 | including the parallax arithmetic |
+| **`c8_frame`** | **184,932 / 190,655 / 196,121** | **25 Hz** |
 
 Bit exact against `tests/chequer8.py` over 260 camera positions spanning
 16,384 world units of camera — a whole period of the far layer's parallax
@@ -102,27 +102,31 @@ compiled run: it has to leave the layer behind it showing.
 
 A layer at depth Z moves `FOCAL * camx / Z` pixels when the camera slides
 sideways. So the two offsets are not a frame counter any more, they are the
-board's own `camx` shifted right — **six for the far layer and four for the
-near one**, which puts them at 64 and 16 focal lengths of depth, 14,144 and
-3,536 world units. Six `SRA H / RR L` pairs, a hundred T-states, and the
-scenery is tied to the ground under it:
+board's own `camx` — **tripled, then shifted right by five for the front
+layer and by six for the rear**, which puts them at 10.7 and 21.3 focal
+lengths of depth, 2,357 and 4,715 world units. Two adds and six
+`SRA H / RR L` pairs, about 130 T-states:
 
-| camera slides right by | the board's bottom row | the near pyramids | the great one |
+| camera slides right by | the board's bottom row | the front pyramids | the great one |
 |---|---|---|---|
-| 192 world units | 48 pixels left | 12 left | 3 left |
+| 192 world units | 48 pixels left | 18 left | 9 left |
 
 At the camera's fastest — the eight second slide in the GIFs peaks at 20
-world units a frame — that is five pixels a frame for the board, one for the
-near pyramids and one every three frames for the great pyramid, which is
-where those two rates came from in the first place.
+world units a frame — that is five pixels a frame for the board, **two for
+the front pyramids and one for the great one behind them**.
+
+**The front layer is exactly twice the rear**, and not approximately: it is
+the same number shifted one place less, so the ratio holds however the
+camera moves and whatever rounding does to either. That is worth more than
+it sounds — a ratio that drifts with rounding is a parallax that breathes.
 
 **It is a fudge and worth naming as one.** Anything drawn above the horizon
 line is, strictly, infinitely far away and has no parallax at all; scenery
-that shifts as though it stood at 3,536 units would properly be drawn
-nineteen scanlines *below* the horizon, on the board. Every arcade game of
-this kind makes the same trade, and what you buy with it is that the
-scenery now sways with the camera instead of drifting past on a clock of
-its own.
+that shifts as though it stood at 2,357 units would properly be drawn
+twenty-nine scanlines *below* the horizon, on the board. Every arcade game
+of this kind makes the same trade, and what you buy with it is that the
+scenery sways with the camera instead of drifting past on a clock of its
+own — and, at these depths, that you can see it doing so.
 
 A pixel is half a MODE 4 byte, and that is what it costs.
 
@@ -169,9 +173,9 @@ span.
 
 | | T-states a frame | |
 |---|---|---|
-| the rear layer | 46,077 | 32 rows, and no spill left in it |
-| the front layer | 33,608 | 57 spans, 590 T-states each |
-| **`c9_band`** | **79,684** | **77,635 to 83,743 over a whole period** |
+| the rear layer | 46,110 | 32 rows, and no spill left in it |
+| the front layer | 33,648 | 57 spans, 590 T-states each |
+| **`c9_band`** | **79,758** | **77,665 to 83,378 over a whole period** |
 
 ## This is where a 256K SAM runs out
 
@@ -250,6 +254,15 @@ the horizon stood still; it is the first thing a moving one takes back.
 
 ## What is left
 
+- **The front layer at two pixels a frame is not the same thing as a byte a
+  frame**, and the difference is where its cost is. Its offset is
+  `3 * camx >> 5`, which takes odd values on half of all cameras, so the
+  read-modify-write at each end of each span fires as often as it ever did.
+  Forcing that offset even would move it in two pixel jumps and want the
+  pyramids' own edges snapped to even pixels as well — then every span is
+  whole bytes, both ends of it go away, and the front layer is about 5,000
+  T-states cheaper. It is a real saving and it costs the thing the layer was
+  built for, so it is written down here rather than taken.
 - **`c9_span` costs 590 T-states a span** and only about nine of its pixels
   are bytes. Tightening it once took it from 833; the rest of it is the
   caller's per-span arithmetic, which could be a table of (first byte,
