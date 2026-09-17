@@ -234,6 +234,20 @@ T-states** a (register, value) pair from `soundchip/saa.z80s`:
 See `soundchip/chiparr.md`; `soundchip/arrange.md` is the other way of doing it, an order of
 magnitude above this because it rewrites every channel every frame.
 
+**And what it costs to play any of that inside a frame that cannot be
+interrupted**, which is every demo here that draws through `SP`. The tick
+is scheduled rather than polled for - see `sound.md`, and
+`tests/test_snd.py` for these:
+
+| | T-states | |
+|---|---|---|
+| the check, at a band that is not the one | **28** | 532 … 2,240 a frame, 19 bands to 80 |
+| `snd_tick`, nothing to say that frame | **185** | |
+| `snd_tick`, the median frame | 422 | two register pairs |
+| `snd_tick`, the worst frame in three minutes | 2,662 | 31 pairs, 80 T-states each |
+| **sound, mean** | **2,242** | 0.9% of a 25 Hz frame |
+| **sound, worst** | **7,564** | 3.2%, taking chequer10's worst frame to 95.8% |
+
 ## 2. The rasteriser (`renderlit`), before and after
 
 Measured by timing `rndl_six` on one quad of a known size.

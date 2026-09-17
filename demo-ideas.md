@@ -217,6 +217,19 @@ now is swept off the side of the screen long before it gets close.
 94,465 / 153,882 / 222,452 - 93% of a 25 Hz frame at its worst, four frames
 of 250 over 90%, and 26 pages. See `chequer10.md`.
 
+**And it can have music.** A SAA1099 wants feeding fifty times a second and
+these demos draw twenty-five times a second with interrupts off throughout -
+`SP` is the screen for most of the frame, and an interrupt taken there pushes
+`PC` into the picture. So one of the two ticks a frame has to happen in the
+middle of the drawing, and it is **scheduled rather than polled for**: every
+band of the board costs a known number of T-states, so the caller knows which
+band is 120,000 T-states in and pokes the number. The top of a band turns out
+to be the one free seam in the frame - the main set, `IX`, `IY` and `SP` are
+all dead there, reloaded before they are next read - so the check is three
+instructions and 28 T-states, and the tick needs nothing saved. 2,242
+T-states a frame in the mean and 7,564 at the worst, which is 0.9% and 3.2%.
+See `sound.md`.
+
 **The camera in the GIFs.** All five earlier demos share `stroll()` in
 `tests/mkgif.py`: a slide of two and a half squares either way taking
 eight seconds, and a walk forwards of five squares a second. At the

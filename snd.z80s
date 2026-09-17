@@ -1,0 +1,120 @@
+;------------------------------------------------------------------
+; snd.z80s - a 50 Hz music tick inside a 25 Hz frame
+;
+;   snd_point    the check, at the top of the board's band loop
+;   snd_tick     one tick: the log's bank in, the pairs out, the bank
+;                back
+;   snd_stack    the tick's own stack, because the caller's is not
+;                mapped while the board is being drawn
+;
+; A SAA1099 wants feeding fifty times a second. These demos draw at
+; twenty-five, with interrupts off from one end of the frame to the
+; other - `SP` is the screen for most of it, and an interrupt would
+; push `PC` into the picture - so one of the two ticks a frame has to
+; happen in the middle of the drawing, and the drawing is the thing
+; that cannot be interrupted.
+;
+; SO IT IS SCHEDULED RATHER THAN INTERRUPTED. The frame is locked to
+; two display frames: it starts on the frame interrupt, so tick one is
+; the top of the frame and tick two belongs one display frame -
+; 120,000 T-states - after it. Every band of the board costs a known
+; number of T-states, so the caller knows which band that is before it
+; starts, and pokes the number into snd_n. Nothing is polled and
+; nothing can be missed: the count of ticks a second is exactly right
+; by construction, and the phase is re-synced by the interrupt at the
+; top of every frame.
+;
+; THE BAND LOOP'S TOP IS THE ONE FREE SEAM IN THE FRAME. Inside a row
+; every register is live - both sets, IX and IY are six colour values,
+; and SP is the screen - but at the top of a band the main set, IX, IY
+; and SP are all dead, reloaded from cells and from the band table
+; before they are next read. Only the alternate set survives a band
+; boundary, so a tick that stays in the main set needs no saving at
+; all: 28 T-states a band to ask, and the player's own cost when the
+; answer is yes.
+;
+; AND THE TICK OWNS THE LOW 32K. The screen and this code are both in
+; the high block, so the low block is the board's run bank and nothing
+; else - which means the tick can page its log in over it and put the
+; chunk back, two OUTs and a saved byte. Its stack has to be up here
+; though: the caller's own is in chunk 0, which is paged away for most
+; of the frame.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+SAA_PORT:       EQU 255         ; C for both: the chip decodes the low
+SAA_ADDR:       EQU 1           ; half of the address, and B picks the
+SAA_DATA:       EQU 0           ; register select from the data port
+
+;------------------------------------------------------------------
+; snd_point - is this the band the tick belongs in?
+;
+; Goes at the top of the band loop, where HL is about to be reloaded
+; with the band's entry and the flags are dead. 28 T-states when the
+; answer is no, which it is for all but one band a frame.
+;------------------------------------------------------------------
+
+snd_point:
+        LD   HL,snd_n           ; 10
+        DEC  (HL)               ; 11
+        JR   Z,snd_fire         ; 12 taken, 7 not - and not taken is the
+    IF SND_BENCH                ; band loop carrying on
+        RET                     ; the bench calls the point; inline there
+    ENDIF                       ; is nothing here at all
+snd_fire:
+        LD   SP,snd_stack       ; 10 - SP is dead at a band boundary, and
+        CALL snd_tick           ; 17   the caller's stack is not mapped
+    IF SND_BENCH
+        LD   SP,(snd_sp)        ; and the bench wants its own back
+        RET
+    ENDIF
+
+;------------------------------------------------------------------
+; snd_tick - one frame of the log
+;
+; A count of (register, value) pairs and then the pairs, which is the
+; shape tests/chiparr.py writes: 2.86 pairs a frame over a three
+; minute arrangement, 31 in its worst frame, because most frames
+; change nothing.
+;------------------------------------------------------------------
+
+snd_tick:
+        IN   A,(SND_LMPR)       ; whichever chunk the band loop has in
+        LD   (snd_back+1),A
+        LD   A,SND_BANK
+        OUT  (SND_LMPR),A
+        LD   HL,(snd_at)        ; where the log has got to, which lives
+        LD   E,(HL)             ; up here rather than in the bank
+        INC  HL
+        LD   A,E
+        OR   A
+        JR   Z,snd_t2           ; a frame that changes nothing
+        LD   C,SAA_PORT
+snd_t1:
+        LD   B,SAA_ADDR
+        LD   A,(HL)             ; which register
+        INC  HL
+        OUT  (C),A
+        LD   B,SAA_DATA
+        LD   A,(HL)             ; and what goes in it
+        INC  HL
+        OUT  (C),A
+        DEC  E
+        JR   NZ,snd_t1
+snd_t2:
+        LD   (snd_at),HL
+snd_back:
+        LD   A,0                ; patched: the chunk that was in
+        OUT  (SND_LMPR),A
+        RET
+
+snd_n:          DEFB 255        ; bands to go before the tick, from the
+                                ; caller: 255 is never, because a board
+                                ; is at most 80 bands
+snd_at:         DEFW 0          ; where the log has got to
+    IF SND_BENCH
+snd_sp:         DEFS 2          ; the bench's stack, which the real thing
+    ENDIF                       ; has no reason to keep
+                DEFS 16         ; and the tick's own stack, which is
+snd_stack:                      ; eight levels of it

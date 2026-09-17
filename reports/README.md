@@ -5,9 +5,13 @@
 of these runs; this directory is the runs themselves, so a claim can be
 diffed against its source rather than taken on trust.
 
-    python3 tests/mkreports.py              # the demos the notes quote
-    python3 tests/mkreports.py chequer10    # or just some of them
-    python3 tests/mkreports.py --all        # everything in tests/
+    python3 tests/mkreports.py --all        # everything in tests/, as here
+    python3 tests/mkreports.py              # or just the demos the notes quote
+    python3 tests/mkreports.py chequer10    # or one of them
+
+What is checked in is `--all`: every test in `tests/`, all passing. Most
+take a second or two; `float16` takes six minutes and `float32` two,
+because they are exhaustive over their inputs rather than sampled.
 
 Each file is one test's output with a header saying whether it passed and
 how long it took. They are *generated* — edit the test, not the report.
