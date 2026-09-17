@@ -18,18 +18,23 @@ import os
 import sys
 
 os.environ["HARRIER_MINP"] = "1"        # chequer9's viewport
+os.environ["JET_W"] = "24"              # chequer9's pilot, 24x48
+os.environ["JET_H"] = "48"
+os.environ["HARRIER_SKY"] = "15"        # a flat sky and a flat board:
+os.environ["DESERT_SKY"] = "15"         # nothing here grades a palette
 os.environ["HARRIER_HZ"] = "95"
 os.environ["HARRIER_CAMH"] = "308"
 os.environ["DESERT_ROWS"] = "20"  # a shorter band: the board can be tall
 
 import chequer9 as C
 import desert as T
+import jetpack as J
 from sam import Sam
 
 CHUNKS = ("harness_chq9c0.asm", "harness_chq9c1.asm",   # the board's bank,
           "harness_chq9c2.asm",                         # widest bands first
           "harness_chq9msk0.asm", "harness_chq9msk1.asm",   # the swap masks
-          "harness_chq9c3.asm",                         # and the rest of it
+          "harness_chq9c3.asm", "harness_chq9c4.asm",   # and the rest of it
           "harness_desert9_0.asm", "harness_desert9_1.asm",
           "harness_jetmove.asm")                        # and the pilot
 
@@ -42,8 +47,8 @@ def corner(i, hz):
     he takes big steps, so that the sky he leaves behind is a fresh
     piece of the screen every frame rather than a sliver.
     """
-    px = (i * 13) % (128 - 16)
-    py = (i * 7) % (192 - 96)
+    px = (i * 13) % (128 - J.W // 2)
+    py = (i * 7) % (192 - J.H)
     return px, py, i % 3
 
 

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The pilot: a person in a jetpack, seen from behind, 32x96 pixels.
+"""The pilot: a person in a jetpack, seen from behind.
 
     python3 tests/jetpack.py [out.png]
 
@@ -8,12 +8,23 @@ the rows between interpolate - because that is the only way to draw a
 person into a 32 pixel wide grid and still be able to move a shoulder
 by two pixels afterwards.
 
+AND BECAUSE THEY ARE PROFILES, HE HAS A SIZE. The figure is drawn in
+the 32x96 grid its numbers were tuned in and the profiles are scaled
+into whatever W and H say on the way past, so he is redrawn at the size
+asked for rather than resampled down to it - which on a sprite with a
+one pixel outline and a two pixel highlight is the difference between a
+smaller pilot and a broken one.
+
 Transparent is -1. Everything else is a MODE 4 palette index, and the
 board below owns 1, 2 and 3, so the pilot uses 0 and 4..14.
 """
+import os
 import sys
 
-W, H = 32, 96
+W = int(os.environ.get("JET_W", 32))            # what he is drawn at,
+H = int(os.environ.get("JET_H", 96))            # which a demo chooses:
+AW, AH = 32, 96                 # chequer6, 7 and 8 have him at the size
+                                # he was drawn, chequer9 at 24x48
 CLEAR = -1
 
 BLACK, SUIT_D, SUIT_M, SUIT_L = 0, 4, 5, 6
@@ -25,9 +36,20 @@ def blank():
     return [[CLEAR] * W for _ in range(H)]
 
 
+def scale(prof):
+    """A profile out of the grid it was drawn in and into this one.
+
+    A span is scaled by its ends rather than its edges - (r + 1) out and
+    one back - so that a four pixel arm at 32 wide is three pixels at 24
+    and not two.
+    """
+    return [(int(round(y * H / AH)), int(round(l * W / AW)),
+             int(round((r + 1) * W / AW)) - 1) for y, l, r in prof]
+
+
 def profile(px, prof, colour):
     """Fill between a left and a right edge that walk down the rows."""
-    prof = sorted(prof)
+    prof = sorted(scale(prof))
     for (y0, l0, r0), (y1, l1, r1) in zip(prof, prof[1:]):
         for y in range(y0, y1 + 1):
             t = 0 if y1 == y0 else (y - y0) / (y1 - y0)
@@ -38,7 +60,7 @@ def profile(px, prof, colour):
 
 
 def mirror(prof):
-    return [(y, W - 1 - r, W - 1 - l) for y, l, r in prof]
+    return [(y, AW - 1 - r, AW - 1 - l) for y, l, r in prof]
 
 
 def both(px, prof, colour):
@@ -155,8 +177,10 @@ def lean(px, way):
     if not way:
         return px
     out = blank()
+    lift = max(1, int(round(3 * W / AW)))        # three pixels at 32 wide
     for y in range(H):
-        k = way * int(round(3 * max(0.0, min(1.0, (72 - y) / 40.0))))
+        k = way * int(round(lift * max(0.0, min(1.0,
+                                               (72 - y * AH / H) / 40.0))))
         for x in range(W):
             if 0 <= x + k < W:
                 out[y][x + k] = px[y][x]

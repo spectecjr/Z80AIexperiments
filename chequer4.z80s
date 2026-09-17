@@ -40,7 +40,12 @@
 CHQ4_BUF0:      EQU 0x80
 CHQ4_BUF1:      EQU 0x20
 CHQ4_C1:        EQU 0x1111      ; the two colour indices, both nibbles
-CHQ4_C2:        EQU 0x2222
+CHQ4_C2:        EQU 0x2222      ; CHQ4_SKYC, the sky's own, comes with the
+                                ; viewport: it is the board's first colour
+                                ; where a copper grades the two apart by
+                                ; scanline, and an index of its own where
+                                ; the palette has to sit still - see
+                                ; chequer9
 
 ;------------------------------------------------------------------
 ; The paged layout, which is what chequer5 uses (see chequer5.md):
@@ -106,7 +111,7 @@ chq4_fill:
 chq4_f1:
         LD   B,0
 chq4_f2:
-        LD   (HL),CHQ4_C1 & 255
+        LD   (HL),CHQ4_SKYC & 255
         INC  HL
         DJNZ chq4_f2
         DEC  D
@@ -183,19 +188,22 @@ chq4_msk8:
         LD   H,A
         LD   DE,chq4_msk
     IF CHQ4_DYNHZ               ; as many scanlines as this horizon has,
-        LD   A,(chq4_rows)      ; entered at two bytes an LDI
-        NEG
-        ADD  A,128
-        ADD  A,A
+        LD   A,(chq4_rows)      ; taken out of the deep board's own mask a
+        LD   B,A                ; step at a time - because a shallower
+        LD   C,0x80             ; horizon draws the same board with
+chq4_g1:                        ; scanlines left out, and the mask has to
+        LD   A,(HL)             ; lose the same ones. Half a step in, so
+        LD   (DE),A             ; that both ends of it are exact.
+        INC  DE
+        LD   A,C
+chq4_gf:
+        ADD  A,0                ; patched: the step's fraction, and
         LD   C,A
-        LD   B,0
-        LD   IX,chq4_ldi
-        ADD  IX,BC
-        JP   (IX)
-chq4_ldi:
-        DUP  128
-        LDI                     ; 16 T-states a scanline against 81
-        EDUP
+        LD   A,L
+chq4_gi:
+        ADC  A,0                ; patched: its whole part. A table is 128
+        LD   L,A                ; bytes on a 128 byte boundary and the
+        DJNZ chq4_g1            ; walk is 95 at most, so L cannot carry
     ELSE
         DUP  192 - CHQ4_TOP
         LDI                     ; 16 T-states a scanline against 81
@@ -298,6 +306,7 @@ chq4_m2:
         EXX
 
 chq4_b1:
+    IF CHQ4_DYNHZ = 0
         LD   HL,(chq4_acc)      ; the phase for this band, in pixels:
         LD   BC,(chq4_cx)       ; one camx less than the band below
         OR   A
@@ -305,6 +314,7 @@ chq4_b1:
         LD   (chq4_acc),HL
         LD   A,H
         EX   AF,AF'             ; parked; HL is wanted for the table
+    ENDIF
 chq4_bp:
         LD   HL,chq4_band       ; patched: this band's entry
         LD   A,(HL)             ; the rows it covers
@@ -316,13 +326,32 @@ chq4_bp:
         INC  HL
 
     IF CHQ4_PAGED
+    IF CHQ4_DYNHZ
+        LD   A,(HL)             ; how many squares wider the band below
+        INC  HL                 ; this one was: one on the deep board, and
+        LD   E,(HL)             ; four or five where the horizon is low and
+        INC  HL                 ; most of the board's scanlines are not
+        LD   D,(HL)             ; drawn
+        INC  HL
+        LD   (chq4_bp+1),HL     ; and on to the next band
+        LD   HL,(chq4_acc)      ; the phase for this band, in pixels: this
+        LD   BC,(chq4_cx)       ; band's width times the camera inside one
+chq4_d1:                        ; square
+        OR   A                  ; which also clears the carry
+        SBC  HL,BC
+        DEC  A
+        JR   NZ,chq4_d1
+        LD   (chq4_acc),HL
+        LD   A,H
+    ELSE
         LD   E,(HL)             ; this band's table of compiled bodies
         INC  HL
         LD   D,(HL)
         INC  HL
         LD   (chq4_bp+1),HL     ; and on to the next band
-        EX   AF,AF'             ; the phase, two bytes an entry
-        ADD  A,A
+        EX   AF,AF'             ; the phase
+    ENDIF
+        ADD  A,A                ; two bytes an entry
         ADD  A,E
         LD   E,A
         JR   NC,chq4_b2
@@ -457,6 +486,14 @@ chq4_bend:
         LD   A,(HL)             ; of the bank comes next, or zero for the
         OR   A                  ; end of the board
         JR   Z,chq4_bdone
+    IF CHQ4_DYNHZ
+        INC  HL                 ; where this horizon's bands go on in the
+        LD   E,(HL)             ; next chunk, because every horizon has a
+        INC  HL                 ; list of its own - and read BEFORE the
+        LD   D,(HL)             ; OUT, because after it this table is not
+        LD   (chq4_bp+1),DE     ; mapped any more
+        OUT  (CHQ4_LMPR),A
+    ELSE
         OUT  (CHQ4_LMPR),A
         LD   HL,chq4_band       ; every chunk keeps its band table at its
         LD   (chq4_bp+1),HL     ; foot, so that is all there is to it
@@ -464,6 +501,7 @@ chq4_bend:
         LD   BC,(chq4_cx)       ; phase, because the terminator went round
         ADD  HL,BC              ; the band loop to be found - so give it
         LD   (chq4_acc),HL      ; back
+    ENDIF
         JP   chq4_b1
 chq4_bdone:
     ENDIF

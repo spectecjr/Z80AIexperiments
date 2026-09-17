@@ -799,12 +799,34 @@ is on the screen. So:
   it, at the band holding the bottom row of the screen. The bands before
   that one are the ones that would be off the bottom.
 - **the depth-indexed tables are the same tables**, only generated as deep
-  as the deepest board and copied as far as the horizon says. chequer9's
-  swap masks are 512 of them and the copy is 128 `LDI`s entered at
-  `2 * (128 - rows)`: 522 T-states at 19 rows of board and 1,754 at 96,
-  against the 1,500 to 7,800 that computing the mask a scanline again would
-  have cost. This was expected to be the bill for a moving horizon and it is
-  the cheapest thing in it.
+  as the deepest board and read as far as the horizon says. chequer9's swap
+  masks are 512 of them and the walk is ten instructions a scanline: 1,354
+  T-states at 19 rows of board and 6,205 at 96, against the 1,500 to 7,800
+  that computing the mask a scanline again would have cost. This was
+  expected to be the bill for a moving horizon and it is not.
+
+**A SHALLOW BOARD LEAVES SCANLINES OUT; IT DOES NOT RESCALE.** The obvious
+thing is to squeeze the board into the rows it has - lower the camera as the
+horizon drops - and the obvious thing is wrong: the squares at the bottom of
+the screen shrink with it and the ground reads as tilting away rather than
+as being flown over. Draw the same deep board with rows dropped instead -
+one in two for half the height, one in five for a fifth - and the near
+ground keeps its scale at every horizon while the depth folds up behind it.
+What that costs:
+
+- **a band list per horizon**, because which bands are drawn is no longer a
+  contiguous slice of one table. Four bytes a band and 17K over 78 horizons,
+  against a 95K bank that does not change at all - and the lists have to
+  live in the chunks with the bodies they point at, because that is what the
+  band loop has mapped.
+- **one byte a band** saying how many squares wider the band below it was,
+  which is what the phase accumulator steps by: one on the deep board, four
+  or five on the shallowest.
+- **a DDA where the mask copy was**, stepping `(rows - 1) * 256 / (n - 1)`
+  in 8.8 with the accumulator started at half a step so that both ends land
+  exactly. 63 T-states a row against `LDI`'s 16.
+- and it buys back the rule that a horizon has to fall on a band boundary:
+  every row in the range is a horizon now.
 - **what does change is the widest square**, because pitching the horizon up
   brings coarser ground into view. chequer9's board is half the screen at
   its tallest, so it compiles up to 80 pixel squares rather than 64: 3,240
@@ -846,11 +868,51 @@ the bottom right corner.
 | one masked byte | `POP BC / LD A,C / AND m / OR v / LD C,A / PUSH BC` |
 | a step | `LD HL,-d / ADD HL,SP / LD SP,HL`, or `DEC SP` where the step is small enough |
 
-chequer9's pilot is 96 rows in **16,116 T-states against the absolute
-version's 14,401** - 12% for being able to put him anywhere on the screen,
-and no `DI` window longer than the sprite itself. He still moves in whole
-bytes sideways: a pixel of horizontal travel would want him compiled at both
-phases and a mask on *every* byte rather than the 110 his outline needs.
+chequer9's pilot is **8,066 T-states at 24x48 and 16,116 at 32x96**, against
+14,401 for the absolute version of the same 32x96 sprite - 12% for being
+able to put him anywhere on the screen, and no `DI` window longer than the
+sprite itself. He still moves in whole bytes sideways: a pixel of horizontal
+travel would want him compiled at both phases and a mask on *every* byte
+rather than the 110 his outline needs.
+
+**And he has a size, because he is profiles rather than a bitmap.** The
+figure is a list of (row, left, right) that the rows between interpolate, so
+the numbers stay in the 32x96 grid they were tuned in and scale on the way
+past - spans by their ends, so a four pixel arm at 32 wide is three pixels
+at 24 and not two. Resampling the bitmap instead eats the one pixel outline
+and the two pixel highlight, which is most of what makes a sprite this size
+read at all.
+
+## The copper is the most expensive thing on a SAM, and the pixels are free
+
+Every chequered floor here grades its distance in the palette: two entries
+reprogrammed on every scanline. It is free in pixels and it is the single
+most expensive thing in the frame, because **a SAM palette entry is a port,
+not memory**. There is no copper list: every change is serviced by the CPU
+in a line interrupt, which is about a quarter of a 50 Hz frame for a screen
+of them - and it wants interrupts *enabled*, which a routine drawing through
+`SP` with the stack pointed at the screen cannot have. The two things do not
+compose: the fill has to run `DI`, so the fade and the fill cannot both be
+on the same scanline budget.
+
+chequer4 took the depth *alternation* out of the palette by noticing it was
+a phase (a whole square of horizontal phase exchanges the two colours, which
+is what the swap did). chequer9 drops the rest: no fade into the distance,
+one flat sky, sixteen colours for the whole screen and every frame.
+
+**What that costs is an index, not T-states.** The board's two colours were 1
+and 2 and the sky was also 1 - one index meaning sky above the horizon and
+near ground below it, which only a per-scanline palette can pull off. With
+the palette sitting still they have to differ, so the sky gets index 15.
+
+**And what a baked fade would cost is also indices.** A band already picks
+its six values from a table, so a band drawn in a different pair of colours
+is the same number of T-states - the fade could come back in the pixels for
+nothing at run time. But MODE 4 has sixteen colours, the pilot uses twelve of
+them, the board two and the sky one: exactly one spare, which is one more
+step of depth and not a gradient. That is the whole argument, and it is why
+the answer to "can we have the fade back" is a palette budget rather than a
+frame budget.
 
 ## Every CALL is a bet that the page underneath it has not moved
 

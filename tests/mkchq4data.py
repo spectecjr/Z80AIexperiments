@@ -37,6 +37,12 @@ EQU = "chequer%sequ.z80s" % SET                         # viewport of
 C1 = 0x1111                     # the two colour indices, both nibbles
 C2 = 0x2222
 SWAP = 0x33                     # what exchanges them, one byte
+SKY = int(os.environ.get("HARRIER_SKY", 1))     # and the sky: the board's
+                                # own first colour where a copper grades
+                                # the two apart by scanline, and an index
+                                # of its own where the palette has to sit
+                                # still, because then one index cannot be
+                                # both the sky and the near squares
 
 
 def masks(here):
@@ -133,9 +139,12 @@ def main(here):
              "CHQ4_SWAP:      EQU %d          ; exchanges the two colours"
              % SWAP,
              "CHQ4_ABOVE:     EQU %d          ; and what the top run spills"
-             % (C.HAZE * 0x11 if C.TOP > C.HZ + 1 else C1 & 255,
+             % (C.HAZE * 0x11 if C.TOP > C.HZ + 1 else SKY * 0x11,
                 ),
              "                                ; into, haze or sky",
+             "CHQ4_SKYC:      EQU 0x%04X      ; the sky, both nibbles of"
+             % (SKY * 0x1111),
+             "                                ; both bytes",
            "CHQ4_SPILL:     EQU %d           ; PUSHes the topmost run can"
            % (spill + 1),
            "                                ; overrun the row above by"]

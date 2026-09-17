@@ -106,7 +106,7 @@ bytes happen to be in the page that is there now.
 and they go quickly: a compiled run bank and its lookup tables can be ten of
 them on their own, two buffers are four, and a compiled sprite is one more.
 `chequer8` needs twenty, which is a 512K machine - worth deciding on
-purpose rather than discovering. `chequer9` needs twenty-two, because a
+purpose rather than discovering. `chequer9` needs twenty-four, because a
 horizon that moves has to have every square width it can ever show compiled:
 the pages are where the cost of that lands, not the frame.
 
@@ -141,7 +141,11 @@ for those.
   `road2.md` measures what it costs: ~150 T-states a line with entry and
   exit, **28,800 a frame over 192 lines**, and it cannot fire at all during
   a `PUSH` fill, because the fill holds `SP` on the screen and an interrupt
-  would push `PC` into the picture.
+  would push `PC` into the picture. **That is a quarter of a 50 Hz frame for
+  a screen of palette changes, and it wants interrupts enabled, so a
+  routine that draws through `SP` cannot have both.** `chequer9` is the
+  demo that took the consequence: no per-scanline palette at all, sixteen
+  colours for the whole screen, and the distance carried by the geometry.
 - **STATUS (249, read)**: bit 0 line, bit 1 mouse, bit 2 MIDI in, **bit 3
   frame**, bit 4 MIDI out - each *low* when requesting. Bits 5-7 are
   keyboard matrix lines 6-8. All five interrupts share IM 1, so the handler

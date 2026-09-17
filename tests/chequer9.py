@@ -17,6 +17,13 @@ import os
 import sys
 
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+os.environ["JET_W"] = "24"              # a smaller pilot: 24x48 where
+os.environ["JET_H"] = "48"              # chequer6 to 8 have him 32x96
+os.environ["HARRIER_SKY"] = "15"        # a flat sky, in an index of its
+os.environ["DESERT_SKY"] = "15"         # own: no palette changes by
+                                        # scanline anywhere in this demo,
+                                        # because a SAM services those
+                                        # with a line interrupt a row
 os.environ["HARRIER_MINP"] = "1"        # chequer9's viewport: the widest
 os.environ["HARRIER_HZ"] = "95"         # board it can have, which is the
 os.environ["HARRIER_CAMH"] = "308"      # one its bank was built for
@@ -36,24 +43,15 @@ W, H, STRIDE = C.W, C.H, C.STRIDE
 
 
 def horizons():
-    """How many scanlines of board each allowed horizon gives, tallest
-    first - which is the Z80's index into chq4_hztab."""
-    out, rows, run, last = [], H - 1 - HR.HZ, 0, None
-    widths = [HR.PTAB[y] for y in range(H - 1, HR.HZ, -1)]   # bottom up
-    bands = []
-    for p in widths:
-        if p == last:
-            run += 1
-        else:
-            if last is not None:
-                bands.append(run)
-            run, last = 1, p
-    bands.append(run)
-    for n in bands:
-        if ROWS0 <= rows <= ROWS1:
-            out.append(rows)
-        rows -= n
-    return out
+    """How many scanlines of board each horizon gives, tallest first -
+    which is the Z80's index into chq4_hztab.
+
+    Every row in the range is a horizon now. A shallow board is the deep
+    one with scanlines left out rather than a rescaled copy of it, so
+    each horizon carries a band list of its own and nothing has to fall
+    on a band boundary.
+    """
+    return list(range(ROWS1, ROWS0 - 1, -1))
 
 
 HORIZONS = horizons()

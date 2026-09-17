@@ -33,6 +33,7 @@ os.environ.setdefault("HARRIER_MINP", "1")      # the full depth viewport
 sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
 
 import chequer3 as C                            # noqa: E402
+import harrier as HR                            # noqa: E402
 import mkchq3data as M3                         # noqa: E402
 import mkchq4data as M4                         # noqa: E402
 
@@ -47,6 +48,10 @@ BODY = 30                       # bytes a compiled body
 ROWS0 = int(os.environ.get("CHQ_ROWS0", 77))    # the shortest board a
 ROWS1 = int(os.environ.get("CHQ_ROWS1", 114))   # horizon may give, and
                                                 # the tallest
+DYN = os.environ.get("CHQ_DYNHZ") == "1"        # whether the horizon
+                                                # moves at all, which is
+                                                # what the per horizon
+                                                # band tables are for
 
 
 def body(p, ph, which):
@@ -91,13 +96,44 @@ def runbytes(p):
     return sum(sum(len(o) for o in M3.build(p, t)[0]) + 3 for t in (0, 1))
 
 
+def board(n):
+    """The bands of an n scanline board, widest first: (rows, step, p).
+
+    The board is one picture - the deepest one the bank was compiled
+    for - and a shallower horizon shows it with scanlines left out, so
+    that the square at the bottom of the screen is the same size
+    whatever the horizon is doing. What changes with the horizon is
+    therefore not the widths but which of them are on the screen, and
+    the step is how many squares wider the band below this one was: one
+    on the deep board, four or five on the shallowest.
+    """
+    ws = [C.PTAB[HR.FULL[i]] for i in HR.lines(n)][::-1]     # widest first
+    out, prev = [], ws[0] + 1            # the phase is seeded one square
+    for p in ws:                         # wider than the widest band
+        if out and p == out[-1][2]:
+            out[-1][0] += 1
+        else:
+            out.append([1, prev - p, p])
+            prev = p
+    return [tuple(b) for b in out]
+
+
+BOARDS = ({n: board(n) for n in range(ROWS0, ROWS1 + 1)} if DYN else {})
+TALLY = {}                      # and how many band entries each width
+for _b in BOARDS.values():      # needs across all of them, which is what
+    for _n, _d, _p in _b:       # its chunk has to find room for
+        TALLY[_p] = TALLY.get(_p, 0) + 1
+
+
 def chunks(band):
     """Share the bands out, widest first, so that a chunk is a stretch
     of the screen and a frame walks the bank forwards."""
     out, cur, used = [], [], 0
-    for n, p in band:
+    spare = 1024 + 4 * len(BOARDS)      # the values, and a terminator a
+    for n, p in band:                   # horizon
         want = p * BODY + 2 * p + runbytes(p) + 3      # bodies, table, runs
-        if used + want > WINDOW - 1024:               # band table and values
+        want += 4 * TALLY.get(p, 0)                    # and band entries
+        if used + want > WINDOW - spare:
             out.append(cur)
             cur, used = [], 0
         cur.append((n, p))
@@ -107,71 +143,103 @@ def chunks(band):
 
 
 def horizons(here, cut):
-    """Where to enter the band table for each horizon that is allowed.
+    """The band tables, one per (chunk, horizon), and the index into them.
 
-    The board's widths are a function of (row - horizon) and nothing
-    else, so ONE band table serves every horizon: a lower horizon is a
-    taller board and simply starts further down the table, at the band
-    holding the bottom row of the screen. The bands below that one are
-    the ones that would be off the bottom of the screen.
+    ONE BANK SERVES EVERY HORIZON: a band's compiled bodies and runs are
+    a function of its width and of nothing else, so what a horizon needs
+    of its own is only the list of which bands it draws and how many
+    scanlines each gets. That is four bytes a band - rows, the step in
+    squares from the band below, and where its bodies are - and the list
+    for a chunk ends with a terminator carrying the next chunk and where
+    this horizon goes on in it.
 
-    A horizon is allowed when the screen's bottom row is the last row
-    of its band, because a band is drawn whole. Which rows those are
-    depends on where the bands fall: near the horizon a band is a
-    scanline or two, so most rows are allowed, and the wide bands at
-    the bottom of the screen rule out a run of rows each.
+    The lists live in the chunks with the bodies they point at, because
+    the band loop reads them with that chunk mapped and nothing else is.
     """
-    out, rows = [], sum(n for n, _ in M4.bands())
+    where = {}                                  # width -> (chunk, at)
     for k, part in enumerate(cut):
-        at = 0
         for n, p in part:
-            if ROWS0 <= rows <= ROWS1:                  # the range asked for
-                out.append((191 - rows, BANK0 + PAGES[k], at, rows, p))
-            rows -= n
-            at += 3
+            where[p] = k
+    tabs = [[] for _ in cut]                    # the text, a chunk
+    at = [0] * len(cut)                         # and where it has got to
+    start = {}                                  # (horizon, chunk) -> offset
+    for n in sorted(BOARDS):
+        for k in range(len(cut)):
+            start[(n, k)] = at[k]
+            bands = [b for b in BOARDS[n] if where[b[2]] == k]
+            at[k] += 4 * (len(bands) + 1)
+    for n in sorted(BOARDS):
+        for k in range(len(cut)):
+            bands = [b for b in BOARDS[n] if where[b[2]] == k]
+            tabs[k].append("                ; %d scanlines of board, the"
+                           " %d bands of it in this chunk" % (n, len(bands)))
+            for rows, d, p in bands:
+                tabs[k].append("        DEFB %d,%d" % (rows, d))
+                tabs[k].append("        DEFW %s_t%d" % (PRE, p))
+            if k + 1 < len(cut):
+                tabs[k].append("        DEFB 0,0x%02X" % (BANK0 + PAGES[k + 1]))
+                tabs[k].append("        DEFW %d" % start[(n, k + 1)])
+            else:
+                tabs[k].append("        DEFB 0,0\n        DEFW 0")
     parts = ["; Generated by tests/mkchq5body.py - do not edit by hand.",
              "; Every horizon the board can have, and how to draw it: the",
-             "; chunk the bottom band is in, where in that chunk's band",
-             "; table it is, how many scanlines of board there are, and",
-             "; how wide the widest square is - which is what the phase",
-             "; accumulator is seeded with. Five bytes a horizon, lowest",
-             "; horizon (the tallest board) first.",
+             "; chunk its widest band is in, where in that chunk's band",
+             "; table this horizon's list starts, how many scanlines of",
+             "; board there are, how wide the widest square is - which is",
+             "; what the phase accumulator is seeded with - and the step",
+             "; through the deep board's mask, in 8.8, which is how the",
+             "; scanlines that are not drawn get left out of it. Seven",
+             "; bytes a horizon, tallest board first.",
              "\nCHQ4_HZ0:       EQU %d          ; the first horizon here"
-             % min(h for h, _, _, _, _ in out),
+             % (191 - max(BOARDS)),
              "CHQ4_HZN:       EQU %d          ; and how many there are"
-             % len(out),
+             % len(BOARDS),
              "\nchq4_hztab:"]
-    for hz, bank, at, n, p in sorted(out):
-        parts.append("        DEFB 0x%02X       ; horizon %d: %d scanlines,"
-                     " widest square %d" % (bank, hz, n, p))
-        parts.append("        DEFW chq4_band + %d" % at)
-        parts.append("        DEFB %d" % n)
-        parts.append("        DEFB %d" % (p + 1))
+    for n in sorted(BOARDS, reverse=True):
+        d = HR.step(n)
+        parts.append("        DEFB 0x%02X       ; %d scanlines, widest square"
+                     " %d, %.2f rows of deep board a scanline"
+                     % (BANK0 + PAGES[0], n, BOARDS[n][0][2], d / 256))
+        parts.append("        DEFW %d" % start[(n, 0)])
+        parts.append("        DEFB %d,%d" % (n, BOARDS[n][0][2] + 1))
+        parts.append("        DEFB %d,%d" % (d & 255, d >> 8))
     open(os.path.join(here, "chequer%shz.z80s" % SET), "w").write(
         "\n".join(parts) + "\n")
-    return out
+    return tabs
 
 
 def emit(here):
     vtab, which = M4.values()
     band = M4.bands()
     cut = chunks(band)
+    tabs = horizons(here, cut) if DYN else None
     for k, part in enumerate(cut):
         nxt = BANK0 + PAGES[k + 1] if k + 1 < len(cut) else 0
         parts = ["; Generated by tests/mkchq5body.py - do not edit by hand.",
-                 "; Chunk %d of chequer5's bank: the bands %d to %d, their"
-                 % (k, part[0][1], part[-1][1]),
+                 "; Chunk %d of chequer%s's bank: the bands %d to %d, their"
+                 % (k, SET, part[0][1], part[-1][1]),
                  "; compiled row loop bodies, their runs and the value sets.",
                  "\n        ORG 0x0000",
-                 "chq4_band:      ; rows, and this band's table of bodies",
-                 "\n".join("        DEFB %d\n        DEFW %s_t%d"
-                           % (n, PRE, p) for n, p in part),
-                 "        DEFB 0,%d       ; and the chunk that comes after"
-                 % nxt,
-                 "\n        ALIGN 32",
-                 "chq4_val:       ; BC, DE, HL, IX, IY and AF in the order a",
-                 "                ; body POPs them, and sixteen bytes on, the",
-                 "                ; same set with the two colours exchanged"]
+                 "chq4_band:"]
+        if DYN:
+            parts.append("        ; rows, how many squares wider the band"
+                         " below was, and this")
+            parts.append("        ; band's table of bodies - a list a"
+                         " horizon, because which")
+            parts.append("        ; bands are drawn at all is what a"
+                         " horizon chooses")
+            parts.append("\n".join(tabs[k]))
+        else:
+            parts.append("        ; rows, and this band's table of bodies")
+            parts.append("\n".join("        DEFB %d\n        DEFW %s_t%d"
+                                   % (n, PRE, p) for n, p in part))
+            parts.append("        DEFB 0,%d       ; and the chunk that"
+                         " comes after" % nxt)
+        parts.append("\n        ALIGN 32")
+        parts.append("chq4_val:       ; BC, DE, HL, IX, IY and AF in the"
+                     " order a\n                ; body POPs them, and"
+                     " sixteen bytes on, the\n                ; same set"
+                     " with the two colours exchanged")
         for v in vtab:
             parts.append("        DEFB " + ",".join(str(x) for x in v))
             parts.append("        DEFS 4")
@@ -195,10 +263,11 @@ def emit(here):
                      " the caller's stack" % WINDOW)
         open(os.path.join(here, "chequer%sc%d.z80s" % (SET, k)), "w").write(
             "\n".join(parts) + "\n")
-    hz = horizons(here, cut)
-    print("chequer%shz.z80s: %d horizons, %d to %d scanlines of board"
-          % (SET, len(hz), min(n for _, _, _, n, _ in hz),
-             max(n for _, _, _, n, _ in hz)))
+    if DYN:
+        print("chequer%shz.z80s: %d horizons, %d to %d scanlines of board,"
+              " %d band entries"
+              % (SET, len(BOARDS), min(BOARDS), max(BOARDS),
+                 sum(len(b) for b in BOARDS.values())))
     n = sum(p for _, p in band)
     print("chequer%sc*.z80s: %d bodies of %d bytes in %d chunks of %d bands"
           % (SET, n, BODY, len(cut), len(band) // len(cut)))

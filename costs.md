@@ -15,10 +15,11 @@ of hardware these budgets *do* now take account of is paging: a SAM has
 `.claude/skills/sam-coupe-hardware` has the registers. `chequer8` is the
 first thing here that does not fit a 256K machine: twenty pages of the
 thirty-two LMPR can address, so a 512K SAM. `chequer8.md` says what a 256K
-version would have to give up. `chequer9` takes twenty-two pages and could
+version would have to give up. `chequer9` takes twenty-four pages and could
 not be cut down to sixteen at all: its run bank alone is 95K, because a
 horizon that moves has to have every square width it can ever show
-compiled.
+compiled, and 17K more of band lists because which of those widths are drawn
+is what a horizon chooses.
 
 ---
 
@@ -31,7 +32,7 @@ compiled.
 | `chequer6` | **143,643** steady, 159,388 changing pose | 25 | and a pilot in a jetpack over it, masked, three poses |
 | `chequer7` | 193,921 / **201,281** / 209,572 | 25 | and a two layer city scrolling on the horizon |
 | `chequer8` | 184,932 / **190,655** / 196,121 | 25 | board in the bottom 40%, a two layer desert on it, parallax off the camera |
-| `chequer9` | 90,216 / **146,642** / 193,023 | 25 | the horizon moves with the pilot, 10% to 50% of the screen, one bank for all 65 of them |
+| `chequer9` | 85,994 / **141,182** / 194,389 | 25 | the horizon moves with the pilot, 10% to 50% of the screen, the board keeps its scale, no palette at all |
 | `zarch` | 195,482 / **208,206** / 215,619 | 25 | Zarch's ground: a chequered plane, turning |
 | `chequer3` | 106,970 / **110,806** / 114,736 | **50** | the same picture, stripes in the palette |
 | `road2` | 104,750 / **112,736** / 118,270 | **50** | the Hang On road, 121% of the screen wide, bank paged |
@@ -50,23 +51,29 @@ where that horizon puts him:
 
 | | 19 rows of board (10%) | 96 rows (50%) |
 |---|---|---|
-| the board (`chq4_floor`) | 23,480 | **123,107** |
-| the swap mask, copied as far as the board goes | 522 | 1,754 |
+| the board (`chq4_floor`) | 28,670 | **124,064** |
+| the swap mask, gathered out of the deep board's | 1,354 | 6,205 |
 | the desert, 20 rows, two layers | 49,796 | 49,796 |
-| the pilot, 96 rows, anywhere | 16,116 | 16,116 |
-| the sky he left behind | 7,164 | 9,463 |
+| the pilot, 24x48, anywhere | 8,066 | 8,066 |
+| the sky he left behind | 1,158 | 5,021 |
 | the rows the board gave up, when the horizon drops | 0 … 3,736 | 0 |
-| the horizon table and the flip | 542 | 542 |
-| **the frame** | **97,620** | **200,778** |
+| the horizon table and the flip | 613 | 613 |
+| **the frame** | **89,657** | **193,765** |
 
 The pilot is the same number at both ends because he is compiled as one walk
-of `SP` and draws every row wherever he is: **16,116 against chequer8's
-14,401**, which is what position independence costs. The mask is the finding
-— a moving horizon was expected to cost thousands of T-states a frame in
-recomputed swap masks and costs a `LDI` a scanline instead, because the
-tables are indexed by depth and depth is a function of the row's distance
-from the horizon. And the desert, which does not move, is now the largest
-fixed cost in the frame and twice the board at the shallow end. See
+of `SP` and draws every row wherever he is: **8,066 at 24x48, against 16,116
+at 32x96** and chequer8's 14,401 for a 32x96 pilot who cannot move at all.
+
+The mask is where the geometry shows up. A shallow board is the deep board
+with scanlines left out — so that the square at the bottom of the screen is
+the same size at every horizon rather than shrinking with the board — and
+its mask has to lose the same ones, which is a DDA gather at 63 T-states a
+row where a rescaled board could `LDI` the first n rows at 16. The other
+half of that trade is 17K of band lists, one per horizon, because which
+bands are drawn is no longer a contiguous slice of one table.
+
+And the desert, which does not know where the horizon is, is now the largest
+fixed cost in the frame: 49,796 against a board that falls to 28,670. See
 `chequer9.md`.
 
 ## 1a. The floors, measured

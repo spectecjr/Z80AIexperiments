@@ -1,4 +1,4 @@
-; Chunk 3 of chequer9's bank, which LMPR pages in at 0x0000: the band
+; Chunk 4 of chequer9's bank, which LMPR pages in at 0x0000: the band
 ; lists, one per horizon, at its foot, then the value sets, the tables of compiled bodies,
 ; the bodies themselves and the runs - for a stretch of bands, and
 ; needing nothing from any other chunk. CHQ4_RET comes from the resident
@@ -7,4 +7,4 @@
 chq4_ret:       EQU CHQ4_RET
 chq3_ret:       EQU CHQ4_RET
 chq5_ret:       EQU CHQ4_RET
-        INCLUDE "chequer9c3.z80s"
+        INCLUDE "chequer9c4.z80s"

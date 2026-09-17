@@ -32,6 +32,11 @@ MINP = int(os.environ.get("HARRIER_MINP", 8))    # narrowest square
                                 # drawn, in pixels: 8 leaves haze above
                                 # the board, 1 takes it to the horizon
 HAZE = 3                        # the colour index the far field gets
+SKY = int(os.environ.get("HARRIER_SKY", 1))     # and the sky: the board's
+                                # own first colour where a copper grades
+                                # the two apart by scanline, an index of
+                                # its own where the palette has to sit
+                                # still
 
 
 def ztab():
@@ -51,22 +56,50 @@ def ptab():
 ZTAB = ztab()
 PTAB = ptab()
 TOP = min(y for y in range(H) if PTAB[y])       # first row with a board
+FULL = [y for y in range(H) if PTAB[y]]         # and every row it covers,
+                                                # which is the deep board a
+                                                # moving horizon samples
+
+
+def step(n):
+    """The DDA step for a board of n scanlines, in 8.8 fixed point.
+
+    The board is always the same picture - the deepest one the tables
+    were built for - and a shallower horizon shows it with scanlines
+    left out rather than squeezed, so that the square at the bottom of
+    the screen is the same size whatever the horizon is doing. This is
+    what steps through the deep board while the shallow one is drawn.
+    """
+    return int(round((len(FULL) - 1) * 256 / (n - 1)))
+
+
+def lines(n):
+    """Which row of the deep board each of n drawn rows shows.
+
+    The accumulator starts at half a step so that the ends are exact:
+    the top drawn row is the deep board's first and the bottom one is
+    its last, whatever rounding does in between. The Z80 keeps the
+    fraction in C and the row in L, so this is the same arithmetic.
+    """
+    d = step(n)
+    return [(0x80 + j * d) >> 8 for j in range(n)]
 
 
 def viewport(hz):
-    """The same two tables for a horizon at another row.
+    """The board's two tables for a horizon at another row.
 
     A square's width and a scanline's depth both depend on the row's
-    distance from the horizon and on nothing else, so moving the
-    horizon does not change the board - it changes how much of it is on
-    the screen. This is what a demo with a horizon that moves asks for,
-    and what lets one run bank serve all of them.
+    distance from the horizon and on nothing else, so ONE set of tables
+    serves every horizon. What changes with the horizon is how many
+    scanlines there are to put them on - and rather than rescale them
+    into the space, which tilts the board and shrinks the squares at
+    the bottom of the screen, the rows in between are dropped.
     """
-    z = [0] * (hz + 1) + [(CAMH * FOCAL) // (y - hz) for y in range(hz + 1, H)]
-    p = [0] * H
-    for y in range(hz + 1, H):
-        w = int(round((S * (y - hz)) / CAMH))
-        p[y] = w if w >= MINP else 0
+    n = H - 1 - hz
+    z, p = [0] * H, [0] * H
+    for y, i in enumerate(lines(n), hz + 1):
+        z[y] = ZTAB[HZ + 1 + i]
+        p[y] = PTAB[HZ + 1 + i]
     return p, z, min(y for y in range(H) if p[y])
 
 
@@ -90,7 +123,7 @@ def frame(camx, camz, hz=None):
     """
     ptab, ztab, top = (PTAB, ZTAB, TOP) if hz is None else viewport(hz)
     hz = HZ if hz is None else hz
-    buf = bytearray(b"\x11" * (STRIDE * H))
+    buf = bytearray(bytes([SKY * 0x11]) * (STRIDE * H))
     for y in range(hz + 1, top):
         buf[y * STRIDE:(y + 1) * STRIDE] = bytes([HAZE * 0x11]) * STRIDE
     par = [0] * H

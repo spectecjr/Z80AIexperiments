@@ -46,11 +46,19 @@ VIEW = {"HARRIER_HZ": "95",     # the deepest board: 96 scanlines, half
         "HARRIER_MINP": "1",    # wide at the bottom of it
         "CHQ_SET": "9",
         "CHQ_ROWS0": "19",      # and the range of boards a horizon may
-        "CHQ_ROWS1": "96"}      # give: 10% of the screen to 50%
+        "CHQ_ROWS1": "96",      # give: 10% of the screen to 50%
+        "CHQ_DYNHZ": "1",       # every one of which gets a band list
+        "HARRIER_SKY": "15"}    # and a flat sky, in an index of its own:
+                                # nothing in this demo changes a palette
+                                # entry by scanline, because a SAM
+                                # services those with a line interrupt
 SAND = {"DESERT_ROWS": "20",    # a shorter band than chequer8's, so that
         "DESERT_SET": "9",      # the tallest board still fits the frame,
-        "DESERT_FIRST": "16"}   # and past the board's chunks in the map
-JET = {"JET_FIRST": "20"}       # the pilot goes past the desert's
+        "DESERT_FIRST": "18",   # and past the board's chunks in the map
+        "DESERT_SKY": "15"}     # with a flat sky, in an index of its own
+JET = {"JET_FIRST": "22",       # the pilot goes past the desert's, and
+       "JET_W": "24",           # is 24x48 here rather than the 32x96 the
+       "JET_H": "48"}           # demos with a pilot who stands still use
 
 
 def main():

@@ -52,7 +52,7 @@ about which of those it is.
 | `chequer6` | **1 px** | **1 px** | **pixels** | **154,607** | 25 Hz, and a pilot in front of it |
 | `chequer7` | **1 px** | **1 px** | **pixels** | **201,281** | 25 Hz, and a city on the horizon |
 | `chequer8` | **1 px** | **1 px** | **pixels** | **190,655** | 25 Hz, 40% of the screen, a desert above it |
-| `chequer9` | **1 px** | **1 px** | **pixels** | **146,642** | 25 Hz, the horizon moving between 10% and 50% |
+| `chequer9` | **1 px** | **1 px** | **pixels** | **141,182** | 25 Hz, the horizon moving between 10% and 50%, and no palette at all |
 
 `chequer4` is the one to use: it draws chequer3's screen — the GIFs come
 out byte for byte identical — with the depth alternation in the pixels
@@ -128,16 +128,29 @@ See `chequer8.md`.
 **And a horizon that moves.** `chequer9` puts the board between 10% of the
 screen and half of it depending on how high the pilot is flying - Space
 Harrier's trick, where the ground rises to meet the player, and not anything
-a camera could actually do. **One run bank serves all 65 positions of it**,
+a camera could actually do. **One run bank serves all 78 positions of it**,
 because a square's width and a scanline's depth are both functions of the
-row's distance from the horizon and of nothing else: the band table is one
-table entered further down, and the 512 swap mask tables are copied as far
-as the horizon says for 522 to 1,754 T-states. The pilot is compiled as one
-walk of `SP` so that he can be anywhere, 16,116 T-states against 14,401
-standing still, and the desert band is 20 scanlines rather than 32.
-90,216 / 146,642 / 193,023, and 199,930 in the worst frame of the sweep -
-83%, with the cheapest frames inside a 50 Hz one. The bank is 95K and the
-map is 22 pages. See `chequer9.md`.
+row's distance from the horizon and of nothing else.
+
+What a shallower horizon does *not* do is rescale the board into the room it
+has: that shrinks the squares at the bottom of the screen and reads as the
+ground tilting away rather than as being flown over. It draws the same 96
+scanline picture with **scanlines left out** - one row in two at 48, one in
+five at 19 - so the near ground keeps its scale and only the depth folded
+into the screen changes. That costs a band list a horizon (17K), one byte a
+band saying how many squares wider the band below it was, and a DDA that
+walks the mask table the same way.
+
+**And there is no palette left.** The distance fade and the graded sky were
+both a copper, which on a SAM is a line interrupt a scanline: about a
+quarter of the frame, and interrupts enabled, which a routine drawing
+through `SP` cannot have. So the board is two flat greens, the sky is one
+blue in an index of its own, and the geometry carries the distance on its
+own. The pilot is 24x48 now, and 8,066 T-states.
+
+85,994 / 141,182 / 194,389, and 191,352 in the worst frame of the sweep -
+81%, with 109 of the GIF's 250 frames inside a 50 Hz one. The bank is 95K
+and 17K of lists, and the map is 24 pages. See `chequer9.md`.
 
 **The camera in the GIFs.** All five demos now share `stroll()` in
 `tests/mkgif.py`: a slide of two and a half squares either way taking

@@ -5,8 +5,8 @@
 
 C9_TOP:         EQU 95          ; the band's first scanline
 C9_ROWS:        EQU 20          ; and how many of them
-C9_SKY:         EQU 0x1111      ; the board's own sky, a pair
-C9_BANK0:       EQU 0x30        ; the rear layer's first chunk
+C9_SKY:         EQU 0xFFFF      ; the board's own sky, a pair
+C9_BANK0:       EQU 0x32        ; the rear layer's first chunk
 
 c9_spans:       ; the front layer, a row at a time:
                 ; first pixel, last pixel, colour, and

@@ -50,7 +50,10 @@ TOP = 115 - ROWS                # the first of them, where the board's
 STRIDE = 128
 PERIOD = 256                    # pixels, which is the screen's width
 
-SKY = 1                         # the board's own sky index; the rest are
+SKY = int(os.environ.get("DESERT_SKY", 1))      # the board's own sky
+                                # index, so that the band grades with the
+                                # rest of the sky - or an index of its own
+                                # where the sky is flat. The rest are
 LIT, SAND, DARK = 7, 6, 5       # the pilot's, which are fixed. The great
 FLIT, FDARK = 12, 4             # pyramid is pale sand with a dull rose
                                 # shadow - aerial perspective, the far

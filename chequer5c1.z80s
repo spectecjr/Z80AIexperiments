@@ -3,7 +3,8 @@
 ; compiled row loop bodies, their runs and the value sets.
 
         ORG 0x0000
-chq4_band:      ; rows, and this band's table of bodies
+chq4_band:
+        ; rows, and this band's table of bodies
         DEFB 2
         DEFW chq5_t49
         DEFB 1

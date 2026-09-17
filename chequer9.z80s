@@ -23,14 +23,29 @@
 ; the horizon up brings coarser ground into view: 3,240 compiled bodies
 ; in four chunks, against chequer8's 2,080 in three.
 ;
-; A HORIZON IS ALLOWED WHEN THE SCREEN'S BOTTOM ROW IS THE LAST ROW OF
-; ITS BAND, because a band is drawn whole. 65 of the 78 rows in the
-; range are - near the horizon a band is a scanline or two, so nearly
-; every row is, and it is the wide bands at the bottom of the screen
-; that rule out runs of them. The table in
-; chequer9hz.z80s has them: the chunk to page in, where in its band
-; table to start, how many scanlines that is, and the widest square,
-; which is what the phase accumulator is seeded with.
+; AND A SHALLOW BOARD LEAVES SCANLINES OUT rather than squeezing the
+; picture into the room it has. Rescaling it - which is what a camera
+; that really pitched would do - shrinks the squares at the bottom of
+; the screen as the horizon comes down, and the ground reads as tilting
+; away rather than as being flown over. So the board is always the same
+; 96 scanline picture and a shallower horizon draws one row of it in
+; two, or in five: the square at the bottom of the screen is the same
+; size at every horizon, and only how much depth is folded into the
+; screen changes.
+;
+; WHICH MEANS A BAND LIST A HORIZON, because which bands are drawn is
+; now what a horizon chooses. Four bytes a band - the scanlines it
+; covers, how many squares wider the band below it was, and where its
+; compiled bodies are - and the list lives in the chunk with those
+; bodies, because that is the one the band loop has mapped. 4,105 band
+; entries over all 78 horizons, which is 17K of a bank that was already
+; 95K, and every row in the range is a horizon now: nothing has to fall
+; on a band boundary any more.
+;
+; The table in chequer9hz.z80s indexes them: the chunk to page in,
+; where this horizon's list starts in it, how many scanlines of board,
+; the widest square - which is what the phase accumulator is seeded
+; with - and the step through the deep board's mask.
 ;
 ; WHAT THE SWAP MASK DOES ABOUT IT: nothing at all. A scanline's depth
 ; is CAMH * FOCAL / (y - horizon), which is the same function of the
@@ -61,29 +76,37 @@ cq9_init:
 ;------------------------------------------------------------------
 
 cq9_frame:
-        LD   A,(cq9_hz)         ; five bytes a horizon, lowest first -
-        LD   L,A                ; and there are 65 of them, so the index
-        LD   H,0                ; does not fit in a byte
-        LD   E,A
+        LD   A,(cq9_hz)         ; seven bytes a horizon, tallest board
+        LD   L,A                ; first, and 78 of them - so the index is
+        LD   H,0                ; hz * 8 - hz rather than anything that
+        LD   E,A                ; fits in a byte
         LD   D,H
         ADD  HL,HL
         ADD  HL,HL
-        ADD  HL,DE
+        ADD  HL,HL
+        OR   A
+        SBC  HL,DE
         LD   DE,chq4_hztab
         ADD  HL,DE
-        LD   A,(HL)             ; the chunk the bottom band is in
-        LD   (chq4_bnk0),A
+        LD   A,(HL)             ; the chunk this horizon's widest band is
+        LD   (chq4_bnk0),A      ; in
         INC  HL
         LD   E,(HL)
         INC  HL
         LD   D,(HL)
-        LD   (chq4_bp0),DE      ; where in its table that band is
+        LD   (chq4_bp0),DE      ; and where its list of bands starts
         INC  HL
         LD   A,(HL)             ; how many scanlines of board
         LD   (chq4_rows),A
         INC  HL
         LD   A,(HL)
-        LD   (chq4_wide),A      ; and the widest square, plus one
+        LD   (chq4_wide),A      ; the widest square, plus one
+        INC  HL
+        LD   A,(HL)             ; and how fast the mask walks the deep
+        LD   (chq4_gf+1),A      ; board: a step of 1.00 draws every
+        INC  HL                 ; scanline of it, 5.28 draws one in five
+        LD   A,(HL)
+        LD   (chq4_gi+1),A
 
         LD   A,(chq4_rows)      ; the swap mask is as long as the board
         DEC  A
@@ -158,7 +181,7 @@ cq9_w1:
         ADD  HL,DE
         DI                      ; SP is about to be the screen
         LD   (cq9_sp),SP
-        LD   DE,CHQ4_C1
+        LD   DE,CHQ4_SKYC
         LD   A,C                ; the rows to put back, and a row's step
         LD   BC,-128
 cq9_w2:
@@ -252,7 +275,7 @@ cq9_sky:
         DI                      ; SP is about to be the screen
         LD   (cq9_sp),SP
         LD   SP,HL
-        LD   DE,CHQ4_C1
+        LD   DE,CHQ4_SKYC
 cq9_s1:
         DUP  64
         PUSH DE

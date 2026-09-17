@@ -153,6 +153,25 @@ def copper(frames, pars, fog, haze=None, fixed=None):
     return out, pal
 
 
+def flat(frames, pal):
+    """One palette, applied to every scanline of every frame.
+
+    What copper() above does is what a SAM cannot: a palette entry is a
+    port, so changing one by scanline is a line interrupt a row, and
+    servicing 192 of those costs about a quarter of the frame and wants
+    interrupts enabled - which a routine with SP on the screen cannot
+    have. A demo that will not pay it has sixteen colours for the whole
+    screen, and this is what that looks like.
+    """
+    out = []
+    for f in frames:
+        g = np.zeros(f.shape, np.uint8)
+        for i, rgb in pal.items():
+            g[f == i] = i
+        out.append(g)
+    return out, [pal.get(i, (0, 0, 0)) for i in range(16)]
+
+
 def unpack(raw):
     """A MODE 4 buffer into one byte a pixel."""
     b = np.frombuffer(raw, dtype=np.uint8).reshape(192, 128)
@@ -683,8 +702,10 @@ def chequer9(outdir, seconds=10):
     """
     import os
     import subprocess
-    env = dict(os.environ, HARRIER_MINP="1", HARRIER_HZ="76",
-               HARRIER_CAMH="308", DESERT_ROWS="20")
+    env = dict(os.environ, HARRIER_MINP="1", HARRIER_HZ="95",
+               HARRIER_CAMH="308", DESERT_ROWS="20",
+               HARRIER_SKY="15", DESERT_SKY="15",
+               JET_W="24", JET_H="48")
     here = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "mkgif.py")
     subprocess.run([sys.executable, here, "--chequer9", outdir,
@@ -695,7 +716,7 @@ def corners(t):
     """Round the four corners of the screen, a leg at a time, easing in
     and out of each so that the turns read as turns."""
     import math
-    legs = ((10, 0), (100, 0), (100, 96), (10, 96))     # byte, row
+    legs = ((10, 0), (100, 0), (100, 144), (10, 144))   # byte, row
     n = len(legs)
     k = int(t * n) % n
     u = t * n - int(t * n)
@@ -714,13 +735,13 @@ def _chequer9(outdir, seconds=10):
     """
     import jetpack as J
     from mkchqdata import sam
-    from mkhrdata import fog as fogtab
     from sam import Sam
     import chequer9 as C9
     b = Sam("harness_chq9.asm",
             ("harness_chq9c0.asm", "harness_chq9c1.asm",
              "harness_chq9c2.asm", "harness_chq9msk0.asm",
              "harness_chq9msk1.asm", "harness_chq9c3.asm",
+             "harness_chq9c4.asm",
              "harness_desert9_0.asm", "harness_desert9_1.asm",
              "harness_jetmove.asm"), screens=(10, 12),
             chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"],
@@ -729,13 +750,15 @@ def _chequer9(outdir, seconds=10):
                                      "CQ9_R": y["cq9_ret"]})
     s = b.syms
     b.call(s["cq9_init"])
-    fog, haze = fogtab()
-    fixed = {i: sam_rgb(sam(*rgb)) for i, rgb in J.PAL.items()}
+    pal = {i: sam_rgb(sam(*rgb)) for i, rgb in J.PAL.items()}
+    pal[1] = sam_rgb(sam(0, 7, 2))      # the board's two greens, which no
+    pal[2] = sam_rgb(sam(0, 3, 1))      # longer grade into the distance,
+    pal[15] = sam_rgb(sam(0, 2, 6))     # and one flat sky
     n, m = int(seconds * 25), len(C9.HORIZONS)
     frames, ts, last = [], [], 56
     for t in range(n):
         px, py = corners(t / n)
-        hz = min(m - 1, max(0, round((m - 1) * py / 96)))
+        hz = min(m - 1, max(0, round((m - 1) * py / 144)))
         camx = (px - 56) * 40           # the board and the desert follow
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], (26 * t & 0xFFFF).to_bytes(2, "little"))
@@ -747,8 +770,7 @@ def _chequer9(outdir, seconds=10):
         last = px
         ts.append(b.call(s["cq9_frame"]))
         frames.append(unpack(b.screen(b.shown())))
-    still = [[0] * 192] * n
-    idx, pal = copper(frames, still, fog, haze, fixed)
+    idx, pal = flat(frames, pal)
     p = "%s/chequer9.gif" % outdir
     durs = held(ts)
     size = write_gif(p, idx, pal, durs)
