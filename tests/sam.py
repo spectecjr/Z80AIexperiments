@@ -155,6 +155,48 @@ class Sam:
 
     # --- calling ---------------------------------------------------
 
+    def traffic(self, entry):
+        """One call, with every memory cycle it takes counted.
+
+        Contention on a real SAM is paid per memory ACCESS rather than
+        per T-state: the ASIC is fetching the display out of the same
+        DRAM, and a routine that spends its time in registers loses less
+        to it than one that spends its time in PUSH. Nothing here models
+        the contention - that wants rules this repo has not got - but
+        the traffic it would be charged on is measurable, and it is the
+        half of the sum that depends on the code rather than on the
+        machine.
+
+        Reads include every opcode fetch, because the bus does not care
+        why it was busy. Returns (T-states, reads, writes, and how many
+        of the writes landed on the screen).
+        """
+        m, view = self.m, self.view
+        lo, hi = 0x8000, 0x8000 + SCREEN        # the back buffer, mapped
+        n = [0, 0, 0]
+
+        def rd(addr):
+            n[0] += 1
+            return view[MEMOFF + addr]
+
+        def wr(addr, value):
+            n[1] += 1
+            if lo <= addr < hi:
+                n[2] += 1
+            view[MEMOFF + addr] = value
+            return 0
+
+        marks = z80.Z80Machine.READ_MARK | z80.Z80Machine.WRITE_MARK
+        m.set_read_callback(rd)
+        m.set_write_callback(wr)
+        m.mark_addrs(0, 0x10000, marks)
+        try:
+            t = self.call(entry)
+        finally:
+            m.unmark_addrs(0, 0x10000, marks)   # and back to full speed:
+        return (t,) + tuple(n)                  # a marked access is a
+                                                # call into Python
+
     def call(self, entry):
         """T-states for one call, stopping on the HALT at RETADDR."""
         m = self.m

@@ -88,6 +88,48 @@ highlights are the helmet's grey, which leaves him nine. The board has four,
 the desert six (four of them the board's, plus green palms and a deep shadow
 for the near pyramids), and the sky one. See `chequer9.md`.
 
+## 1b. Memory traffic, which is what contention is charged on
+
+Every figure above is raw T-states. On a real SAM the ASIC is fetching the
+display out of the same DRAM, and what it takes is **memory cycles, not
+time**: a routine that spends its time in registers loses less to contention
+than one that spends its time in `PUSH`. So `tests/sam.py`'s `traffic()`
+counts the cycles a frame takes - every opcode fetch, read and write, served
+through the emulator's access callbacks - which is the half of the sum that
+depends on the code rather than on the machine.
+
+| `chequer9`, a frame | cycles | T-states a cycle | of which screen bytes |
+|---|---|---|---|
+| at the tallest board | 49,131 | **3.73** | 15,977 |
+| at the shortest | 23,598 | 3.82 | 6,267 |
+
+Against the floor for each way of moving bytes:
+
+| | T-states | cycles | T-states a cycle |
+|---|---|---|---|
+| `PUSH DE`, a pair | 11 | 3 | **3.67** |
+| `LDI` | 16 | 4 | 4.00 |
+| `POP BC` / `PUSH BC` | 21 | 5 | 4.20 |
+| `LD (HL),A` / `INC HL` | 13 | 3 | 4.33 |
+
+**3.73 against a floor of 3.67 means the bus is saturated.** There is no
+register-heavy slack in this frame for contention to come out of - which is
+the answer to how exposed these routines are: maximally. A demo built out of
+arithmetic rather than `PUSH` would be at six or eight T-states a cycle and
+would lose proportionally less.
+
+Two things bound how bad that is. Contention only applies while the ASIC is
+fetching: 192 display lines of 256 T-states each, which is 49,152 of the
+119,808 in a frame, or **41%** (*inferred* from 6 MHz, 50 Hz and PAL - the
+manual's line timing is not in the skill). And `BORDER` bit 7, SOFF, blanks
+MODE 3 and 4 and removes contention outright, which is worth having during a
+precompute.
+
+What is still missing is the stretch factor itself - how many T-states a
+contended access actually costs - which wants the technical manual's
+contention rules or SimCoupe's implementation rather than a guess. The
+traffic is measured; the multiplier is not.
+
 ## 1a. The floors, measured
 
 | | T-states | |

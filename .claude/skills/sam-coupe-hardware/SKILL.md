@@ -162,7 +162,13 @@ for those.
 Contention is **consistent in internal memory whatever the paging set-up**,
 so a routine's T-state count does not change because it pages. The repo's
 figures are raw Z80 T-states with real contention on top - `costs.md` says
-so at the head of the table. The manual notes ROM runs slightly faster than
+so at the head of the table, and `costs.md` §1b measures the thing
+contention is actually charged on: **memory cycles a frame**, counted by
+`tests/sam.py`'s `traffic()`. chequer9 runs at 3.73 T-states a cycle against
+a `PUSH` fill's floor of 3.67, so these routines are as exposed as a Z80
+program can be. What is not modelled is the stretch factor - how much a
+contended access costs - which wants the manual's rules rather than a
+guess. The manual notes ROM runs slightly faster than
 RAM for the same code, and that `002B` holds a `DJNZ $` for uncontended
 timing loops.
 

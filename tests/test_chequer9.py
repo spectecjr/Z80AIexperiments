@@ -103,6 +103,20 @@ def main():
     print("  cq9_frame at the tallest board   %7d T-states" % max(lo))
     print("  %-40s %.1f%% of a 25 Hz frame at its worst"
           % ("which is", max(times) / 2400))
+
+    print()                             # and what a real SAM would be
+    for hz, name in ((0, "tallest"), (n - 1, "shortest")):   # charged
+        for _ in range(2):              # contention on: a copy of the
+            b.poke(s["cq9_hz"], bytes([hz]))    # resident block sits behind
+            b.poke(s["cq9_px"], bytes([56]))    # each buffer, so both want
+            b.poke(s["cq9_py"], bytes([0 if hz else 144]))   # feeding
+            b.call(s["cq9_frame"])
+        t, r, w, scr = b.traffic(s["cq9_frame"])
+        print("  memory traffic, %-9s board %7d cycles, one every %.2f"
+              " T-states" % (name, r + w, t / (r + w)))
+        print("  %-40s %d of them bytes onto the screen" % ("", scr))
+    print("  %-40s 3.67 T-states a cycle" % "a PUSH fill, for scale, is")
+
     ok = bad == 0
     print("\n%s" % ("ALL TESTS PASSED" if ok else "FAILURES: %d" % bad))
     return 0 if ok else 1

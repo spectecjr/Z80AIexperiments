@@ -336,6 +336,14 @@ quantisation - still for three frames, then nineteen pixels in one. The
 worst change of speed from one frame to the next goes from 6.2 pixels to 1.6
 by keeping one float.
 
+**And the frame is bus-bound, not instruction-bound.** `tests/sam.py`'s
+`traffic()` counts the memory cycles a call takes - every fetch, read and
+write - because that, not time, is what the ASIC's contention is charged on:
+49,131 cycles at the tallest board, one every **3.73 T-states**, against
+3.67 for a `PUSH` fill that does nothing else. There is no slack in it for
+contention to come out of. `costs.md` §1b has the rest, including why that
+is bounded by the 41% of a frame the display is actually being fetched in.
+
     python3 tests/mkchq9data.py               # the board, the desert, the pilot
     python3 tests/jetpack.py /tmp/pilot.png   # look at him, at whatever size
     python3 tests/test_chequer9.py            # verify against the model
