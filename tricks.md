@@ -894,7 +894,7 @@ this - Space Harrier's scenery pops from one size to the next as it comes in
 - and at 25 Hz the pop is invisible against the movement.
 
 chequer10's tree is eight sizes, 13 to 135 scanlines, **3,773 bytes for the
-lot**: a quarter of a page, against a scaler that would have been a few
+lot**, and three of them stand on the board at once out of the same eight: a quarter of a page, against a scaler that would have been a few
 hundred bytes and several times the T-states every frame. 903 T-states to
 draw the smallest and 21,806 the largest, which is 14.2 a byte drawn - the
 floor for a masked compiled sprite with 7% of its bytes on an edge.
@@ -918,6 +918,24 @@ into, so the fill is sixteen `PUSH DE` in a row and the caller enters at
 for every box. It is why a sprite's box here is rounded to a whole number of
 `PUSH` pairs - 2, 2, 4, 4, 6, 10, 14, 16 bytes - which costs a pixel column
 of air and saves a general fill.
+
+**Several objects want slots, not a sorter.** Draw them furthest first and a
+nearer one paints over a further one, which is the whole of the depth
+ordering for a handful of things standing on a plane - the caller keeps the
+slots sorted, which is three numbers a frame at three of them. Map the
+sprite page in once for the lot rather than per object, and remember what
+that costs: the caller's own stack is in the chunk that has just been paged
+away, so nothing in the loop may `PUSH`, `POP` or `CALL`, the slot it is on
+has to be a cell rather than a register, and the sizes' shared return label
+becomes the top of the loop rather than the way out. Anything else that
+entered a sprite the same way - the pilot - then needs a return label of its
+own.
+
+**What makes several of them affordable is the staggering, not the code.**
+One tree at 135 scanlines is 22,190 T-states and a frame has about 30,000
+spare; three near ones would not fit, and three a third of a life apart cost
+31,036 because two of them are always small. Spread in depth is a budget
+decision that looks like a design decision.
 
 **And an object on a decimated board stands on the row whose depth matches,
 not on a row computed from its depth.** A shallow board is the deep one with

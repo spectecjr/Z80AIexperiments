@@ -4,8 +4,8 @@
 ;   cq10_init    sky into both buffers, once
 ;   cq10_frame   draw from (chq4_camx, chq4_camz, cq10_hz), and flip
 ;
-; chequer9's frame with one piece of scenery standing on the board: a
-; Space Harrier tree, at whichever of its eight sizes its distance
+; chequer9's frame with scenery standing on the board: three Space
+; Harrier trees, each at whichever of its eight sizes its distance
 ; calls for, drawn over the board and the desert and under the pilot.
 ;
 ; A SCALED SPRITE IS EIGHT SPRITES. Scaling a masked shape as it is
@@ -17,24 +17,31 @@
 ; put SP at the byte after the bottom right corner of the box and jump
 ; in. 24 T-states at the smallest size and 21,466 at the largest.
 ;
-; WHERE IT STANDS IS THE CALLER'S BUSINESS. cq10_tk, cq10_tx and
-; cq10_ty are its size, its left hand byte and the row it stands on;
-; the demo works those out from the tree's depth and the same
-; perspective the board is drawn with, and this draws what it is told.
-; A size of TREE_N or more is no tree at all, which is how it leaves.
+; WHERE THEY STAND IS THE CALLER'S BUSINESS. cq10_tk, cq10_tx and
+; cq10_ty are three sizes, three left hand bytes and three rows to
+; stand on; the demo works those out from each tree's depth and the
+; same perspective the board is drawn with, and this draws what it is
+; told. A size of TREE_N or more is no tree at all, which is how one
+; leaves. SLOT 0 IS THE FURTHEST: they are drawn in that order, so a
+; nearer tree paints over a further one and the caller keeps them
+; sorted - which it does by construction, planting them at staggered
+; depths.
 ;
 ; AND WHAT IT LEAVES BEHIND HAS TO BE PUT BACK. The band and the board
 ; repaint everything below the band's top every frame, so a tree that
 ; stands on the board needs nothing - but a near one is taller than the
 ; board is and reaches into the sky, and the sky is painted once.
 ; cq10_wipe puts back the part of a box that is above the band's top,
-; and the tree and the pilot both want it: a box each per buffer,
+; and the trees and the pilot all want it: four boxes per buffer,
 ; because each buffer was last drawn two frames ago with them somewhere
 ; else. It is entered at 16 - pairs of a block of PUSHes, which is why
 ; a sprite's box here is a whole number of pairs wide.
 ;
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
+
+CQ10_TREES:     EQU 3           ; how many of them stand on the board at
+                                ; once, furthest first
 
 ;------------------------------------------------------------------
 ; cq10_init - sky into both buffers
@@ -125,42 +132,60 @@ cq10_frame:
 cq10_gone:
         LD   A,(cq10_oy)        ; the pilot, if he has ever been here
         INC  A
-        JR   Z,cq10_g1
+        JR   Z,cq10_g0
         DEC  A                  ; his top row
         LD   B,JET_H
         LD   C,JET_W
         LD   HL,cq10_ox
         LD   D,(HL)
         CALL cq10_wipe
+cq10_g0:
+        XOR  A                  ; and each tree that was in this buffer
+        LD   (cq10_gi),A
 cq10_g1:
-        LD   A,(cq10_otk)       ; and the tree, if there was one
+        LD   A,(cq10_gi)
+        CP   CQ10_TREES
+        JR   NC,cq10_g3
+        LD   E,A
+        LD   D,0
+        LD   HL,cq10_otk
+        ADD  HL,DE
+        LD   A,(HL)
         CP   TREE_N
-        JR   NC,cq10_g2
+        JR   NC,cq10_g2         ; that slot was empty
         ADD  A,A                ; two bytes a size: wide, and tall
         LD   L,A
         LD   H,0
-        LD   DE,tree_box
-        ADD  HL,DE
+        LD   BC,tree_box
+        ADD  HL,BC
         LD   C,(HL)
         INC  HL
         LD   B,(HL)
-        LD   A,(cq10_oty)       ; it stands ON its bottom row, so its top
+        LD   HL,cq10_otx
+        ADD  HL,DE
+        LD   A,(HL)
+        LD   (cq10_gx),A        ; its left hand byte
+        LD   HL,cq10_oty
+        ADD  HL,DE
+        LD   A,(HL)             ; it stood ON its bottom row, so its top
         SUB  B                  ; is that many scanlines above
         INC  A
-        LD   HL,cq10_otx
+        LD   HL,cq10_gx
         LD   D,(HL)
         CALL cq10_wipe
 cq10_g2:
-        LD   A,(cq10_px)        ; and now they are here
-        LD   (cq10_ox),A
-        LD   A,(cq10_py)
+        LD   HL,cq10_gi
+        INC  (HL)
+        JR   cq10_g1
+cq10_g3:
+        LD   A,(cq10_px)        ; and now they are here - drawn or not,
+        LD   (cq10_ox),A        ; because a tree that has gone still has to
+        LD   A,(cq10_py)        ; be wiped out of the buffer it was last in
         LD   (cq10_oy),A
-        LD   A,(cq10_tk)
-        LD   (cq10_otk),A
-        LD   A,(cq10_tx)
-        LD   (cq10_otx),A
-        LD   A,(cq10_ty)
-        LD   (cq10_oty),A
+        LD   HL,cq10_tk         ; the three slots are nine contiguous bytes
+        LD   DE,cq10_otk        ; and so is this buffer's record of them
+        LD   BC,3 * CQ10_TREES
+        LDIR
         RET
 
 ;------------------------------------------------------------------
@@ -234,44 +259,72 @@ cq10_wp:
         RET
 
 ;------------------------------------------------------------------
-; cq10_tree - the tree where it stands now
+; cq10_tree - the trees where they stand now, far to near
 ;
-; Its page goes in over the board's bank for the length of it, and the
-; compiled size is one walk of the stack pointer from the byte after
-; the bottom right corner of its box to the top left - so all this has
-; to do is put SP there. The box comes out of the resident copy of the
-; table, because SP has to be on the corner before the page that holds
-; the sprite is mapped over the board's. No CALL in between: the
-; caller's stack is not mapped.
+; Their page goes in over the board's bank for the length of all three,
+; and each compiled size is one walk of the stack pointer from the byte
+; after the bottom right corner of its box to the top left - so all
+; this has to do is put SP there and jump in. The size comes back to
+; cq10_ret, which is the top of the loop.
+;
+; NOTHING MAY TOUCH THE STACK while the page is in: the caller's own is
+; in chunk 0, which is what has just been paged away. So the slot the
+; loop is on is a cell rather than a register, and the box comes out of
+; the resident copy of the table - which is still mapped, because LMPR
+; maps the low 32K and this block lives at the top of the high one.
+;
+; SLOT 0 IS THE FURTHEST. They are drawn in order, so a nearer tree
+; paints over a further one, and the caller has only to keep them
+; sorted - which it does by construction, because it plants them at
+; staggered depths.
 ;------------------------------------------------------------------
 
 cq10_tree:
-        LD   A,(cq10_tk)
+        LD   A,255              ; before the first slot: cq10_ret's INC
+        LD   (cq10_ti),A        ; lands on 0
+        DI
+        LD   (cq10_sp),SP
+        LD   A,TREE_BANK        ; their page, over the board's bank
+        OUT  (CHQ4_LMPR),A
+
+cq10_ret:                       ; where every size comes back to
+        LD   HL,cq10_ti
+        INC  (HL)
+        LD   A,(HL)
+        CP   CQ10_TREES
+        JR   NC,cq10_t9         ; all of them drawn
+        LD   E,A
+        LD   D,0
+        LD   HL,cq10_tk
+        ADD  HL,DE
+        LD   A,(HL)
         CP   TREE_N
-        RET  NC                 ; no tree this frame
-        ADD  A,A
+        JR   NC,cq10_ret        ; no tree in this slot
+        LD   (cq10_tc),A        ; keep it: the table wants it too
+        ADD  A,A                ; two bytes a size in the box table
         LD   L,A
         LD   H,0
-        LD   DE,tree_box
-        ADD  HL,DE
+        LD   BC,tree_box
+        ADD  HL,BC
         LD   C,(HL)             ; how many bytes wide it is
-        LD   A,(cq10_ty)        ; the byte after its bottom right corner,
-        LD   H,A                ; which is the row it stands on
+        LD   HL,cq10_tx
+        ADD  HL,DE
+        LD   B,(HL)             ; its left hand byte
+        LD   HL,cq10_ty
+        ADD  HL,DE
+        LD   A,(HL)             ; and the row it stands on, which is the
+        LD   H,A                ; bottom of its box
         LD   L,0
         SRL  H
         RR   L
-        LD   A,(cq10_tx)
-        ADD  A,C
+        LD   A,B
+        ADD  A,C                ; one past its right hand end
         LD   E,A
         LD   D,0
         ADD  HL,DE
         LD   DE,CHQ4_SCREEN
         ADD  HL,DE
-        DI
-        LD   (cq10_sp),SP
-        LD   A,TREE_BANK        ; its page, over the board's bank
-        OUT  (CHQ4_LMPR),A
-        LD   A,(cq10_tk)        ; four bytes a size in the table there
+        LD   A,(cq10_tc)        ; four bytes a size in the page's table
         ADD  A,A
         ADD  A,A
         LD   E,A
@@ -286,7 +339,7 @@ cq10_tree:
         EX   DE,HL
         JP   (HL)               ; in, and out at cq10_ret
 
-cq10_ret:
+cq10_t9:
         LD   SP,(cq10_sp)
         LD   A,CHQ4_BANK        ; the caller's stack is in chunk 0
         OUT  (CHQ4_LMPR),A
@@ -331,7 +384,14 @@ cq10_pilot:
         EX   DE,HL              ; and back again
         LD   SP,HL
         EX   DE,HL
-        JP   (HL)               ; in, and out at cq10_ret
+        JP   (HL)               ; in, and out at cq10_pret
+
+cq10_pret:                      ; his own way back, because the tree's is
+        LD   SP,(cq10_sp)       ; the top of a loop over three of them
+        LD   A,CHQ4_BANK
+        OUT  (CHQ4_LMPR),A
+        EI
+        RET
 
 ;------------------------------------------------------------------
 ; cq10_sky - put back the rows the band and the board have given up
@@ -374,14 +434,24 @@ cq10_seen:      DEFB 0          ; and how many scanlines of board this
 cq10_px:        DEFB 56         ; where the pilot is: his left hand byte
 cq10_py:        DEFB 48         ; and his top row, both from the caller
 cq10_pose:      DEFB 1          ; 0 banking left, 1 level, 2 right
-cq10_tk:        DEFB 255        ; and the tree: its size, TREE_N or more
-cq10_tx:        DEFB 0          ; for none, its left hand byte, and the
-cq10_ty:        DEFB 0          ; row it stands on
+cq10_tk:        DEFB 255,255,255        ; and the trees, furthest first:
+cq10_tx:        DEFB 0,0,0      ; each one's size, TREE_N or more for no
+cq10_ty:        DEFB 0,0,0      ; tree, its left hand byte, and the row it
+                                ; stands on. Nine contiguous bytes, because
+                                ; latching them is one LDIR
 cq10_ox:        DEFB 0          ; where they are in THIS buffer, which is
 cq10_oy:        DEFB 255        ; what has to be put back: 255 for nowhere
-cq10_otk:       DEFB 255
-cq10_otx:       DEFB 0
-cq10_oty:       DEFB 0
+cq10_otk:       DEFB 255,255,255
+cq10_otx:       DEFB 0,0,0
+cq10_oty:       DEFB 0,0,0
+        ASSERT cq10_tx == cq10_tk + CQ10_TREES
+        ASSERT cq10_ty == cq10_tx + CQ10_TREES
+        ASSERT cq10_otx == cq10_otk + CQ10_TREES
+        ASSERT cq10_oty == cq10_otx + CQ10_TREES
+cq10_ti:        DEFB 0          ; the slot cq10_tree is drawing, and the one
+cq10_gi:        DEFB 0          ; cq10_gone is putting back
+cq10_tc:        DEFB 0          ; the size that slot holds
+cq10_gx:        DEFB 0          ; and the left hand byte of the box it left
 cq10_wt:        DEFB 0          ; and the box cq10_wipe is working on
 cq10_wh:        DEFB 0
 cq10_sp:        DEFS 2

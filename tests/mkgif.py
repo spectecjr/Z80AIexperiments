@@ -872,7 +872,7 @@ def _chequer10(outdir, seconds=10):
             chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"],
                                      "CHQ4_SCR": y["CHQ4_SCREEN"],
                                      "C9_RET": y["c9_ret"],
-                                     "CQ9_R": y["cq10_ret"],
+                                     "CQ9_R": y["cq10_pret"],
                                      "CQ10_R": y["cq10_ret"]})
     s = b.syms
     b.call(s["cq10_init"])
@@ -890,12 +890,14 @@ def _chequer10(outdir, seconds=10):
                                         # chequer9's: what a tree standing
                                         # still closes at, and the ground
                                         # with it
-    far, near, trip = 6800, 650, 77     # a tree's life: planted at a depth
-                                        # that asks for the smallest sprite
+    far, near = 6800, 650               # a tree's life: planted at a depth
+    life = (far - near) // step         # that asks for the smallest sprite
                                         # of the eight, gone when it has
-                                        # filled the bottom of the screen,
-                                        # and (far - near) / step frames in
-                                        # between
+                                        # filled the bottom of the screen
+    across = (-330, 310, -130, 250, -210, 150)  # and somewhere new across
+                                        # the playfield each time, so that
+                                        # the three of them are never in a
+                                        # line
     cam = []                            # where the camera is every frame,
     for t in range(n):                  # which a tree needs to know before
         fx, fy = corners(t / n, exact=True)     # it is planted: it is
@@ -905,21 +907,26 @@ def _chequer10(outdir, seconds=10):
                                         # so that the pilot's own panning
                                         # does not sweep it off the side of
                                         # the screen on the way in
-    frames, ts, last = [], [], 56
-    tz, side = None, 1
+    frames, ts, last, sown = [], [], 56, 0
+    trees = [None] * C10.SLOTS          # each one a (depth, world x), and
+    for j in range(C10.SLOTS):          # they start a third of a life
+        trees[j] = (far - j * (far - near) // C10.SLOTS, None)  # apart
     for t in range(n):
         camx, hz, fx, fy = cam[t]
         camz = step * t
         px, py = round(fx), round(fy)
-        if tz is None:                  # plant the next one, on the other
-            side = -side                # side of the flight path
-            tz = camz + far
-            tx = cam[min(n - 1, t + trip)][0] + 220 * side
-        at = C10.place(hz, camx, camz, tx, tz)
-        tk, tix, tiy = at if at else (255, 0, 0)
-        if tz - camz < near or (at is None and tz - camz < 3200):
-            tz = None                   # it has arrived, or the camera has
-                                        # panned it off the side
+        for j, (d, x) in enumerate(trees):
+            if x is None or d < near:   # plant it, or plant its successor
+                d = far if x is not None else d
+                x = cam[min(n - 1, t + (d - near) // step)][0] \
+                    + across[sown % len(across)]
+                sown += 1
+                trees[j] = (d, x)
+        here = []                       # where each of them is now, and
+        for d, x in trees:              # furthest first, which is the
+            at = C10.place(hz, camx, camz, x, camz + d)     # order the Z80
+            here.append((d, at if at else (255, 0, 0)))     # draws them in
+        here.sort(key=lambda p: -p[0])
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], (camz & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["cq10_hz"], bytes([hz]))
@@ -927,12 +934,13 @@ def _chequer10(outdir, seconds=10):
         b.poke(s["cq10_py"], bytes([py]))
         b.poke(s["cq10_pose"],          # banking the way he is going
                bytes([1 + (1 if px > last else -1 if px < last else 0)]))
-        b.poke(s["cq10_tk"], bytes([tk]))
-        b.poke(s["cq10_tx"], bytes([tix]))
-        b.poke(s["cq10_ty"], bytes([tiy]))
+        b.poke(s["cq10_tk"], bytes(a[0] for _, a in here))
+        b.poke(s["cq10_tx"], bytes(a[1] for _, a in here))
+        b.poke(s["cq10_ty"], bytes(a[2] for _, a in here))
         last = px
         ts.append(b.call(s["cq10_frame"]))
         frames.append(unpack(b.screen(b.shown())))
+        trees = [(d - step, x) for d, x in trees]
     idx, pal = flat(frames, pal)
     p = "%s/chequer10.gif" % outdir
     durs = [2 * TICK] * n               # 25 Hz throughout: the worst frame
@@ -942,6 +950,9 @@ def _chequer10(outdir, seconds=10):
     report(p, size, n, durs, secs, got, bad)
     print("    %-38s %d / %d / %d T-states"
           % ("the frames cost", min(ts), sum(ts) // len(ts), max(ts)))
+    print("    %-38s %d of %d frames, worst %.1f%%"
+          % ("over 90% of a 25 Hz frame",
+             sum(1 for t in ts if t > 216000), len(ts), max(ts) / 2400))
 
 
 def zarch(outdir, seconds=8):

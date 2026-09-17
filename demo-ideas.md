@@ -53,7 +53,7 @@ about which of those it is.
 | `chequer7` | **1 px** | **1 px** | **pixels** | **201,281** | 25 Hz, and a city on the horizon |
 | `chequer8` | **1 px** | **1 px** | **pixels** | **190,655** | 25 Hz, 40% of the screen, a desert above it |
 | `chequer9` | **1 px** | **1 px** | **pixels** | **139,314** | 25 Hz, a four colour board, the horizon moving between 10% and 50%, no palette changes at all |
-| `chequer10` | **1 px** | **1 px** | **pixels** | **144,254** | and scenery: a tree compiled at eight sizes, standing on the board |
+| `chequer10` | **1 px** | **1 px** | **pixels** | **153,882** | and scenery: three trees compiled at eight sizes, standing on the board |
 
 `chequer4` is the one to use: it draws chequer3's screen — the GIFs come
 out byte for byte identical — with the depth alternation in the pixels
@@ -179,7 +179,8 @@ read faster over the same ground. At its peak the bottom row now travels
 **18.8 pixels a frame** where it travelled 37.5, which is still above the 12
 that read as a lurch below; a quarter of the original would put it at 9.4.
 
-**And then scenery.** `chequer10` stands a Space Harrier tree on that board.
+**And then scenery.** `chequer10` stands three Space Harrier trees on that
+board, at staggered depths.
 A scaled sprite is **eight sprites**, because scaling a masked shape as it is
 drawn costs a Z80 several times what drawing it does - so the tree is
 compiled at the eight heights the arcade uses and pops from one to the next
@@ -188,10 +189,20 @@ own trick, one descending walk of `SP` over its box, and `tests/mksprite.py`
 is now that walk with both generators calling it.
 
 3,773 bytes for the eight, 903 T-states to draw the smallest and 21,806 the
-largest, and 24,710 in the frame for the largest because its box reaches
+largest, and 24,720 in the frame for the largest because its box reaches
 into sky that is painted once. **Nothing clips**: a walk of `SP` writes where
 it is put, so the caller has to know the box fits - which is exactly how a
 tree leaves, growing until the frame it would no longer fit in.
+
+**Three of them is three slots and no depth buffer.** They are drawn furthest
+first, so a nearer tree paints over a further one, and keeping the slots in
+that order is a sort of three numbers a frame. The page goes in once for all
+three, which means the loop runs with the caller's own stack paged away:
+nothing in it may `PUSH`, `POP` or `CALL`, so the slot it is on is a cell and
+the boxes come out of the resident copy of the table. What keeps three of
+them affordable is the staggering - a third of a life apart, so when the near
+one is 135 scanlines the others are 27 and 19, and the three cost 31,036
+rather than the 66,000 three near ones would.
 
 The arithmetic that places it is the interesting half. It stands on **the
 drawn row whose depth is nearest its own**, not on a row computed from its
@@ -201,8 +212,8 @@ beside where the camera *will* be when it arrives: the camera pans ±900
 world units with the pilot, and a tree planted beside where the camera is
 now is swept off the side of the screen long before it gets close.
 
-88,358 / 144,254 / 210,517 - 88% of a 25 Hz frame at its worst, and 26 pages.
-See `chequer10.md`.
+94,465 / 153,882 / 222,452 - 93% of a 25 Hz frame at its worst, four frames
+of 250 over 90%, and 26 pages. See `chequer10.md`.
 
 **The camera in the GIFs.** All five earlier demos share `stroll()` in
 `tests/mkgif.py`: a slide of two and a half squares either way taking

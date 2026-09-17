@@ -1,15 +1,15 @@
 #!/usr/bin/env python3
-"""Verify and time chequer10 - a tree standing on the moving board.
+"""Verify and time chequer10 - three trees standing on the moving board.
 
     pip install z80
     python3 tests/test_chequer10.py
 
 chequer9's sweep with scenery in it: every horizon from 10% of the
-screen to 50% of it, the pilot going round the screen, and a tree
-coming in from the distance through all eight of its sizes. Both
-sprites leave a box of sky behind them when they move, and putting that
+screen to 50% of it, the pilot going round the screen, and three trees
+coming in from the distance through all eight of their sizes. Every
+sprite leaves a box of sky behind it when it moves, and putting that
 back is per buffer - so the sweep walks the horizon up and down and
-moves both of them every frame rather than jumping about.
+moves all four of them every frame rather than jumping about.
 """
 import os
 import sys
@@ -49,12 +49,18 @@ def corner(i):
 
 
 def standing(i, hz, camx, camz):
-    """A tree at the depth that asks for size i % 8, somewhere across
-    the board - so every size is drawn at every part of the sweep."""
-    k = i % len(T.SIZES)
-    d = TREEH * HR.FOCAL / T.SIZES[k]
-    x = camx + (((i * 37) % 9) - 4) * 256
-    return C.place(hz, camx, camz, x, camz + d)
+    """Three trees, furthest first: one at the depth that asks for size
+    i % 8 and two further out, spread across the board - so every size
+    is drawn at every part of the sweep, and the slots are always in
+    the order the Z80 draws them in."""
+    out = []
+    for j in range(C.SLOTS):
+        k = (i + 2 * j) % len(T.SIZES)
+        d = TREEH * HR.FOCAL / T.SIZES[k]
+        x = camx + (((i * 37 + 83 * j) % 9) - 4) * 256
+        out.append((d, C.place(hz, camx, camz, x, camz + d)))
+    out.sort(key=lambda p: -p[0])       # furthest first
+    return [at if at else (255, 0, 0) for _, at in out]
 
 
 TREEH = C.TREEH
@@ -76,15 +82,25 @@ def steady(b, s, fields):
     behind the buffer about to be drawn, and there is one behind each -
     the camera included, which is what makes a board cost what it does.
     So a setting has to be poked for both buffers before what it costs
-    is what it would cost in a demo.
+    is what it would cost in a demo. Values are bytes, so that a whole
+    row of tree slots can be poked at once.
     """
     for _ in range(3):
         b.poke(s["chq4_camx"], CAM[0].to_bytes(2, "little"))
         b.poke(s["chq4_camz"], CAM[1].to_bytes(2, "little"))
         for a, v in fields:
-            b.poke(s[a], bytes([v]))
+            b.poke(s[a], bytes(v) if isinstance(v, (list, tuple)) else
+                   bytes([v]))
         t = b.call(s["cq10_frame"])
     return t
+
+
+def slots(*trees):
+    """The three slots as the Z80 holds them: sizes, lefts, rows."""
+    trees = list(trees) + [(255, 0, 0)] * (C.SLOTS - len(trees))
+    return [("cq10_tk", [t[0] for t in trees]),
+            ("cq10_tx", [t[1] for t in trees]),
+            ("cq10_ty", [t[2] for t in trees])]
 
 
 def main():
@@ -92,7 +108,7 @@ def main():
             chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"],
                                      "CHQ4_SCR": y["CHQ4_SCREEN"],
                                      "C9_RET": y["c9_ret"],
-                                     "CQ9_R": y["cq10_ret"],
+                                     "CQ9_R": y["cq10_pret"],
                                      "CQ10_R": y["cq10_ret"]})
     s = b.syms
     print("  %-40s %d, pages %s"
@@ -107,29 +123,28 @@ def main():
         camx = -3000 + 211 * i
         camz = 900 * (i % 5)
         px, py, pose = corner(i)
-        at = standing(i, hz, camx, camz)
-        tk, tx, ty = at if at else (255, 0, 0)
-        seen.add(tk)
+        trees = standing(i, hz, camx, camz)
+        seen |= {tk for tk, _, _ in trees}
         b.poke(s["chq4_camx"], (camx & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["chq4_camz"], (camz & 0xFFFF).to_bytes(2, "little"))
         b.poke(s["cq10_hz"], bytes([hz]))
         b.poke(s["cq10_px"], bytes([px]))
         b.poke(s["cq10_py"], bytes([py]))
         b.poke(s["cq10_pose"], bytes([pose]))
-        b.poke(s["cq10_tk"], bytes([tk]))
-        b.poke(s["cq10_tx"], bytes([tx]))
-        b.poke(s["cq10_ty"], bytes([ty]))
+        b.poke(s["cq10_tk"], bytes(t[0] for t in trees))
+        b.poke(s["cq10_tx"], bytes(t[1] for t in trees))
+        b.poke(s["cq10_ty"], bytes(t[2] for t in trees))
         times.append(b.call(s["cq10_frame"]))
         got = b.screen(b.shown())
-        want = bytes(C.frame(camx, camz, hz, px, py, pose, tk, tx, ty))
+        want = bytes(C.frame(camx, camz, hz, px, py, pose, trees))
         if got != want:
             bad += 1
             if bad <= 3:
                 d = [k for k in range(len(want)) if got[k] != want[k]]
                 print("  PIXEL MISMATCH hz=%d (%d rows) x=%d px=%d py=%d "
-                      "tk=%d tx=%d ty=%d: %d bytes, first at %d (y=%d x=%d) "
+                      "trees=%s: %d bytes, first at %d (y=%d x=%d) "
                       "got %02X want %02X"
-                      % (hz, C.HORIZONS[hz], camx, px, py, tk, tx, ty,
+                      % (hz, C.HORIZONS[hz], camx, px, py, trees,
                          len(d), d[0], d[0] // C.STRIDE,
                          (d[0] % C.STRIDE) * 2, got[d[0]], want[d[0]]))
     print("  %-40s %d frames, %d horizons, %d mismatches"
@@ -145,31 +160,33 @@ def main():
           % ("which is", max(times) / 2400))
 
     print()                             # what the scenery costs, at the
-    b.poke(s["cq10_tx"], bytes([0]))    # board that leaves it the least
-    b.poke(s["cq10_ty"], bytes([191]))  # room
-    drawn = []
-    for k in range(len(T.SIZES)):
-        b.poke(s["cq10_tk"], bytes([k]))
+    drawn = []                          # board that leaves it the least
+    for k in range(len(T.SIZES)):       # room
+        b.poke(s["cq10_tk"], bytes([255, 255, k]))
+        b.poke(s["cq10_tx"], bytes([0, 0, 0]))
+        b.poke(s["cq10_ty"], bytes([0, 0, 191]))
         drawn.append(b.call(s["cq10_tree"]))
-    base = steady(b, s, TALL + [("cq10_tk", 255)])
+    base = steady(b, s, TALL + slots())
     for k, h in enumerate(T.SIZES):
-        t = steady(b, s, TALL + [("cq10_tk", k), ("cq10_tx", 0),
-                                 ("cq10_ty", 191)])
+        t = steady(b, s, TALL + slots((k, 0, 191)))
         print("  the tree at %3d scanlines        %6d T-states drawn, %6d"
               " in the frame" % (h, drawn[k], t - base))
-    worst = steady(b, s, [("cq10_hz", 0), ("cq10_px", 0), ("cq10_py", 0),
-                          ("cq10_tk", len(T.SIZES) - 1), ("cq10_tx", 0),
-                          ("cq10_ty", 191)])
+    three = steady(b, s, TALL + slots((1, 100, 118), (4, 20, 140),
+                                      (7, 56, 191)))
+    print("  %-40s %6d T-states, %d in the frame"
+          % ("three of them, 19 + 54 + 135 rows",
+             drawn[1] + drawn[4] + drawn[7], three - base))
+    worst = steady(b, s, [("cq10_hz", 0), ("cq10_px", 0), ("cq10_py", 0)]
+                   + slots((1, 100, 118), (4, 20, 140), (7, 56, 191)))
     print("  %-40s %7d T-states" % ("the worst frame there is", worst))
     print("  %-40s %.1f%% of a 25 Hz frame" % ("which is", worst / 2400))
 
     print()                             # and what a real SAM would be
-    for tk, name in ((len(T.SIZES) - 1, "with the tree"),   # charged
-                     (255, "without it")):
-        steady(b, s, TALL + [("cq10_tk", tk), ("cq10_tx", 0),
-                             ("cq10_ty", 191)])
+    for trees, name in ((((1, 100, 118), (4, 20, 140), (7, 56, 191)),
+                         "with three trees"), ((), "with none")):
+        steady(b, s, TALL + slots(*trees))
         t, r, w, scr = b.traffic(s["cq10_frame"])
-        print("  memory traffic, %-13s %7d cycles, one every %.2f T-states"
+        print("  memory traffic, %-16s %7d cycles, one every %.2f T-states"
               % (name, r + w, t / (r + w)))
         print("  %-40s %d of them bytes onto the screen" % ("", scr))
     print("  %-40s 3.67 T-states a cycle" % "a PUSH fill, for scale, is")

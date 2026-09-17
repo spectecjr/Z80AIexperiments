@@ -1,12 +1,17 @@
 #!/usr/bin/env python3
-"""A model of chequer10: the board, the desert, a tree and the pilot.
+"""A model of chequer10: the board, the desert, three trees and the pilot.
 
-chequer9's picture with one piece of scenery standing on the board.
-The tree is compiled at the eight sizes tree.py draws it at and pops
-from one to the next as it comes in, which is what the arcade does -
-so placing it is a matter of working out its depth, taking the size
+chequer9's picture with scenery standing on the board: three trees,
+each compiled at the eight sizes tree.py draws it at and popping from
+one to the next as it comes in, which is what the arcade does - so
+placing one is a matter of working out its depth, taking the size
 nearest the height perspective asks for, and putting it on the row
 whose depth matches.
+
+THEY ARE DRAWN FURTHEST FIRST, which is all the depth sorting three
+objects on a plane need: the caller plants them at staggered depths and
+keeps the slots in that order, and a nearer tree paints over a further
+one for nothing.
 
 WHICH ROW IS ITS OWN QUESTION at a moving horizon, because a shallow
 board is the deep one with scanlines left out: the depths on the screen
@@ -45,6 +50,9 @@ import jetpack as J
 import tree as T
 
 W, H, STRIDE = C.W, C.H, C.STRIDE
+SLOTS = 3                       # how many trees stand on the board at
+                                # once, which is what the Z80 has room for
+                                # in its frame as much as in its cells
 TREEH = 433                     # how tall a tree is in world units: 1.7
                                 # squares, which fills the screen at the
                                 # depth where the board's squares are 80
@@ -106,11 +114,13 @@ def blit(buf, rows, x, y):
                 buf[base + i] = b | (buf[base + i] & 0xF0)
 
 
-def frame(camx, camz, hz=0, px=56, py=48, pose=1, tk=255, tx=0, ty=0):
+def frame(camx, camz, hz=0, px=56, py=48, pose=1, trees=()):
     """hz is an index into HORIZONS: 0 is the tallest board.
 
-    tk is the tree's size, TREE_N or more for no tree; tx its left hand
-    byte and ty the row it stands on. The pilot is drawn over it.
+    trees is up to SLOTS (size, left byte, row it stands on), FURTHEST
+    FIRST - they are drawn in that order, so a nearer one paints over a
+    further one. A size of TREE_N or more is no tree. The pilot is drawn
+    over the lot.
     """
     rows = HORIZONS[hz]
     buf = C.frame(camx, camz, 191 - rows)
@@ -118,8 +128,9 @@ def frame(camx, camz, hz=0, px=56, py=48, pose=1, tk=255, tx=0, ty=0):
     for r, row in enumerate(D.band(*D.offsets(camx))):
         at = (top + r) * STRIDE
         buf[at:at + STRIDE] = row
-    if tk < len(T.SIZES):
-        h = T.SIZES[tk]
-        blit(buf, T.rows(T.tree(h)[0]), tx, ty - h + 1)
+    for tk, tx, ty in trees:
+        if tk < len(T.SIZES):
+            h = T.SIZES[tk]
+            blit(buf, T.rows(T.tree(h)[0]), tx, ty - h + 1)
     blit(buf, J.rows(J.lean(J.pilot(), pose - 1)), px, py)
     return buf
