@@ -754,22 +754,25 @@ def _chequer9(outdir, seconds=10):
     b.call(s["cq9_init"])
     pal = {i: sam_rgb(sam(*rgb)) for i, rgb in J.PAL.items()}
     pal[1] = sam_rgb(sam(7, 7, 5))      # the board's four sands, as two
-    pal[2] = sam_rgb(sam(6, 6, 4))      # PAIRS rather than four steps of
-    pal[10] = sam_rgb(sam(7, 5, 5))     # one ramp: 1 and 2 are a shade
-    pal[9] = sam_rgb(sam(6, 4, 4))      # apart, 9 and 10 are a shade apart,
-                                        # and the pairs a step and a
-                                        # quarter apart - enough that what
-                                        # alternates INTO the screen is
-                                        # louder than what alternates
-                                        # across it, which is what makes
-                                        # the board read as bands rolling
-                                        # towards the player rather than as
-                                        # columns running away, and no
-                                        # louder than that. The dark pair
-                                        # goes pink rather than browner as
-                                        # it lightens because on a SAM the
-                                        # only way up from a saturated
-                                        # orange is to raise the blue gun.
+    pal[2] = sam_rgb(sam(6, 6, 4))      # pairs a step and a quarter apart:
+    pal[10] = sam_rgb(sam(5, 5, 3))     # 247 and 210 of luma against 174
+    pal[9] = sam_rgb(sam(7, 5, 3))      # and 196.
+                                        #
+                                        # AND THE DARK PAIR IS THE OTHER WAY
+                                        # ROUND. A swapped row draws 10
+                                        # where an even row draws 1, so 10
+                                        # has to be the DARKER of its pair
+                                        # for the checker to change phase
+                                        # from one band to the next. Put the
+                                        # lighter one there and every column
+                                        # keeps the same identity all the
+                                        # way to the horizon - slot A always
+                                        # the pale one, slot B always the
+                                        # dark one - and the board reads as
+                                        # stripes running away rather than
+                                        # as a checkerboard. It is the one
+                                        # thing about these four colours
+                                        # that is not a matter of taste.
     pal[13] = sam_rgb(sam(2, 5, 2))     # and the desert's own two: green
     pal[14] = sam_rgb(sam(4, 2, 0))     # for the palms, and a deep shadow
                                         # for the near pyramids

@@ -55,8 +55,8 @@ SKY = int(os.environ.get("DESERT_SKY", 1))      # the board's own sky
                                 # rest of the sky - or an index of its own
                                 # where the sky is flat. The rest are
 if os.environ.get("DESERT_PAL") == "board4":
-    LIT, SAND, DARK = 1, 2, 9   # the board's own four sands, so that the
-    FLIT, FDARK = 10, 14        # ground and the horizon are one place -
+    LIT, SAND, DARK = 1, 2, 10  # the board's own four sands, so that the
+    FLIT, FDARK = 9, 14         # ground and the horizon are one place -
     PALM = 13                   # plus two the pilot gave up. The rear
                                 # layer is the board's pale pair and its
                                 # dune field the dark one, which is

@@ -120,10 +120,10 @@ as it scrolls in. That is free here, and the reason is worth keeping:
 and one edge byte. Give it a third bit — `0xBB` rather than `0x33` — and the
 odd rows of squares come out in two indices the even rows never use:
 
-| | even rows of squares | odd rows |
+| | slot A | slot B |
 |---|---|---|
-| one square | 1, pale cream (luma 247) | 10, pink sand (203) |
-| the next | 2, a shade down (210) | 9, a shade down again (166) |
+| even rows of squares | 1, pale cream (luma 247) | 2, khaki (210) |
+| odd rows | **10, the darker: khaki-olive (174)** | 9, sand (196) |
 
 `1 ^ 0xB = 10` and `2 ^ 0xB = 9`, so a swapped row draws 10 where an even one
 draws 1: the checker keeps its offset and the whole row is a band darker.
@@ -142,17 +142,28 @@ apart. Then what alternates across the screen is quiet, what alternates into
 it is loud, and the ground bands the way Space Harrier's does.
 
 It wants to be **only just** loud enough. In luma the four are 247 and 210,
-203 and 166: 37 across a band and 44 between them. Pull the pairs further
+174 and 196: 37 across a band and 44 between them. Pull the pairs further
 apart and the ground starts to strobe as it scrolls, because the bands are a
 square row deep and a square row is three scanlines at the horizon.
 
-**The dark pair goes pink as it lightens, and that is the palette's
-doing.** A SAM colour is two bits a gun and a bright bit the three of them
-share, so the only way up from a saturated orange is to raise the blue gun:
-(255,182,109) lightens to (255,182,182) and not to a paler tan. The machine
-has no desaturated warm tones at all - every sand it can draw is either
-yellow, orange or pink - which is why the reference photograph's dusty beige
-is the one thing here that cannot be matched.
+**And the dark pair goes in the other way round.** A swapped row draws 10
+where an even row draws 1, so for the checker to change phase from one band
+to the next, **10 has to be the darker of its pair**. Put the lighter one
+there — the obvious way round, pairing pale with pale — and every column
+keeps its identity all the way to the horizon: slot A the pale one, slot B
+the dark one, for as many bands as are on the screen. The board then reads
+as stripes running away rather than as a checkerboard, however carefully the
+four colours are chosen, and no amount of adjusting their contrast fixes it.
+It is the one thing here that is not a matter of taste.
+
+**What the palette will not do is a dusty beige.** A SAM colour is two bits
+a gun and a bright bit the three of them share, so every channel has the
+same parity and the only way up from a saturated orange is to raise the blue
+gun: (255,182,109) lightens to (255,182,182), which is pink, and never to a
+paler tan. The machine has no desaturated warm tones at all — its sands are
+yellow, orange, olive or pink — so the four here are cream, khaki, olive and
+sand, and the arcade original's dusty beige is the one thing about it that
+cannot be matched.
 
 **Which is what made it expensive.** Sixteen colours is sixteen colours: the
 pilot had twelve, the board two and the sky one. Four for the board means

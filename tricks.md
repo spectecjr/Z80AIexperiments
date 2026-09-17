@@ -925,6 +925,17 @@ apart and the pairs far apart: what alternates across the screen goes quiet,
 what alternates into it goes loud, and the ground bands the way the arcade
 one does.
 
+**And put the DARKER of the second pair in the swapped slot.** The swap
+draws the second pair's first colour where the first pair's first colour
+would have gone, so that slot is where the phase of the checker lives. Pair
+pale with pale - the obvious way round - and every column of squares keeps
+its identity from the horizon to the bottom of the screen: one column always
+the pale one, the next always the dark one. The board then reads as stripes
+running away no matter how the four colours are balanced, and the fix is to
+exchange two palette entries and nothing else. This one is worth checking by
+eye on a still frame; it is invisible in the numbers, because the contrasts
+are identical either way.
+
 What it costs is that MODE 4 has sixteen colours and they were all spoken
 for: the pilot had twelve, the board two, the sky one. His two dark greys
 are one grey now. **That is the shape of every colour decision on this
