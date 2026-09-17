@@ -22,6 +22,13 @@ compiled, and 17K more of band lists because which of those widths are drawn
 is what a horizon chooses. `chequer10` is twenty-six: two more for eight
 sizes of tree, which three slots share.
 
+**And whether a game fits in one of these frames** is `game.md`, with the
+arithmetic in `tests/mkbudget.py`: a MODE 4 screen is 24,576 bytes and the
+board writes its bytes at 9.5 T-states each, so **a 25 Hz frame can write
+the screen about once**. A playable Space Harrier - twelve sprites, four of
+them 32x135 - wants 226,500 T-states of sprite on top of a picture, which is
+148% of a 25 Hz frame and 98% of a 16.7 Hz one.
+
 ---
 
 ## 1. The demos
