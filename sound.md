@@ -141,11 +141,12 @@ place: the frame has to wait for the display anyway to run at a steady 25
 Hz, and that wait is the one place in the whole demo where `SP` is a
 normal stack and nothing is half-drawn.
 
-**Poll it there.** A tight loop reading STATUS is about 30 T-states a
-turn, so the 100 µs window is twenty chances rather than one, and no
-interrupt is ever taken — which means `IM 1` never has to be set up, the
-ROM's handler never runs, and the "interrupt pushes `PC` into the picture"
-problem never arises anywhere in the demo.
+**Poll it there.** Bit 3 goes low for about 100 µs and then clears itself —
+it does not latch until an interrupt is acknowledged — so a tight loop is
+all it takes. Reading STATUS is about 30 T-states a turn, so the window is
+twenty chances rather than one, and no interrupt is ever taken: `IM 1`
+never has to be set up, the ROM's handler never runs, and the "interrupt
+pushes `PC` into the picture" problem never arises anywhere in the demo.
 
 ```
 snd_wait:
@@ -155,12 +156,18 @@ snd_wait:
         CALL snd_tick           ; the top of the frame
 ```
 
-**What to verify on hardware**: that bit 3 clears itself after its ~100 µs
-rather than staying low until an interrupt is acknowledged. If it latches,
-the wait loop has to clear it — and if it cannot be cleared without taking
-an interrupt, the fallback is to wait on the *line* interrupt flag
-instead, which is programmable to a line of your choosing and is bit 0 of
-the same register.
+**And the same loop is the frame lock.** A poll that has to *wait* for the
+bit is a demo running at a steady 25 Hz; one that finds it already low has
+overrun its two display frames and knows it. That is a frame counter for
+nothing, which is the other thing a demo wants and the reason not to
+measure the lock by counting T-states.
+
+**The one thing left to check on hardware** is the other direction of
+`LMPR`: that it reads back what was written to it, so the tick can put the
+band loop's chunk back without the loop having to keep a copy. If it does
+not, the band loop stores the current chunk in a cell when it switches -
+it already has the value in `A` at that point - and the `IN` becomes an
+`LD A,(nn)`, which is two T-states cheaper anyway.
 
 ## When the frame is short, there is no mid-frame tick to place
 

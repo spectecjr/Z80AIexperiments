@@ -150,6 +150,13 @@ for those.
   frame**, bit 4 MIDI out - each *low* when requesting. Bits 5-7 are
   keyboard matrix lines 6-8. All five interrupts share IM 1, so the handler
   has to read this to know which fired.
+- **A request is held for about 100 µs and then clears itself**, rather
+  than latching until an interrupt is acknowledged - so a routine that
+  runs `DI` from end to end can *poll* this register instead of ever
+  taking an interrupt. 100 µs is 600 T-states, which is far too tight to
+  poll from inside a fill, and plenty from a wait loop: that is the whole
+  of the argument in `sound.md` for scheduling a mid-frame music tick and
+  polling only for the frame lock.
 - **BORDER (254, write)**: bits 0-2 and 5 are the CLUT address for the
   border colour, bit 3 MIC, bit 4 BEEP, bit 6 THROM (MIDI through),
   **bit 7 SOFF** - blanks the display in MODEs 3 and 4 *and removes memory
