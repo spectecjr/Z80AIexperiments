@@ -111,6 +111,7 @@ def main():
                                      "CQ9_R": y["cq10_pret"],
                                      "CQ10_R": y["cq10_ret"]})
     s = b.syms
+    b.report_memory()
     print("  %-40s %d, pages %s"
           % ("chunks", len(CHUNKS), ", ".join(str(p) for p in b.pages)))
     it = b.call(s["cq10_init"])

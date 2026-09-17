@@ -32,6 +32,7 @@ def main():
     b = Sam("harness_chq7.asm", CHUNKS, screens=(10, 12),
             chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"]})
     s = b.syms
+    b.report_memory()
     it = b.call(s["chq6_init"])
     print("  chq6_init %d T-states once, the sky into both buffers" % it)
     poses = [(x, z, t, (t // 7) % 3)

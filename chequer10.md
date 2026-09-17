@@ -44,8 +44,11 @@ the arcade does too, and at 25 Hz the pop is invisible against the movement.
 | 135 | 16x135 | 1,535 | 104 | 22,190 | 24,720 |
 | **19 + 54 + 135** | three slots | 1,829 | 135 | **29,141** | **31,036** |
 
-3,773 bytes of sprite for the lot — a quarter of one 16K page, and the map
-gives it two. `drawn` is the whole of `cq10_tree`, which walks all three
+3,773 bytes of *picture* for the lot, which compiles to **10,384 bytes of
+code** — a third of the pair of pages the map gives it, and 2.8 bytes of code
+a byte drawn. That ratio is the technique's real price: a bitmap and a
+general blitter would be the 3,773 and a routine, and would cost several
+times the T-states. `drawn` is the whole of `cq10_tree`, which walks all three
 slots whether or not they hold anything (384 T-states for the two empty
 ones); `in the frame` is what a frame costs with that tree in it rather than
 none. They agree except at 135 rows, where the box reaches 19 scanlines above
@@ -162,7 +165,23 @@ scenery you fly past and scenery that never gets close.
     22,23              the pilot, compiled and position independent
     24,25              the tree, eight sizes of the same
 
-Twenty-six of the thirty-two pages `LMPR` can address, so a 512K SAM.
+Twenty-six of the thirty-two pages `LMPR` can address, so a 512K SAM — 416K
+claimed, 341,130 bytes of it actually holding something:
+
+| | bytes | |
+|---|---|---|
+| the board's five chunks | 155,320 | compiled row loops, up to 80 pixel squares, and the band lists |
+| the swap masks | 65,536 | 512 tables, 96 rows deep, in two chunks that are exactly full |
+| the desert's two | 51,834 | the rear layer cut by row, four phases |
+| the pilot | 4,032 | three poses |
+| the trees | 10,384 | eight sizes |
+| the resident block | 4,872 | 2,436 bytes, and there is a copy behind each buffer |
+| the two buffers | 49,152 | |
+
+`tests/test_chequer10.py` prints that table every run, chunk by chunk, with
+how much of each page pair is used — which is where the 12% on the pilot's
+pair and the 32% on the trees' comes from, and the argument for what to put
+in the room they leave.
 
 ## Invariants
 

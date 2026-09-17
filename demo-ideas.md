@@ -188,7 +188,9 @@ as it comes in, which is what the arcade does too. Each size is the pilot's
 own trick, one descending walk of `SP` over its box, and `tests/mksprite.py`
 is now that walk with both generators calling it.
 
-3,773 bytes for the eight, 903 T-states to draw the smallest and 21,806 the
+3,773 bytes of picture for the eight, compiled into 10,384 bytes of code -
+2.8 bytes of code a byte drawn, which is what this technique costs in the
+currency it spends. 903 T-states to draw the smallest and 21,806 the
 largest, and 24,720 in the frame for the largest because its box reaches
 into sky that is painted once. **Nothing clips**: a walk of `SP` writes where
 it is put, so the caller has to know the box fits - which is exactly how a

@@ -833,7 +833,7 @@ def _chequer9(outdir, seconds=10):
     got, bad, secs = check_gif(p, idx, pal, durs)
     report(p, size, n, durs, secs, got, bad)
 
-def chequer10(outdir, seconds=10):
+def chequer10(outdir, seconds=10, rate=25.0):
     """chequer10, in a process of its own: chequer9's viewport again."""
     import os
     import subprocess
@@ -846,10 +846,10 @@ def chequer10(outdir, seconds=10):
     here = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                         "mkgif.py")
     subprocess.run([sys.executable, here, "--chequer10", outdir,
-                    str(seconds)], env=env, check=True)
+                    str(seconds), str(rate)], env=env, check=True)
 
 
-def _chequer10(outdir, seconds=10):
+def _chequer10(outdir, seconds=10, rate=25.0):
     """chequer10 at its measured rate: 25 Hz, 210,811 at its worst.
 
     chequer9's flight with a tree coming in: planted in the world at a
@@ -885,11 +885,17 @@ def _chequer10(outdir, seconds=10):
     pal[14] = sam_rgb(sam(4, 2, 0))     # which the tree is drawn in too:
                                         # nothing here costs a new index
     pal[15] = sam_rgb(sam(2, 4, 4))
-    n, m = int(seconds * 25), len(C10.HORIZONS)
-    step = 80                           # the camera's speed, three times
-                                        # chequer9's: what a tree standing
-                                        # still closes at, and the ground
-                                        # with it
+    n, m = int(seconds * rate), len(C10.HORIZONS)
+    step = int(round(80 * 25 / rate))   # the camera's speed, three times
+                                        # chequer9's at 25 Hz: what a tree
+                                        # standing still closes at, and the
+                                        # ground with it. It is per FRAME,
+                                        # so a demo that updates half as
+                                        # often has to move twice as far to
+                                        # cover the same ground in the same
+                                        # time - which is the whole of what
+                                        # a lower frame rate does to a demo
+                                        # like this one
     far, near = 6800, 650               # a tree's life: planted at a depth
     life = (far - near) // step         # that asks for the smallest sprite
                                         # of the eight, gone when it has
@@ -942,9 +948,9 @@ def _chequer10(outdir, seconds=10):
         frames.append(unpack(b.screen(b.shown())))
         trees = [(d - step, x) for d, x in trees]
     idx, pal = flat(frames, pal)
-    p = "%s/chequer10.gif" % outdir
-    durs = [2 * TICK] * n               # 25 Hz throughout: the worst frame
-                                        # here is 88% of one
+    p = "%s/chequer10%s.gif" % (outdir, "" if rate == 25 else "_%g" % rate)
+    durs = [int(round(50 / rate)) * TICK] * n   # locked: the worst frame
+                                        # at 25 Hz is 93% of one
     size = write_gif(p, idx, pal, durs)
     got, bad, secs = check_gif(p, idx, pal, durs)
     report(p, size, n, durs, secs, got, bad)
@@ -1397,7 +1403,8 @@ def chequer2(outdir, seconds=8):
 
 if __name__ == "__main__":
     if len(sys.argv) > 1 and sys.argv[1] == "--chequer10":
-        _chequer10(sys.argv[2], float(sys.argv[3]))     # its own viewport,
+        _chequer10(sys.argv[2], float(sys.argv[3]),     # its own viewport,
+                   float(sys.argv[4]) if len(sys.argv) > 4 else 25)
         raise SystemExit                                # its own process
     if len(sys.argv) > 1 and sys.argv[1] == "--chequer9":
         _chequer9(sys.argv[2], float(sys.argv[3]))      # its own viewport,

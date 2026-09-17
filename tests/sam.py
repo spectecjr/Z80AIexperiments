@@ -65,6 +65,8 @@ class Sam:
         img, self.syms = assemble(resident, here=here, root=root)
         defs = chunk_defines(self.syms) if chunk_defines else None
         self.screens = screens
+        self.resident = len(img)        # what the map is actually holding,
+        self.bank = []                  # for the memory report below
         for i, s in enumerate(screens):                 # a copy behind each
             at = (s + 1) * PAGE + (code_at & 0x3FFF)    # buffer, as the
             self.ram[at:at + len(img)] = img            # routine requires
@@ -83,6 +85,7 @@ class Sam:
                                  "machine has %d"
                                  % (h, p, p + 1, len(self.ram) // PAGE))
             self.ram[p * PAGE:p * PAGE + len(img)] = img
+            self.bank.append((h, len(img)))
             self.syms.update(syms)
         self.ram[RETADDR] = 0x76                        # HALT, to return to
 
@@ -95,6 +98,49 @@ class Sam:
         self._map(0x0000, 0)
         self._map(0x8000, screens[0])
         self.m.set_breakpoint(RETADDR)
+
+    # --- what it all takes -----------------------------------------
+
+    def memory(self):
+        """What the map holds and what it claims, in bytes and in pages.
+
+        The two are not the same and the difference is the point: a
+        chunk gets a *pair* of pages because that is what LMPR maps, so
+        a bank of eleven chunks claims 352K however much of it is
+        compiled code. The resident block is counted once per buffer,
+        because there really is a copy behind each.
+        """
+        bank = sum(n for _, n in self.bank)
+        code = self.resident * len(self.screens)
+        screens = SCREEN * len(self.screens)
+        pages = 2 * len(self.bank) + 2 * len(self.screens)
+        return {"bank": bank, "chunks": len(self.bank),
+                "resident": self.resident, "code": code,
+                "screens": screens, "held": bank + code + screens,
+                "pages": pages, "claimed": pages * PAGE}
+
+    def report_memory(self, indent="  ", detail=True):
+        """The memory report the tests print."""
+        m = self.memory()
+        print("%s%-40s %7d bytes in %d pages (%dK of a %dK machine)"
+              % (indent, "memory", m["held"], m["pages"],
+                 m["claimed"] // 1024, len(self.ram) // 1024))
+        print("%s%-40s %7d bytes over %d pages"
+              % (indent, "  the bank, %d chunks" % m["chunks"],
+                 m["bank"], 2 * m["chunks"]))
+        if detail:
+            for (h, n), p in zip(self.bank, self.pages):
+                name = h.replace("harness_", "").replace(".asm", "")
+                print("%s%-40s %7d bytes  (%3d%% of its pair)"
+                      % (indent, "    %-14s pages %2d,%2d"
+                         % (name, p, p + 1), n, round(100 * n / (2 * PAGE))))
+        print("%s%-40s %7d bytes, a copy behind each buffer"
+              % (indent, "  the resident block, %d bytes" % m["resident"],
+                 m["code"]))
+        print("%s%-40s %7d bytes in %d pages"
+              % (indent, "  the buffers", m["screens"],
+                 2 * len(self.screens)))
+        return m
 
     # --- the three registers ---------------------------------------
 

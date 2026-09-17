@@ -893,8 +893,9 @@ from. **So compile it at every size you will use.** The arcades did exactly
 this - Space Harrier's scenery pops from one size to the next as it comes in
 - and at 25 Hz the pop is invisible against the movement.
 
-chequer10's tree is eight sizes, 13 to 135 scanlines, **3,773 bytes for the
-lot**, and three of them stand on the board at once out of the same eight: a quarter of a page, against a scaler that would have been a few
+chequer10's tree is eight sizes, 13 to 135 scanlines - 3,773 bytes of picture
+compiled into **10,384 bytes of code**, 2.8 bytes of code a byte drawn, and
+three of them stand on the board at once out of the same eight: a quarter of a page, against a scaler that would have been a few
 hundred bytes and several times the T-states every frame. 903 T-states to
 draw the smallest and 21,806 the largest, which is 14.2 a byte drawn - the
 floor for a masked compiled sprite with 7% of its bytes on an edge.

@@ -30,6 +30,7 @@ def ride(n):
 def main():
     b = Sam("harness_rd2.asm", ("harness_rd2a.asm", "harness_rd2b.asm"))
     s = b.syms
+    b.report_memory()
     it = b.call(s["rd2_init"])
     print("  rd2_init  %d T-states once, sky and grass into both buffers" % it)
     poses = ride(200)

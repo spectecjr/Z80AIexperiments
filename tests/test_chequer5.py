@@ -31,6 +31,7 @@ def main():
     b = Sam("harness_chq5.asm", CHUNKS, screens=(10, 12),
             chunk_defines=lambda y: {"CHQ4_RET": y["chq4_ret"]})
     s = b.syms
+    b.report_memory()
     it = b.call(s["chq4_init"])
     print("  chq4_init %d T-states once, the sky into both buffers" % it)
     # camx runs past one square and goes negative, because the square

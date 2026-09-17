@@ -35,6 +35,7 @@ def main():
                                      "CHQ4_SCR": y["CHQ4_SCREEN"],
                                      "C9_RET": y["c9_ret"]})
     s = b.syms
+    b.report_memory()
     for name, equ in (("harness_jetrun.asm", "JET8_BANK"),
                       ("harness_desert0.asm", "C9_BANK0")):
         page = b.pages[CHUNKS.index(name)]

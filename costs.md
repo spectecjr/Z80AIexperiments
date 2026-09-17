@@ -61,6 +61,25 @@ where that horizon puts him:
 | the rows the board gave up, when the horizon drops | 0 … 3,736 | 0 |
 | the horizon table and the flip | 613 | 613 |
 
+**And what the map holds**, which `tests/test_chequer10.py` prints chunk by
+chunk every run. Bytes held and pages claimed are not the same number: a
+chunk gets a *pair* of 16K pages because that is what `LMPR` maps, so eleven
+chunks claim 352K however much of them is compiled code.
+
+| `chequer10` | bytes | pages |
+|---|---|---|
+| the board's five chunks | 155,320 | 10 |
+| the swap masks, 512 tables 96 rows deep | 65,536 | 4, exactly full |
+| the desert's two | 51,834 | 4 |
+| the pilot, three poses | 4,032 | 2, 12% used |
+| the trees, eight sizes | 10,384 | 2, 32% used |
+| the resident block, 2,436 bytes | 4,872 | behind the buffers |
+| the two buffers | 49,152 | 4 |
+| **held** | **341,130** | **26 pages, 416K claimed** |
+
+`reports/` has that table for every demo here, beside the T-states it came
+with.
+
 **`chequer10` adds one thing to that**, a slot of scenery, at the eight sizes
 the tree is compiled at — measured as what a frame costs with it in against
 the same frame with none:
