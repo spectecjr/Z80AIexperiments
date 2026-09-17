@@ -122,8 +122,8 @@ odd rows of squares come out in two indices the even rows never use:
 
 | | even rows of squares | odd rows |
 |---|---|---|
-| one square | 1, pale cream | 10, sand |
-| the next | 2, a shade down | 9, a shade down again |
+| one square | 1, pale cream (luma 247) | 10, pink sand (203) |
+| the next | 2, a shade down (210) | 9, a shade down again (166) |
 
 `1 ^ 0xB = 10` and `2 ^ 0xB = 9`, so a swapped row draws 10 where an even one
 draws 1: the checker keeps its offset and the whole row is a band darker.
@@ -142,10 +142,17 @@ apart. Then what alternates across the screen is quiet, what alternates into
 it is loud, and the ground bands the way Space Harrier's does.
 
 It wants to be **only just** loud enough. In luma the four are 247 and 210,
-196 and 159: 37 across a band and 51 between them. Pull the pairs further
-apart than that and the ground starts to strobe as it scrolls, because the
-bands are a square row deep and a square row is three scanlines at the
-horizon.
+203 and 166: 37 across a band and 44 between them. Pull the pairs further
+apart and the ground starts to strobe as it scrolls, because the bands are a
+square row deep and a square row is three scanlines at the horizon.
+
+**The dark pair goes pink as it lightens, and that is the palette's
+doing.** A SAM colour is two bits a gun and a bright bit the three of them
+share, so the only way up from a saturated orange is to raise the blue gun:
+(255,182,109) lightens to (255,182,182) and not to a paler tan. The machine
+has no desaturated warm tones at all - every sand it can draw is either
+yellow, orange or pink - which is why the reference photograph's dusty beige
+is the one thing here that cannot be matched.
 
 **Which is what made it expensive.** Sixteen colours is sixteen colours: the
 pilot had twelve, the board two and the sky one. Four for the board means
