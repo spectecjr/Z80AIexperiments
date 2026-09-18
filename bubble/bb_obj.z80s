@@ -1,0 +1,176 @@
+;------------------------------------------------------------------
+; bb_obj.z80s - object table
+;
+; 48 slots of 16 bytes. Render priority is slot order: bb_obj_alloc_hi
+; hands out slots from 0 upwards for things that must never stutter
+; (players, enemies, bubbles) and bb_obj_alloc_lo from 47 downwards for
+; things the budget governor may defer to the next frame (fruit at rest,
+; score popups). That removes the per-frame priority sort entirely.
+;
+; Objects are addressed through IX. LD (IX+n),r is 4 accesses against 2
+; for LD (HL),r, which costs roughly 25 accesses per object per frame -
+; the price of readable field access, and still inside the ~55a/object
+; logic line of the frame budget.
+;------------------------------------------------------------------
+
+bb_obj_init:
+                LD   HL,bb_objects              ; [10T / 3a]
+                LD   DE,bb_objects+1            ; [10T / 3a]
+                LD   BC,OBJ_MAX*OBJ_SIZE-1      ; [10T / 3a]
+                LD   (HL),OT_FREE               ; [10T / 3a]
+                LDIR
+                LD   HL,bb_drawn                ; [10T / 3a]
+                LD   DE,bb_drawn+1              ; [10T / 3a]
+                LD   BC,OBJ_MAX*2*D_SIZE-1      ; [10T / 3a]
+                LD   (HL),$FF                   ; [10T / 3a]  nothing drawn
+                LDIR
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_objcount),A            ; [13T / 4a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_obj_alloc_hi / _lo --------------------------------------
+;
+; Exit : CF clear and IX = the slot, A = slot index, if one was free;
+;        CF set if the table is full.
+; Trash: AF, BC, DE
+
+bb_obj_alloc_hi:
+                LD   IX,bb_objects              ; [14T / 4a]
+                LD   DE,OBJ_SIZE                ; [10T / 3a]
+                LD   B,OBJ_MAX                  ; [7T / 2a]
+                LD   C,0                        ; [7T / 2a]  slot index
+bb_oa_hi_loop:
+                LD   A,(IX+O_TYPE)              ; [19T / 4a]
+                OR   A                          ; [4T / 1a]
+                JR   Z,bb_oa_found              ; [12T / 2a]
+                ADD  IX,DE                      ; [15T / 2a]
+                INC  C                          ; [4T / 1a]
+                DJNZ bb_oa_hi_loop              ; [13T / 2a]
+                SCF                             ; [4T / 1a]
+                RET                             ; [10T / 3a]
+
+bb_obj_alloc_lo:
+                LD   IX,bb_objects+(OBJ_MAX-1)*OBJ_SIZE ; [14T / 4a]
+                LD   DE,NEG_OBJ_SIZE                      ; [10T / 3a]
+                LD   B,OBJ_MAX                  ; [7T / 2a]
+                LD   C,OBJ_MAX-1                ; [7T / 2a]
+bb_oa_lo_loop:
+                LD   A,(IX+O_TYPE)              ; [19T / 4a]
+                OR   A                          ; [4T / 1a]
+                JR   Z,bb_oa_found              ; [12T / 2a]
+                ADD  IX,DE                      ; [15T / 2a]
+                DEC  C                          ; [4T / 1a]
+                DJNZ bb_oa_lo_loop              ; [13T / 2a]
+                SCF                             ; [4T / 1a]
+                RET                             ; [10T / 3a]
+
+bb_oa_found:
+                LD   A,C                        ; [4T / 1a]
+                LD   HL,bb_objcount             ; [10T / 3a]
+                INC  (HL)                       ; [11T / 3a]
+                OR   A                          ; [4T / 1a]  clear CF
+                RET                             ; [10T / 3a]
+
+; ---- bb_obj_free ------------------------------------------------
+; Entry: IX = object. The slot's pixels are cleaned up by the next two
+; erase passes, one per buffer, because bb_drawn_spr still names them.
+
+bb_obj_free:
+                LD   (IX+O_TYPE),OT_FREE        ; [19T / 5a]
+                LD   HL,bb_objcount             ; [10T / 3a]
+                DEC  (HL)                       ; [11T / 3a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_obj_update ----------------------------------------------
+; Walk every live slot and dispatch on type.
+
+bb_obj_update:
+                LD   IX,bb_objects              ; [14T / 4a]
+                LD   B,OBJ_MAX                  ; [7T / 2a]
+bb_ou_loop:
+                PUSH BC                         ; [11T / 3a]
+                LD   A,(IX+O_TYPE)              ; [19T / 4a]
+                OR   A                          ; [4T / 1a]
+                CALL NZ,bb_obj_dispatch         ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+                LD   DE,OBJ_SIZE                ; [10T / 3a]
+                ADD  IX,DE                      ; [15T / 2a]
+                DJNZ bb_ou_loop                 ; [13T / 2a]
+                RET                             ; [10T / 3a]
+
+; A = type (1..n). Jump table, two bytes per entry.
+bb_obj_dispatch:
+                DEC  A                          ; [4T / 1a]
+                ADD  A,A                        ; [4T / 1a]
+                LD   HL,bb_obj_vectors          ; [10T / 3a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                LD   E,(HL)                     ; [7T / 2a]
+                INC  HL                         ; [6T / 1a]
+                LD   D,(HL)                     ; [7T / 2a]
+                EX   DE,HL                      ; [4T / 1a]
+                JP   (HL)                       ; [4T / 1a]
+
+bb_obj_vectors:
+                DEFW bb_upd_player              ; OT_PLAYER
+                DEFW bb_upd_enemy               ; OT_ENEMY
+                DEFW bb_upd_bubble              ; OT_BUBBLE
+                DEFW bb_upd_bubble              ; OT_BUBBLE_MOB (same physics)
+                DEFW bb_upd_fruit               ; OT_FRUIT
+                DEFW bb_upd_popup               ; OT_POPUP
+
+; ---- bb_obj_grid ------------------------------------------------
+;
+; Rebuild the cell occupancy grid from live objects. Bubbles use it for
+; separation (3x3 neighbourhood instead of O(n^2): 24 bubbles would be
+; 276 pairs, this is 24 x 9 lookups) and the render pass uses it to wake
+; static objects that a mover has just crossed.
+
+bb_obj_grid:
+                LD   HL,bb_cellgrid             ; [10T / 3a]
+                LD   DE,bb_cellgrid+1           ; [10T / 3a]
+                LD   BC,MAP_CELLS-1             ; [10T / 3a]
+                LD   (HL),0                     ; [10T / 3a]
+                LDIR
+                LD   IX,bb_objects              ; [14T / 4a]
+                LD   B,OBJ_MAX                  ; [7T / 2a]
+                LD   C,0                        ; [7T / 2a]  slot index
+bb_og_loop:
+                LD   A,(IX+O_TYPE)              ; [19T / 4a]
+                OR   A                          ; [4T / 1a]
+                JR   Z,bb_og_next               ; [12T / 2a]
+                ; cell = (y >> 3) * 32 + (x >> 3), cached in O_CELL
+                LD   A,(IX+O_YH)                ; [19T / 4a]
+                ADD  A,8                        ; [7T / 2a]  hotspot to centre
+                AND  $F8                        ; [7T / 2a]
+                LD   L,A                        ; [4T / 1a]
+                LD   H,0                        ; [7T / 2a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]  cy * 32
+                LD   A,(IX+O_XH)                ; [19T / 4a]
+                ADD  A,8                        ; [7T / 2a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                AND  $1F                        ; [7T / 2a]  cx
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                LD   DE,bb_cellgrid             ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   (IX+O_CELLL),L             ; [19T / 5a]
+                LD   (IX+O_CELLH),H             ; [19T / 5a]
+                LD   A,C                        ; [4T / 1a]
+                INC  A                          ; [4T / 1a]  store slot+1
+                LD   (HL),A                     ; [7T / 2a]
+bb_og_next:
+                LD   DE,OBJ_SIZE                ; [10T / 3a]
+                ADD  IX,DE                      ; [15T / 2a]
+                INC  C                          ; [4T / 1a]
+                DJNZ bb_og_loop                 ; [13T / 2a]
+                RET                             ; [10T / 3a]

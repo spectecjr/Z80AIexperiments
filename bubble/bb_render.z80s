@@ -1,0 +1,361 @@
+;------------------------------------------------------------------
+; bb_render.z80s - the frame's render pass
+;
+; Three sweeps, in this order, because interleaving erase and draw would
+; let one object's erase punch a hole in another's freshly drawn pixels:
+;
+;   1. plan   - decide which objects are redrawn this frame, charge the
+;               budget, and record which cells will be disturbed
+;   2. erase  - undo what THIS buffer was holding (two frames old)
+;   3. draw   - lay down the new pixels and update the draw records
+;
+; The whole pass runs with interrupts disabled: bb_blit_flat_8x16 parks
+; SP inside the framebuffer, so an interrupt mid-blit would push a return
+; address into the picture.
+;
+; Budget: the plan sweep walks slots in order, and slot order is priority
+; order (see bb_obj.z80s). When RENDER_BUDGET runs out the remaining
+; low-priority objects simply are not redrawn - and because they are also
+; not erased, their pixels from two frames ago stand for one more frame.
+; That degrades the cheapest objects to 25 Hz under extreme load instead
+; of tearing or dropping the whole frame.
+;------------------------------------------------------------------
+
+bb_render:
+                DI                              ; [4T / 1a]
+                LD   HL,RENDER_BUDGET           ; [10T / 3a]
+                LD   (bb_budget),HL             ; [16T / 5a]
+                CALL bb_plan                    ; [17T / 5a]
+                CALL bb_erase_pass              ; [17T / 5a]
+                CALL bb_draw_pass               ; [17T / 5a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_drawn_ptr -----------------------------------------------
+;
+; Entry : C = slot index
+; Exit  : IY = &bb_drawn[backbuf][slot]
+; Trash : AF, DE, HL
+; Cost  : [~90T / 24a]
+
+bb_drawn_ptr:
+                LD   A,(bb_backbuf)             ; [13T / 4a]
+                OR   A                          ; [4T / 1a]
+                LD   A,C                        ; [4T / 1a]
+                JR   Z,bb_dp_buf0               ; [12T / 2a]
+                ADD  A,OBJ_MAX                  ; [7T / 2a]
+bb_dp_buf0:
+                LD   L,A                        ; [4T / 1a]
+                LD   H,0                        ; [7T / 2a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]  x D_SIZE
+                LD   DE,bb_drawn                ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                PUSH HL                         ; [11T / 3a]
+                POP  IY                         ; [14T / 4a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_plan ----------------------------------------------------
+;
+; Sweep 1a: an object needs redrawing if this buffer's record does not
+;           already match its current position and frame. Charge the
+;           budget, set OF_INSET, and mark both its old and new boxes
+;           into bb_touched.
+; Sweep 1b: promote any object that was going to be skipped but whose
+;           box a marked cell falls in. Those objects have old box ==
+;           new box, so promoting them adds no new cells - one pass is
+;           provably enough, no iteration to a fixed point needed.
+
+bb_plan:
+                LD   HL,bb_touched              ; [10T / 3a]
+                LD   DE,bb_touched+1            ; [10T / 3a]
+                LD   BC,MAP_CELLS-1             ; [10T / 3a]
+                LD   (HL),0                     ; [10T / 3a]
+                LDIR
+
+                LD   IX,bb_objects              ; [14T / 4a]
+                LD   C,0                        ; [7T / 2a]
+bb_plan_a:
+                LD   A,(IX+O_TYPE)              ; [19T / 4a]
+                OR   A                          ; [4T / 1a]
+                JR   Z,bb_plan_a_next           ; [12T / 2a]
+
+                RES  7,(IX+O_FLAGS)             ; [23T / 6a]  clear OF_INSET
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_drawn_ptr               ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+
+                ; unchanged since this buffer last saw it?
+                LD   A,(IY+D_SPR)               ; [19T / 4a]
+                CP   (IX+O_SPR)                 ; [19T / 4a]
+                JR   NZ,bb_plan_a_take          ; [12T / 2a]
+                LD   A,(IY+D_X)                 ; [19T / 4a]
+                CP   (IX+O_XH)                  ; [19T / 4a]
+                JR   NZ,bb_plan_a_take          ; [12T / 2a]
+                LD   A,(IY+D_Y)                 ; [19T / 4a]
+                CP   (IX+O_YH)                  ; [19T / 4a]
+                JR   Z,bb_plan_a_next           ; [12T / 2a]  nothing to do
+
+bb_plan_a_take:
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_charge                  ; [17T / 5a]  CF set = no budget
+                POP  BC                         ; [10T / 3a]
+                JR   C,bb_plan_a_next           ; [12T / 2a]
+                SET  7,(IX+O_FLAGS)             ; [23T / 6a]  OF_INSET
+
+                ; mark the old box, if this buffer is holding one
+                LD   A,(IY+D_SPR)               ; [19T / 4a]
+                INC  A                          ; [4T / 1a]   $FF -> 0
+                JR   Z,bb_plan_a_newbox         ; [12T / 2a]
+                LD   B,(IY+D_Y)                 ; [19T / 4a]
+                LD   A,(IY+D_X)                 ; [19T / 4a]
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_mark_box                ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+bb_plan_a_newbox:
+                LD   B,(IX+O_YH)                ; [19T / 4a]
+                LD   A,(IX+O_XH)                ; [19T / 4a]
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_mark_box                ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+
+bb_plan_a_next:
+                LD   DE,OBJ_SIZE                ; [10T / 3a]
+                ADD  IX,DE                      ; [15T / 2a]
+                INC  C                          ; [4T / 1a]
+                LD   A,C                        ; [4T / 1a]
+                CP   OBJ_MAX                    ; [7T / 2a]
+                JR   C,bb_plan_a                ; [12T / 2a]
+
+                ; ---- sweep 1b: promote the disturbed --------------
+                LD   IX,bb_objects              ; [14T / 4a]
+                LD   C,0                        ; [7T / 2a]
+bb_plan_b:
+                LD   A,(IX+O_TYPE)              ; [19T / 4a]
+                OR   A                          ; [4T / 1a]
+                JR   Z,bb_plan_b_next           ; [12T / 2a]
+                BIT  7,(IX+O_FLAGS)             ; [20T / 5a]
+                JR   NZ,bb_plan_b_next          ; [12T / 2a]  already in
+                LD   B,(IX+O_YH)                ; [19T / 4a]
+                LD   A,(IX+O_XH)                ; [19T / 4a]
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_test_box                ; [17T / 5a]  NZ = disturbed
+                POP  BC                         ; [10T / 3a]
+                JR   Z,bb_plan_b_next           ; [12T / 2a]
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_charge                  ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+                JR   C,bb_plan_b_next           ; [12T / 2a]
+                SET  7,(IX+O_FLAGS)             ; [23T / 6a]
+bb_plan_b_next:
+                LD   DE,OBJ_SIZE                ; [10T / 3a]
+                ADD  IX,DE                      ; [15T / 2a]
+                INC  C                          ; [4T / 1a]
+                LD   A,C                        ; [4T / 1a]
+                CP   OBJ_MAX                    ; [7T / 2a]
+                JR   C,bb_plan_b                ; [12T / 2a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_charge --------------------------------------------------
+;
+; Take this object's estimated render cost out of bb_budget.
+; Entry : IX = object
+; Exit  : CF set if the budget is spent (object must be deferred)
+;
+; The figures are the measured ones that tools/bbgfx.py prints, not
+; estimates: a flat erase is 239a and a tiled one ~880a, a masked 16x16
+; draw is 538-577a and an opaque stack-blitted one 363-397a.
+
+bb_charge:
+                LD   B,(IX+O_YH)                ; [19T / 4a]
+                LD   C,(IX+O_XH)                ; [19T / 4a]
+                CALL bb_box_is_flat             ; [17T / 5a]  NZ = all backdrop
+                LD   HL,880                     ; [10T / 3a]  tiled erase
+                JR   Z,bb_ch_erase              ; [12T / 2a]
+                LD   HL,239                     ; [10T / 3a]  PUSH-fill erase
+bb_ch_erase:
+                LD   DE,400                     ; [10T / 3a]  opaque draw
+                BIT  0,(IX+O_FLAGS)             ; [20T / 5a]  OF_MASKED
+                JR   Z,bb_ch_add                ; [12T / 2a]
+                LD   DE,580                     ; [10T / 3a]  masked draw
+bb_ch_add:
+                ADD  HL,DE                      ; [11T / 1a]
+                EX   DE,HL                      ; [4T / 1a]   DE = cost
+                LD   HL,(bb_budget)             ; [16T / 5a]
+                OR   A                          ; [4T / 1a]
+                SBC  HL,DE                      ; [15T / 2a]
+                RET  C                          ; [11T / 3a]  spent
+                LD   (bb_budget),HL             ; [16T / 5a]
+                OR   A                          ; [4T / 1a]   clear CF
+                RET                             ; [10T / 3a]
+
+; ---- bb_erase_pass ----------------------------------------------
+
+bb_erase_pass:
+                LD   IX,bb_objects              ; [14T / 4a]
+                LD   C,0                        ; [7T / 2a]
+bb_ep_loop:
+                LD   A,(IX+O_TYPE)              ; [19T / 4a]
+                OR   A                          ; [4T / 1a]
+                JR   Z,bb_ep_next               ; [12T / 2a]
+                BIT  7,(IX+O_FLAGS)             ; [20T / 5a]  OF_INSET
+                JR   Z,bb_ep_next               ; [12T / 2a]
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_drawn_ptr               ; [17T / 5a]
+                LD   A,(IY+D_SPR)               ; [19T / 4a]
+                INC  A                          ; [4T / 1a]
+                CALL NZ,bb_erase_one            ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+bb_ep_next:
+                LD   DE,OBJ_SIZE                ; [10T / 3a]
+                ADD  IX,DE                      ; [15T / 2a]
+                INC  C                          ; [4T / 1a]
+                LD   A,C                        ; [4T / 1a]
+                CP   OBJ_MAX                    ; [7T / 2a]
+                JR   C,bb_ep_loop               ; [12T / 2a]
+                RET                             ; [10T / 3a]
+
+; Erase the 16x16 box recorded in IY. Entry: IX = object, IY = record.
+bb_erase_one:
+                LD   B,(IY+D_Y)                 ; [19T / 4a]
+                LD   C,(IY+D_X)                 ; [19T / 4a]
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_box_is_flat             ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+                JR   Z,bb_eo_tiles              ; [12T / 2a]
+
+                ; If the object has not moved and its draw is going to be
+                ; the opaque variant, that draw covers this box completely
+                ; and the erase is redundant. Costs 16 accesses to find
+                ; out, saves 239 - and it is the common case for anything
+                ; that is animating on the spot.
+                BIT  0,(IX+O_FLAGS)             ; [20T / 5a]  OF_MASKED
+                JR   NZ,bb_eo_flat              ; [12T / 2a]  hollow: erase
+                LD   A,(IY+D_X)                 ; [19T / 4a]
+                CP   (IX+O_XH)                  ; [19T / 4a]
+                JR   NZ,bb_eo_flat              ; [12T / 2a]
+                LD   A,(IY+D_Y)                 ; [19T / 4a]
+                CP   (IX+O_YH)                  ; [19T / 4a]
+                RET  Z                          ; [11T / 3a]  nothing to undo
+
+bb_eo_flat:
+                ; fast path: plain backdrop under the whole box
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_screen_addr             ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+                LD   DE,(bb_backpair)           ; [20T / 6a]
+                JP   bb_blit_flat_8x16          ; [10T / 3a]  tail call
+
+bb_eo_tiles:
+                ; slow path: snap the box out to whole cells in X and
+                ; regenerate it from the tile bank. 2 cells if the left
+                ; edge is already cell aligned, otherwise 3.
+                LD   A,C                        ; [4T / 1a]
+                AND  7                          ; [7T / 2a]
+                LD   A,2                        ; [7T / 2a]
+                JR   Z,bb_eo_go                 ; [12T / 2a]
+                LD   A,3                        ; [7T / 2a]
+bb_eo_go:
+                RES  0,C                        ; [8T / 2a]
+                RES  1,C                        ; [8T / 2a]
+                RES  2,C                        ; [8T / 2a]   x &= ~7
+                JP   bb_blit_tiles              ; [10T / 3a]  tail call
+
+; ---- bb_draw_pass -----------------------------------------------
+
+bb_draw_pass:
+                LD   IX,bb_objects              ; [14T / 4a]
+                LD   C,0                        ; [7T / 2a]
+bb_dp_loop:
+                LD   A,(IX+O_TYPE)              ; [19T / 4a]
+                OR   A                          ; [4T / 1a]
+                JR   Z,bb_dp_next               ; [12T / 2a]
+                BIT  7,(IX+O_FLAGS)             ; [20T / 5a]
+                JR   Z,bb_dp_next               ; [12T / 2a]
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_draw_one                ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+bb_dp_next:
+                LD   DE,OBJ_SIZE                ; [10T / 3a]
+                ADD  IX,DE                      ; [15T / 2a]
+                INC  C                          ; [4T / 1a]
+                LD   A,C                        ; [4T / 1a]
+                CP   OBJ_MAX                    ; [7T / 2a]
+                JR   C,bb_dp_loop               ; [12T / 2a]
+                RET                             ; [10T / 3a]
+
+; Entry: IX = object, C = slot.
+;
+; Sprite selection is the one interesting decision here. Every solid
+; object carries two compiled frames: a masked one that respects the
+; background, and an opaque stack-blitted one whose transparent pixels
+; have been baked to the backdrop colour. The opaque one is 26% cheaper
+; (397a against 538a, measured by tools/bbgfx.py) but is only correct
+; where the box sits on plain backdrop - which bb_box_is_flat already
+; answers in 28 accesses. Hollow sprites have no opaque variant at all:
+; baking a backdrop rectangle behind a bubble would blank whatever the
+; bubble is floating over.
+
+bb_draw_one:
+                LD   A,C                        ; [4T / 1a]
+                LD   (bb_do_slot),A             ; [13T / 4a]
+
+                ; descriptor: bb_sprite_table + id * SPR_SIZE + S_DRAW
+                LD   A,(IX+O_SPR)               ; [19T / 4a]
+                LD   L,A                        ; [4T / 1a]
+                LD   H,0                        ; [7T / 2a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]  x SPR_SIZE
+                LD   DE,bb_sprite_table+S_DRAW  ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   E,(HL)                     ; [7T / 2a]
+                INC  HL                         ; [6T / 1a]
+                LD   D,(HL)                     ; [7T / 2a]   DE = masked draw
+                INC  HL                         ; [6T / 1a]   -> S_FILL lo
+
+                LD   A,(HL)                     ; [7T / 2a]
+                INC  HL                         ; [6T / 1a]   -> S_FILL hi
+                OR   (HL)                       ; [7T / 2a]
+                JR   Z,bb_do_chosen             ; [12T / 2a]  hollow
+
+                PUSH DE                         ; [11T / 3a]
+                PUSH HL                         ; [11T / 3a]
+                LD   B,(IX+O_YH)                ; [19T / 4a]
+                LD   C,(IX+O_XH)                ; [19T / 4a]
+                CALL bb_box_is_flat             ; [17T / 5a]
+                POP  HL                         ; [10T / 3a]
+                POP  DE                         ; [10T / 3a]
+                JR   Z,bb_do_chosen             ; [12T / 2a]  over a platform
+                LD   D,(HL)                     ; [7T / 2a]
+                DEC  HL                         ; [6T / 1a]
+                LD   E,(HL)                     ; [7T / 2a]   DE = opaque draw
+
+bb_do_chosen:
+                ; record what this buffer will be holding, so the next
+                ; pass over it knows what to undo
+                PUSH DE                         ; [11T / 3a]
+                LD   A,(bb_do_slot)             ; [13T / 4a]
+                LD   C,A                        ; [4T / 1a]
+                CALL bb_drawn_ptr               ; [17T / 5a]
+                LD   A,(IX+O_XH)                ; [19T / 4a]
+                LD   (IY+D_X),A                 ; [19T / 5a]
+                LD   A,(IX+O_YH)                ; [19T / 4a]
+                LD   (IY+D_Y),A                 ; [19T / 5a]
+                LD   A,(IX+O_SPR)               ; [19T / 4a]
+                LD   (IY+D_SPR),A               ; [19T / 5a]
+
+                LD   B,(IX+O_YH)                ; [19T / 4a]
+                LD   C,(IX+O_XH)                ; [19T / 4a]
+                CALL bb_screen_addr             ; [17T / 5a]  HL = top left
+                POP  DE                         ; [10T / 3a]
+                ; fall through into the trampoline
+
+; Call the routine in DE with HL preserved. bb_draw_one was itself
+; CALLed, so the sprite's own RET lands back in bb_draw_pass - the
+; trampoline costs two instructions and no stack juggling. The compiled
+; sprite saves and restores SP around its own stack blitting.
+bb_call_de:
+                PUSH DE                         ; [11T / 3a]
+                RET                             ; [10T / 3a]
+
+bb_do_slot:     DEFB 0

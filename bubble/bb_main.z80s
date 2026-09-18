@@ -1,0 +1,132 @@
+;------------------------------------------------------------------
+; bb_main.z80s - entry point, frame loop, interrupt handler
+;
+; The loop synchronises on HALT and then runs the whole frame with
+; interrupts off, because the blitter parks SP inside the framebuffer.
+; If a frame overruns, the next interrupt is simply missed and the
+; front buffer holds for one more field: the picture drops to 25 Hz
+; rather than tearing.
+;------------------------------------------------------------------
+
+bb_start:
+                CALL bb_init                    ; [17T / 5a]
+                CALL bb_obj_init                ; [17T / 5a]
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_level),A               ; [13T / 4a]
+                CALL bb_load_level              ; [17T / 5a]
+
+                ; display on, first buffer live
+                XOR  A                          ; [4T / 1a]
+                OUT  (P_BORD),A                 ; [11T / 2a]
+
+bb_frame:
+                EI                              ; [4T / 1a]
+                HALT                            ; wait for the frame interrupt
+                DI                              ; [4T / 1a]
+
+                CALL bb_read_input              ; [17T / 5a]
+                ; The grid runs BEFORE the update: bubbles read their
+                ; wind direction through the cell pointer it writes, so
+                ; updating first would use last frame's cell - or, on the
+                ; very first frame, a zeroed one.
+                CALL bb_obj_grid                ; [17T / 5a]
+                CALL bb_obj_update              ; [17T / 5a]
+                CALL bb_spawner                 ; [17T / 5a]
+                CALL bb_render                  ; [17T / 5a]
+
+                LD   A,1                        ; [7T / 2a]
+                LD   (bb_rendered),A            ; [13T / 4a]
+                JR   bb_frame                   ; [12T / 2a]
+
+; ---- interrupt handler ------------------------------------------
+;
+; Placed at $0038 by bb.z80s. Flips the buffers only if the render pass
+; actually finished, so an overrun degrades cleanly.
+
+bb_irq:
+                PUSH AF                         ; [11T / 3a]
+                PUSH HL                         ; [11T / 3a]
+                IN   A,(P_STAT)                 ; [11T / 2a]  acknowledge
+                LD   HL,bb_tick                 ; [10T / 3a]
+                INC  (HL)                       ; [11T / 3a]
+                LD   A,(bb_rendered)            ; [13T / 4a]
+                OR   A                          ; [4T / 1a]
+                JR   Z,bb_irq_done              ; [12T / 2a]
+
+                ; back buffer becomes front
+                LD   A,(bb_backbuf)             ; [13T / 4a]
+                LD   (bb_frontbuf),A            ; [13T / 4a]
+                LD   HL,bb_bufpage              ; [10T / 3a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                LD   A,(HL)                     ; [7T / 2a]
+                OR   VMPR_MODE4                 ; [7T / 2a]
+                OUT  (P_VMPR),A                 ; [11T / 2a]
+
+                ; the other one becomes the new back buffer
+                LD   A,(bb_frontbuf)            ; [13T / 4a]
+                XOR  1                          ; [7T / 2a]
+                LD   (bb_backbuf),A             ; [13T / 4a]
+                LD   HL,bb_bufpage              ; [10T / 3a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                LD   A,(HL)                     ; [7T / 2a]
+                OUT  (P_HMPR),A                 ; [11T / 2a]
+
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_rendered),A            ; [13T / 4a]
+bb_irq_done:
+                POP  HL                         ; [10T / 3a]
+                POP  AF                         ; [10T / 3a]
+                EI                              ; [4T / 1a]
+                RET                             ; [10T / 3a]
+
+bb_bufpage:     DEFB BUF0_PAGE, BUF1_PAGE
+
+; ---- bb_load_level ----------------------------------------------
+
+bb_load_level:
+                ; copy the 96-byte bitmap for this level
+                LD   A,(bb_level)               ; [13T / 4a]
+                LD   L,A                        ; [4T / 1a]
+                LD   H,0                        ; [7T / 2a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]  x32
+                LD   D,H                        ; [4T / 1a]
+                LD   E,L                        ; [4T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]  x64
+                ADD  HL,DE                      ; [11T / 1a]  x96
+                LD   DE,bb_leveldata            ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   DE,bb_levelmap             ; [10T / 3a]
+                LD   BC,MAP_BYTES               ; [10T / 3a]
+                LDIR
+
+                CALL bb_autotile                ; [17T / 5a]
+                CALL bb_build_flat3             ; [17T / 5a]
+                CALL bb_build_flow              ; [17T / 5a]
+
+                ; backdrop colour, as a byte pair ready for PUSH
+                LD   A,(bb_backdrop)            ; [13T / 4a]
+                LD   L,A                        ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                LD   (bb_backpair),HL           ; [16T / 5a]
+
+                ; paint both buffers, display still blanked
+                LD   A,BUF0_PAGE                ; [7T / 2a]
+                CALL bb_render_bg               ; [17T / 5a]
+                LD   A,BUF1_PAGE                ; [7T / 2a]
+                CALL bb_render_bg               ; [17T / 5a]
+
+                ; restore the back buffer mapping the flip expects
+                LD   A,(bb_backbuf)             ; [13T / 4a]
+                LD   HL,bb_bufpage              ; [10T / 3a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                LD   A,(HL)                     ; [7T / 2a]
+                OUT  (P_HMPR),A                 ; [11T / 2a]
+
+                JP   bb_spawn_level             ; [10T / 3a]

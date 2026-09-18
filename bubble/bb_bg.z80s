@@ -1,0 +1,85 @@
+;------------------------------------------------------------------
+; bb_bg.z80s - paint the whole tile map into a buffer (level load only)
+;
+; 32 cells x 4 bytes = 128 bytes, which is exactly SCR_STRIDE, so the
+; destination pointer just streams: no per-row fixup at all.
+;
+; Cost: 24576 bytes at ~4.5 acc/byte = ~110,000 accesses, about 4.6
+; frames. Called twice (once per buffer) during the level wipe, with
+; the display blanked via BORD_SOFF so contention is 1-in-4 throughout.
+;------------------------------------------------------------------
+
+; Entry : A = base page of the target buffer (BUF0_PAGE or BUF1_PAGE)
+; Trash : everything
+
+bb_render_bg:
+                OUT  (P_HMPR),A                 ; [11T / 2a]
+                LD   DE,SCR_BASE                ; [10T / 3a]
+                LD   HL,bb_tilemap              ; [10T / 3a]
+                LD   (bb_bg_cell),HL            ; [16T / 5a]
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_bg_sub),A              ; [13T / 4a]
+                LD   A,MAP_H                    ; [7T / 2a]
+                LD   (bb_bg_crow),A             ; [13T / 4a]
+
+bb_bg_cellrow:
+                LD   A,CELL_H                   ; [7T / 2a]
+                LD   (bb_bg_prow),A             ; [13T / 4a]
+
+bb_bg_pixrow:
+                LD   HL,(bb_bg_cell)            ; [16T / 5a]
+                LD   A,MAP_W                    ; [7T / 2a]
+                LD   (bb_bg_ccount),A           ; [13T / 4a]
+
+bb_bg_cellloop:
+                PUSH HL                         ; [11T / 3a]
+                LD   L,(HL)                     ; [7T / 2a]   tile id
+                LD   H,0                        ; [7T / 2a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]  tile * 32
+                LD   BC,bb_tilebank             ; [10T / 3a]
+                ADD  HL,BC                      ; [11T / 1a]
+                LD   A,(bb_bg_sub)              ; [13T / 4a]
+                ADD  A,A                        ; [4T / 1a]
+                ADD  A,A                        ; [4T / 1a]   row within tile * 4
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                LD   BC,4                       ; [10T / 3a]
+                LDIR                            ; [~21T/byte / 4a per byte]
+                POP  HL                         ; [10T / 3a]
+                INC  HL                         ; [6T / 1a]   next cell
+                LD   A,(bb_bg_ccount)           ; [13T / 4a]
+                DEC  A                          ; [4T / 1a]
+                LD   (bb_bg_ccount),A           ; [13T / 4a]
+                JR   NZ,bb_bg_cellloop          ; [12T / 2a]
+
+                ; DE has advanced exactly 128 bytes, so it is already
+                ; sitting at the start of the next screen row.
+                LD   HL,bb_bg_sub               ; [10T / 3a]
+                INC  (HL)                       ; [11T / 3a]
+                LD   HL,bb_bg_prow              ; [10T / 3a]
+                DEC  (HL)                       ; [11T / 3a]
+                JR   NZ,bb_bg_pixrow            ; [12T / 2a]
+
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_bg_sub),A              ; [13T / 4a]
+                LD   HL,(bb_bg_cell)            ; [16T / 5a]
+                LD   BC,MAP_W                   ; [10T / 3a]
+                ADD  HL,BC                      ; [11T / 1a]
+                LD   (bb_bg_cell),HL            ; [16T / 5a]
+                LD   HL,bb_bg_crow              ; [10T / 3a]
+                DEC  (HL)                       ; [11T / 3a]
+                JR   NZ,bb_bg_cellrow           ; [12T / 2a]
+                RET                             ; [10T / 3a]
+
+bb_bg_cell:     DEFW 0
+bb_bg_sub:      DEFB 0
+bb_bg_prow:     DEFB 0
+bb_bg_crow:     DEFB 0
+bb_bg_ccount:   DEFB 0

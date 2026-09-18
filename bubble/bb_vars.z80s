@@ -1,0 +1,104 @@
+;------------------------------------------------------------------
+; bb_vars.z80s - RAM layout for sections A/B ($0000-$7FFF, pages 0,1)
+;
+; Everything here is resident: the erase path regenerates background
+; pixels from bb_tilebank rather than from a background master page,
+; which is what keeps the second 32K window free for the back buffer.
+;------------------------------------------------------------------
+
+; ---- Page-aligned lookup tables ($5000) -------------------------
+;
+; Kept page-aligned so a lookup is LD H,page / LD L,index / LD r,(HL),
+; which is 3 accesses. Row addressing could be computed instead
+; (H = $80 + y>>1, L = (y&1)<<7 + x>>1) but that is nine instructions
+; and this is three.
+
+                ORG $5000
+bb_rowaddr_lo:  DEFS 192        ; low  byte of SCR_BASE + y*128
+                DEFS 64
+bb_rowaddr_hi:  DEFS 192        ; high byte of SCR_BASE + y*128
+                DEFS 64
+
+; Cell-column helpers for the 1-bit level bitmap. For cell column cx:
+;   byte offset within the row = cx >> 3      (0..3)
+;   bit mask                   = $80 >> (cx & 7)
+bb_cellbyte:    DEFS 32
+bb_cellmask:    DEFS 32
+
+; Wind acceleration deltas, indexed 0..8 (DIR_U .. DIR_NONE), padded to
+; 16 entries so a direction byte can be masked with $0F instead of
+; range-checked. That matters because a newly spawned object is read
+; before bb_obj_grid has given it a valid cell pointer.
+bb_dir_dx:      DEFS 16         ; signed, pre-multiplied by BUB_ACCEL
+bb_dir_dy:      DEFS 16         ; signed, pre-multiplied by BUB_ACCEL
+
+; ---- Level and background ($5400) -------------------------------
+
+                ORG $5400
+bb_levelmap:    DEFS MAP_BYTES  ; 96 bytes: one bit per cell, 4 per row
+bb_flowfield:   DEFS MAP_CELLS  ; 768 bytes: one direction byte per cell
+                                ; (a nibble field would be 384 but costs
+                                ;  a shift and a mask on every lookup;
+                                ;  bubbles read this every frame)
+bb_tilemap:     DEFS MAP_CELLS  ; 768 bytes: autotiled tile id per cell
+bb_flatmap:     DEFS MAP_BYTES  ; 96 bytes: 1 = cell is plain backdrop
+bb_flat3map:    DEFS MAP_BYTES  ; 96 bytes: 1 = this cell AND the 3x3
+                                ; block starting at it are all backdrop.
+                                ; An object box is at most 3x3 cells, so
+                                ; picking the 224a erase over the 704a one
+                                ; costs a single cell lookup (~25a) rather
+                                ; than nine of them.
+
+; ---- Object table ($5C00, 16-byte aligned) ----------------------
+
+                ORG $5C00
+bb_objects:     DEFS OBJ_MAX * OBJ_SIZE         ; 768 bytes
+
+; Per-buffer draw records. Buffer N's pixels are two frames old by the
+; time we render into it again, so each buffer remembers independently
+; what it is holding. Interleaved 4 bytes per slot so one IY reaches
+; every field with a small displacement.
+bb_drawn:       DEFS OBJ_MAX * 2 * 4            ; [buffer][slot][D_*]
+
+; Cell occupancy grid, rebuilt each frame from moving objects. Used for
+; bubble-bubble repulsion and for waking static objects that a mover has
+; just crossed. One byte per cell: object slot + 1, or 0 for empty.
+bb_cellgrid:    DEFS MAP_CELLS
+
+; Cells whose pixels this frame's erase or draw will disturb. An object
+; that has not moved can keep its pixels only if nothing in here touches
+; it; marking a box costs ~45a and testing one ~63a, against the ~700a
+; of redrawing an object that did not need it.
+bb_touched:     DEFS MAP_CELLS
+
+; ---- Scalars ($6700) --------------------------------------------
+
+                ORG $6700
+bb_frontbuf:    DEFB 0          ; 0 or 1: buffer currently being displayed
+bb_backbuf:     DEFB 1          ; 0 or 1: buffer being rendered into
+bb_tick:        DEFB 0          ; incremented by the frame interrupt
+bb_rendered:    DEFB 0          ; 1 = back buffer complete, safe to flip
+bb_savesp:      DEFW 0          ; SP parked here across stack-blit runs
+bb_budget:      DEFW 0          ; remaining render budget, in accesses
+bb_objcount:    DEFB 0          ; live objects
+bb_level:       DEFB 0          ; current level index
+bb_backdrop:    DEFB 0          ; backdrop colour index, duplicated nibbles
+bb_backpair:    DEFW 0          ; backdrop as a byte pair, ready for PUSH
+bb_scratch:     DEFS 16
+
+; ---- Tile bank ($6800) ------------------------------------------
+;
+; Tile 0 is the plain backdrop and tiles 1..16 are the solid edge
+; variants picked by the autotiler, 32 bytes each (4 bytes x 8 rows in
+; MODE 4). A whole level's look is 544 bytes.
+
+                ORG $6800
+bb_tilebank:    DEFS 32 * 32
+
+; Compiled sprites live down in the code area from $0040: they are code,
+; not data, and there is 20K of room there. The sprite descriptor table
+; is generated alongside them.
+
+; Priority comes from slot order: important objects are allocated from
+; slot 0 upwards and cheap ones from slot 47 downwards, so the render
+; pass walks the table in slot order and needs no sort at all.

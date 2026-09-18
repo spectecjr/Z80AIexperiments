@@ -1,0 +1,191 @@
+;------------------------------------------------------------------
+; bb_level.z80s - level bitmap, autotiling, background, collision
+;
+; The level is a 1-bit-per-cell bitmap exactly as the arcade stores it:
+; 4 bytes per row x 24 rows = 96 bytes. That one structure does three
+; jobs - collision, autotiling, and choosing the erase path - which is
+; why it is worth keeping the map in bit form rather than unpacking it.
+;------------------------------------------------------------------
+
+; ---- bb_cell_solid ----------------------------------------------
+;
+; Entry : B = cell row (0..23), C = cell column (0..31)
+; Exit  : NZ if the cell is solid, Z if it is open.
+;         Cells outside the map read as solid (walls and ceiling).
+; Trash : AF, DE, HL
+; Cost  : [~110T / 26a]
+
+bb_cell_solid:
+                LD   A,B                        ; [4T / 1a]
+                CP   MAP_H                      ; [7T / 2a]
+                JR   NC,bb_cs_solid             ; [12T / 2a]  off top/bottom
+                LD   A,C                        ; [4T / 1a]
+                CP   MAP_W                      ; [7T / 2a]
+                JR   NC,bb_cs_solid             ; [12T / 2a]  off left/right
+                LD   H,0                        ; [7T / 2a]
+                LD   L,B                        ; [4T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]  cy*2
+                ADD  HL,HL                      ; [11T / 1a]  cy*4 = stride
+                LD   DE,bb_levelmap             ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   A,C                        ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                AND  3                          ; [7T / 2a]   cx >> 3
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                LD   D,(HL)                     ; [7T / 2a]   the map byte
+                LD   HL,bb_cellmask             ; [10T / 3a]
+                LD   A,C                        ; [4T / 1a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                LD   A,(HL)                     ; [7T / 2a]   $80 >> (cx&7)
+                AND  D                          ; [4T / 1a]
+                RET                             ; [10T / 3a]
+bb_cs_solid:
+                LD   A,1                        ; [7T / 2a]   NZ
+                OR   A                          ; [4T / 1a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_point_solid ---------------------------------------------
+;
+; Entry : B = y in pixels, C = x in pixels
+; Exit  : NZ if the cell containing that pixel is solid
+; Trash : AF, BC, DE, HL
+
+bb_point_solid:
+                LD   A,B                        ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                AND  $1F                        ; [7T / 2a]   y >> 3
+                LD   B,A                        ; [4T / 1a]
+                LD   A,C                        ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                AND  $1F                        ; [7T / 2a]   x >> 3
+                LD   C,A                        ; [4T / 1a]
+                JP   bb_cell_solid              ; [10T / 3a]
+
+; ---- bb_autotile ------------------------------------------------
+;
+; Turn the 1-bit map into a tile id per cell, arcade style: a solid
+; cell picks one of 16 edge variants from its 4-neighbour mask, so a
+; level's entire look comes from 17 tiles x 32 bytes = 544 bytes.
+;
+;   bit 3 = cell above is solid      bit 1 = cell below is solid
+;   bit 2 = cell right is solid      bit 0 = cell left  is solid
+;
+; (that order falls out of probing up/right/down/left into a left-
+;  shifting accumulator, which is one instruction cheaper than
+;  assembling the bits in their nominal order)
+;
+; Tile 0 is the plain backdrop; solid cells use tiles 1 + mask.
+; Also builds bb_flatmap, the "this cell is plain backdrop" bitmap that
+; the erase path uses to decide between the 224a and the 704a route.
+;
+; Cost : one-off at level load, ~768 cells x ~150a = ~115,000a.
+
+bb_autotile:
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_at_cy),A               ; [13T / 4a]
+                LD   HL,bb_flatmap              ; [10T / 3a]
+                LD   DE,bb_flatmap+1            ; [10T / 3a]
+                LD   BC,MAP_BYTES-1             ; [10T / 3a]
+                LD   (HL),$FF                   ; [10T / 3a]  assume all flat
+                LDIR
+                LD   HL,bb_tilemap              ; [10T / 3a]
+                LD   (bb_at_dst),HL             ; [16T / 5a]
+
+bb_at_rowloop:
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_at_cx),A               ; [13T / 4a]
+bb_at_colloop:
+                LD   A,(bb_at_cy)               ; [13T / 4a]
+                LD   B,A                        ; [4T / 1a]
+                LD   A,(bb_at_cx)               ; [13T / 4a]
+                LD   C,A                        ; [4T / 1a]
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_cell_solid              ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+                JR   NZ,bb_at_issolid           ; [12T / 2a]
+
+                ; open cell: backdrop tile, leave the flat bit set
+                XOR  A                          ; [4T / 1a]
+                JR   bb_at_store                ; [12T / 2a]
+
+bb_at_issolid:
+                ; clear this cell's bit in bb_flatmap
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_flat_clear              ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+
+                ; gather the 4-neighbour mask (see bb_flow.z80s)
+                CALL bb_neighbours              ; [17T / 5a] + 130a
+                LD   A,D                        ; [4T / 1a]
+                INC  A                          ; [4T / 1a]  tiles 1..16
+
+bb_at_store:
+                LD   HL,(bb_at_dst)             ; [16T / 5a]
+                LD   (HL),A                     ; [7T / 2a]
+                INC  HL                         ; [6T / 1a]
+                LD   (bb_at_dst),HL             ; [16T / 5a]
+
+                LD   HL,bb_at_cx                ; [10T / 3a]
+                INC  (HL)                       ; [11T / 3a]
+                LD   A,(HL)                     ; [7T / 2a]
+                CP   MAP_W                      ; [7T / 2a]
+                JR   C,bb_at_colloop            ; [12T / 2a]
+
+                LD   HL,bb_at_cy                ; [10T / 3a]
+                INC  (HL)                       ; [11T / 3a]
+                LD   A,(HL)                     ; [7T / 2a]
+                CP   MAP_H                      ; [7T / 2a]
+                JR   C,bb_at_rowloop            ; [12T / 2a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_flat_clear ----------------------------------------------
+; Clear cell (B=cy, C=cx)'s bit in bb_flatmap.
+bb_flat_clear:
+                LD   H,0                        ; [7T / 2a]
+                LD   L,B                        ; [4T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]  cy*4
+                LD   DE,bb_flatmap              ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   A,C                        ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                AND  3                          ; [7T / 2a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                PUSH HL                         ; [11T / 3a]
+                LD   HL,bb_cellmask             ; [10T / 3a]
+                LD   A,C                        ; [4T / 1a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                LD   A,(HL)                     ; [7T / 2a]
+                CPL                             ; [4T / 1a]
+                POP  HL                         ; [10T / 3a]
+                AND  (HL)                       ; [7T / 2a]
+                LD   (HL),A                     ; [7T / 2a]
+                RET                             ; [10T / 3a]
+
+bb_at_cx:       DEFB 0
+bb_at_cy:       DEFB 0
+bb_at_dst:      DEFW 0

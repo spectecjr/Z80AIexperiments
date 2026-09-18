@@ -1,0 +1,267 @@
+;------------------------------------------------------------------
+; bb_boxes.z80s - cell-level queries about a 16x16 object box
+;
+; A 16x16 box covers at most 3x3 cells, which is what makes all three
+; of these cheap: the flat test is a single bit lookup in a map that was
+; precomputed per cell at level load, and mark/test are nine byte
+; accesses over a contiguous 3x3 window.
+;------------------------------------------------------------------
+
+; ---- bb_box_is_flat ---------------------------------------------
+;
+; Entry : B = y, C = x (top-left of the box, pixels)
+; Exit  : NZ if every cell the box can touch is plain backdrop, so the
+;         224a PUSH-fill erase is safe; Z if the tile path is needed.
+; Trash : AF, DE, HL
+; Cost  : [~120T / 28a]
+
+bb_box_is_flat:
+                LD   A,B                        ; [4T / 1a]
+                CP   (MAP_H-2)*CELL_H           ; [7T / 2a]
+                JR   NC,bb_bif_no               ; [12T / 2a]  clipped, be safe
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                AND  $1F                        ; [7T / 2a]   cy
+                LD   L,A                        ; [4T / 1a]
+                LD   H,0                        ; [7T / 2a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]  cy * MAP_STRIDE
+                LD   DE,bb_flat3map             ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   A,C                        ; [4T / 1a]
+                CP   (MAP_W-2)*CELL_W           ; [7T / 2a]
+                JR   NC,bb_bif_no               ; [12T / 2a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                AND  $1F                        ; [7T / 2a]   cx
+                LD   E,A                        ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                AND  3                          ; [7T / 2a]   cx >> 3
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                LD   D,(HL)                     ; [7T / 2a]
+                LD   HL,bb_cellmask             ; [10T / 3a]
+                LD   A,E                        ; [4T / 1a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                LD   A,(HL)                     ; [7T / 2a]
+                AND  D                          ; [4T / 1a]
+                RET                             ; [10T / 3a]
+bb_bif_no:
+                XOR  A                          ; [4T / 1a]   Z: not flat
+                RET                             ; [10T / 3a]
+
+; ---- bb_cellptr -------------------------------------------------
+;
+; Entry : A = x, B = y (pixels)
+; Exit  : HL = cy*MAP_W + cx, clamped so a 3x3 window starting there
+;         stays inside the map. The caller adds its own grid base.
+; Trash : AF, C
+
+bb_cellptr:
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                AND  $1F                        ; [7T / 2a]   cx
+                CP   MAP_W-2                    ; [7T / 2a]
+                JR   C,bb_cp_xok                ; [12T / 2a]
+                LD   A,MAP_W-3                  ; [7T / 2a]
+bb_cp_xok:
+                LD   C,A                        ; [4T / 1a]
+                LD   A,B                        ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                AND  $1F                        ; [7T / 2a]   cy
+                CP   MAP_H-2                    ; [7T / 2a]
+                JR   C,bb_cp_yok                ; [12T / 2a]
+                LD   A,MAP_H-3                  ; [7T / 2a]
+bb_cp_yok:
+                LD   L,A                        ; [4T / 1a]
+                LD   H,0                        ; [7T / 2a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]  cy * MAP_W
+                LD   A,C                        ; [4T / 1a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_mark_box ------------------------------------------------
+;
+; Stamp the 3x3 cell window covering the box at (A = x, B = y) into
+; bb_touched. Trash: AF, BC, DE, HL.
+; Cost : [~230T / 48a]
+
+                MACRO MARKROW
+                LD   (HL),1                     ; [10T / 3a]
+                INC  HL                         ; [6T / 1a]  INC HL, not INC L:
+                LD   (HL),1                     ; [10T / 3a]  bb_touched spans
+                INC  HL                         ; [6T / 1a]   three pages and a
+                LD   (HL),1                     ; [10T / 3a]  row can straddle
+                ADD  HL,DE                      ; [11T / 1a]  +MAP_W-2
+                ENDM
+
+bb_mark_box:
+                CALL bb_cellptr                 ; [17T / 5a]
+                LD   DE,bb_touched              ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   DE,MAP_W-2                 ; [10T / 3a]
+                MARKROW
+                MARKROW
+                MARKROW
+                RET                             ; [10T / 3a]
+
+; ---- bb_test_box ------------------------------------------------
+;
+; Entry : A = x, B = y
+; Exit  : NZ if any cell of the 3x3 window is marked in bb_touched.
+; Cost  : [~210T / 44a]
+
+                MACRO TESTROW
+                LD   A,(HL)                     ; [7T / 2a]
+                INC  HL                         ; [6T / 1a]
+                OR   (HL)                       ; [7T / 2a]
+                INC  HL                         ; [6T / 1a]
+                OR   (HL)                       ; [7T / 2a]
+                OR   C                          ; [4T / 1a]
+                LD   C,A                        ; [4T / 1a]
+                ADD  HL,DE                      ; [11T / 1a]
+                ENDM
+
+bb_test_box:
+                CALL bb_cellptr                 ; [17T / 5a]
+                LD   DE,bb_touched              ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   DE,MAP_W-2                 ; [10T / 3a]
+                LD   C,0                        ; [7T / 2a]
+                TESTROW
+                TESTROW
+                TESTROW
+                LD   A,C                        ; [4T / 1a]
+                OR   A                          ; [4T / 1a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_build_flat3 ---------------------------------------------
+;
+; Precompute, per cell, "this cell and the 3x3 block starting at it are
+; all plain backdrop". Run once per level, right after bb_autotile.
+; It turns the erase path decision from nine cell lookups into one.
+;
+; Cost: ~768 cells x ~250a = ~190,000a, about 8 frames at level load.
+
+bb_build_flat3:
+                LD   HL,bb_flat3map             ; [10T / 3a]
+                LD   DE,bb_flat3map+1           ; [10T / 3a]
+                LD   BC,MAP_BYTES-1             ; [10T / 3a]
+                LD   (HL),0                     ; [10T / 3a]  bb_f3_set ORs in
+                LDIR
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_f3_cy),A               ; [13T / 4a]
+bb_f3_rowloop:
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_f3_cx),A               ; [13T / 4a]
+bb_f3_colloop:
+                LD   A,3                        ; [7T / 2a]
+                LD   (bb_f3_rows),A             ; [13T / 4a]
+                LD   A,(bb_f3_cy)               ; [13T / 4a]
+                LD   (bb_f3_yy),A               ; [13T / 4a]
+                LD   E,1                        ; [7T / 2a]   assume flat
+bb_f3_r:
+                LD   A,3                        ; [7T / 2a]
+                LD   (bb_f3_cols),A             ; [13T / 4a]
+                LD   A,(bb_f3_cx)               ; [13T / 4a]
+                LD   (bb_f3_xx),A               ; [13T / 4a]
+bb_f3_c:
+                LD   A,(bb_f3_yy)               ; [13T / 4a]
+                LD   B,A                        ; [4T / 1a]
+                LD   A,(bb_f3_xx)               ; [13T / 4a]
+                LD   C,A                        ; [4T / 1a]
+                PUSH DE                         ; [11T / 3a]
+                CALL bb_cell_solid              ; [17T / 5a]
+                POP  DE                         ; [10T / 3a]
+                JR   Z,bb_f3_open               ; [12T / 2a]
+                LD   E,0                        ; [7T / 2a]   a solid neighbour
+bb_f3_open:
+                LD   HL,bb_f3_xx                ; [10T / 3a]
+                INC  (HL)                       ; [11T / 3a]
+                LD   HL,bb_f3_cols              ; [10T / 3a]
+                DEC  (HL)                       ; [11T / 3a]
+                JR   NZ,bb_f3_c                 ; [12T / 2a]
+                LD   HL,bb_f3_yy                ; [10T / 3a]
+                INC  (HL)                       ; [11T / 3a]
+                LD   HL,bb_f3_rows              ; [10T / 3a]
+                DEC  (HL)                       ; [11T / 3a]
+                JR   NZ,bb_f3_r                 ; [12T / 2a]
+
+                LD   A,E                        ; [4T / 1a]
+                OR   A                          ; [4T / 1a]
+                CALL NZ,bb_f3_set               ; [17T / 5a]
+
+                LD   HL,bb_f3_cx                ; [10T / 3a]
+                INC  (HL)                       ; [11T / 3a]
+                LD   A,(HL)                     ; [7T / 2a]
+                CP   MAP_W                      ; [7T / 2a]
+                JR   C,bb_f3_colloop            ; [12T / 2a]
+                LD   HL,bb_f3_cy                ; [10T / 3a]
+                INC  (HL)                       ; [11T / 3a]
+                LD   A,(HL)                     ; [7T / 2a]
+                CP   MAP_H                      ; [7T / 2a]
+                JR   C,bb_f3_rowloop            ; [12T / 2a]
+                RET                             ; [10T / 3a]
+
+; Set cell (bb_f3_cx, bb_f3_cy)'s bit in bb_flat3map.
+bb_f3_set:
+                LD   A,(bb_f3_cy)               ; [13T / 4a]
+                LD   L,A                        ; [4T / 1a]
+                LD   H,0                        ; [7T / 2a]
+                ADD  HL,HL                      ; [11T / 1a]
+                ADD  HL,HL                      ; [11T / 1a]  cy * MAP_STRIDE
+                LD   DE,bb_flat3map             ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   A,(bb_f3_cx)               ; [13T / 4a]
+                LD   C,A                        ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                AND  3                          ; [7T / 2a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                PUSH HL                         ; [11T / 3a]
+                LD   HL,bb_cellmask             ; [10T / 3a]
+                LD   A,C                        ; [4T / 1a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                LD   A,(HL)                     ; [7T / 2a]
+                POP  HL                         ; [10T / 3a]
+                OR   (HL)                       ; [7T / 2a]
+                LD   (HL),A                     ; [7T / 2a]
+                RET                             ; [10T / 3a]
+
+bb_f3_cx:       DEFB 0
+bb_f3_cy:       DEFB 0
+bb_f3_xx:       DEFB 0
+bb_f3_yy:       DEFB 0
+bb_f3_rows:     DEFB 0
+bb_f3_cols:     DEFB 0

@@ -1,0 +1,50 @@
+;------------------------------------------------------------------
+; bb.z80s - Bubble Bobble prototype for the SAM Coupe
+;
+; Builds a 32K image for pages 0 and 1. The image is entered at $0000
+; with LMPR already selecting page 0 and the ROM paged out; see
+; docs/BUBBLE_BOBBLE_SAM.md and build.sh for how to get it there.
+;
+; Layout of sections A and B ($0000-$7FFF):
+;
+;   $0000  reset entry
+;   $0038  IM 1 interrupt vector
+;   $0040  code, then the compiled sprites
+;   $5000  lookup tables          (bb_vars.z80s)
+;   $5400  level, flow field, tile map
+;   $5C00  object table, draw records, cell grids
+;   $6700  scalars
+;   $6800  tile bank
+;   $8000  stack top, growing down into section B
+;------------------------------------------------------------------
+
+                ORG $0000
+                DI
+                JP   bb_start
+
+                ; pad to the interrupt vector
+                DEFS $0038 - $, $FF
+
+                ORG $0038
+                JP   bb_irq
+
+                ORG $0040
+
+                INCLUDE "bb_equ.z80s"
+                INCLUDE "bb_main.z80s"
+                INCLUDE "bb_init.z80s"
+                INCLUDE "bb_level.z80s"
+                INCLUDE "bb_bg.z80s"
+                INCLUDE "bb_flow.z80s"
+                INCLUDE "bb_boxes.z80s"
+                INCLUDE "bb_blit.z80s"
+                INCLUDE "bb_obj.z80s"
+                INCLUDE "bb_bubble.z80s"
+                INCLUDE "bb_actors.z80s"
+                INCLUDE "bb_render.z80s"
+                INCLUDE "gen/bb_gfx.z80s"
+
+bb_code_end:    EQU $
+BB_CODE_LEN     EQU bb_code_end - $0040
+
+                INCLUDE "bb_vars.z80s"
