@@ -123,7 +123,13 @@ bb_negate_hl:
 ; would end up inside a solid cell. Separating the axes is what lets a
 ; bubble slide along a ceiling instead of sticking to it.
 
+; bb_blocked is set when the axis was reverted, so callers can tell
+; "I hit something" from "I moved less than a whole pixel this frame" -
+; at under 1 px/frame a position delta cannot distinguish the two.
+
 bb_move_x:
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_blocked),A             ; [13T / 4a]
                 LD   L,(IX+O_XL)                ; [19T / 4a]
                 LD   H,(IX+O_XH)                ; [19T / 4a]
                 LD   E,(IX+O_VXL)               ; [19T / 4a]
@@ -135,6 +141,8 @@ bb_move_x:
                 CALL bb_centre_solid            ; [17T / 5a]
                 POP  HL                         ; [10T / 3a]
                 RET  Z                          ; [11T / 3a]  open, keep it
+                LD   A,1                        ; [7T / 2a]
+                LD   (bb_blocked),A             ; [13T / 4a]
                 LD   (IX+O_XL),L                ; [19T / 5a]  revert
                 LD   (IX+O_XH),H                ; [19T / 5a]
                 LD   (IX+O_VXL),0               ; [19T / 5a]
@@ -142,6 +150,8 @@ bb_move_x:
                 RET                             ; [10T / 3a]
 
 bb_move_y:
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_blocked),A             ; [13T / 4a]
                 LD   L,(IX+O_YL)                ; [19T / 4a]
                 LD   H,(IX+O_YH)                ; [19T / 4a]
                 LD   E,(IX+O_VYL)               ; [19T / 4a]
@@ -153,11 +163,15 @@ bb_move_y:
                 CALL bb_centre_solid            ; [17T / 5a]
                 POP  HL                         ; [10T / 3a]
                 RET  Z                          ; [11T / 3a]
+                LD   A,1                        ; [7T / 2a]
+                LD   (bb_blocked),A             ; [13T / 4a]
                 LD   (IX+O_YL),L                ; [19T / 5a]
                 LD   (IX+O_YH),H                ; [19T / 5a]
                 LD   (IX+O_VYL),0               ; [19T / 5a]
                 LD   (IX+O_VYH),0               ; [19T / 5a]
                 RET                             ; [10T / 3a]
+
+bb_blocked:     DEFB 0
 
 ; NZ if the cell under the object's centre (+8,+8 from its top-left) is
 ; solid. Trash: AF, BC, DE, HL.

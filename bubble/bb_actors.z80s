@@ -138,17 +138,16 @@ bb_ue_moving:
                 LD   (IX+O_VYL),L               ; [19T / 5a]
                 LD   (IX+O_VYH),H               ; [19T / 5a]
 
-                LD   A,(IX+O_XH)                ; [19T / 4a]
-                LD   (bb_scratch),A             ; [13T / 4a]
                 CALL bb_move_x                  ; [17T / 5a]
+                LD   A,(bb_blocked)             ; [13T / 4a]
+                LD   (bb_scratch),A             ; [13T / 4a]  move_y clears it
                 CALL bb_move_y                  ; [17T / 5a]
 
-                ; blocked, or about to walk off the edge? turn round.
+                ; Turn round if the wall stopped us, or if there is no
+                ; floor under our feet any more.
                 LD   A,(bb_scratch)             ; [13T / 4a]
-                CP   (IX+O_XH)                  ; [19T / 4a]
-                JR   NZ,bb_ue_checkedge         ; [12T / 2a]
-                JR   bb_ue_turn                 ; [12T / 2a]
-bb_ue_checkedge:
+                OR   A                          ; [4T / 1a]
+                JR   NZ,bb_ue_turn              ; [12T / 2a]
                 CALL bb_on_ground               ; [17T / 5a]
                 RET  NZ                         ; [11T / 3a]
 bb_ue_turn:

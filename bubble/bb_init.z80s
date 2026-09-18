@@ -4,7 +4,9 @@
 
 bb_init:
                 DI                              ; [4T / 1a]
-                LD   SP,$8000                   ; [10T / 3a]  top of section B
+                ; SP is set by the reset stub in bb.z80s, not here: this
+                ; routine is CALLed, so resetting SP would discard its own
+                ; return address.
 
                 ; ROM out, so $0038 belongs to us and IM 1 works.
                 LD   A,LMPR_VALUE               ; [7T / 2a]

@@ -262,6 +262,12 @@ bb_eo_go:
 
 ; ---- bb_draw_pass -----------------------------------------------
 
+; IX must be saved across the sprite call: the compiled OPAQUE sprites
+; cache their two most frequent byte pairs in IX and IY so that laying a
+; row down is four PUSHes rather than four reloads, which means they
+; destroy the object pointer. 8 accesses per object to preserve it,
+; against the ~140 the register caching saves.
+
 bb_draw_pass:
                 LD   IX,bb_objects              ; [14T / 4a]
                 LD   C,0                        ; [7T / 2a]
@@ -272,7 +278,9 @@ bb_dp_loop:
                 BIT  7,(IX+O_FLAGS)             ; [20T / 5a]
                 JR   Z,bb_dp_next               ; [12T / 2a]
                 PUSH BC                         ; [11T / 3a]
+                PUSH IX                         ; [15T / 4a]  see below
                 CALL bb_draw_one                ; [17T / 5a]
+                POP  IX                         ; [14T / 4a]
                 POP  BC                         ; [10T / 3a]
 bb_dp_next:
                 LD   DE,OBJ_SIZE                ; [10T / 3a]

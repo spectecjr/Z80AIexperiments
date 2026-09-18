@@ -18,9 +18,18 @@ machine - which caps screen writes at 15,872 bytes a frame against a
 24,576-byte MODE 4 screen. Full-screen redraw is arithmetically impossible,
 so the renderer is double-buffered dirty rectangles with compiled sprites.
 
-Measured: **18 fully-redrawn 16x16 objects per 50 Hz frame** in a realistic
-Bubble Bobble mix, 27 when everything is solid and over open backdrop,
-against an arcade gameplay peak of 35-40.
+Predicted: 18 fully-redrawn 16x16 objects per 50 Hz frame. **Measured, by
+running the code: about 5.** `tools/profile.py` attributes every memory
+access to the nearest label and puts the tiled erase at 45% of the frame -
+4.6x what the cost model assumed, because it recomputes loop invariants.
+The per-instruction annotations were all correct; the model on top of them
+was not. See section 4 of the design document for the profile and the
+three structural fixes that close the gap.
+
+![30 seconds of the prototype running](../docs/bubble-bobble-sam.gif)
+
+The GIF above is not a mock-up: it is the MODE 4 framebuffer captured out
+of a Z80 emulator running the assembled image, one field at a time.
 
 ## Files
 
@@ -41,6 +50,21 @@ against an arcade gameplay peak of 35-40.
 | `bb_actors.z80s` | players, enemies, pickups, spawning, input |
 | `bb_render.z80s` | plan / erase / draw, and the budget governor |
 | `gen/bb_gfx.z80s` | generated: palette, tiles, levels, compiled sprites |
+
+## Emulation
+
+`tools/z80.py` is a Z80 core and `tools/sam.py` wraps it in enough SAM
+Coupe - paging, CLUT, keyboard matrix, MODE 4 decode - to run the
+assembled image. It found four real bugs that reading the source had not:
+
+* `bb_init` reset `SP` after being CALLed, discarding its own return address
+* compiled opaque sprites cache byte pairs in `IX`/`IY`, which silently
+  destroyed the render pass's object pointer; that one took 31 frames to
+  show, because it only bit once an opaque draw and an enemy coincided
+* enemies compared position deltas to detect walls, which cannot work at
+  under 1 px per frame
+* the row-address table left entries 192-255 zero, so any out-of-range Y
+  would have stack-blitted straight into the code at `$0000`
 
 ## Conventions
 

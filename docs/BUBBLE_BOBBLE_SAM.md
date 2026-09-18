@@ -148,22 +148,31 @@ pre-shifted sprite variants entirely.
 Every solid object therefore carries **both** compiled frames, and
 `bb_draw_one` picks per frame. The opaque one is 26% cheaper.
 
-### Erase - 239a or ~880a
+### Erase - 239a flat, ~4,080a tiled (measured)
 
 There is no background master page (section 5 explains why all four memory
 sections are spoken for), so erase regenerates background pixels:
 
-| Case                               | Method                       | acc  |
-|------------------------------------|------------------------------|------|
-| Box entirely on flat backdrop      | `PUSH` fill, one cached pair | 239  |
-| Box overlaps a platform cell       | LDI from the tile bank       | ~880 |
-| Unmoved, opaque, flat              | skipped - the draw covers it | 16   |
+| Case                               | Method                       | acc    |
+|------------------------------------|------------------------------|--------|
+| Box entirely on flat backdrop      | `PUSH` fill, one cached pair | 239    |
+| Box overlaps a platform cell       | LDI from the tile bank       | ~4,080 |
+| Unmoved, opaque, flat              | skipped - the draw covers it | 16     |
 
 Choosing between them costs 28 accesses, because `bb_flat3map` precomputes
 "this cell and the 3x3 block starting at it are all backdrop" per cell at
-level load. On a typical Bubble Bobble screen ~70% of boxes are flat:
+level load.
 
-    0.70 x 239 + 0.30 x 880 = 431 accesses average
+**The 4,080a is measured, and it is 4.6x what this document originally
+estimated.** The estimate counted the LDI copies and dismissed the address
+arithmetic around them - `bb_blit_tiles` recomputes the tile-bank source
+pointer on every one of the 16 pixel rows, which is 69 accesses of setup
+wrapped around 16 accesses of copying, repeated for each of up to three
+cell columns. `tools/profile.py` runs the real code and attributes bus
+traffic to the nearest label; it puts `bb_bt_rowloop` at **45% of the
+entire frame**. No amount of re-reading the source would have found that:
+the annotations were all individually correct, and the loop structure was
+what was wrong.
 
 ### Totals
 
@@ -178,69 +187,62 @@ level load. On a typical Bubble Bobble screen ~70% of boxes are flat:
 
 ---
 
-## 4. Frame budget
+## 4. Frame budget - predicted, then measured
+
+The original budget counted the blitting and allowed a flat 1,800a for
+everything else. Running the code says otherwise.
+
+### What was predicted
 
     Frame total                                        23,808 a
-      frame IRQ, buffer flip, input, timing              -400
-      object logic (48 x ~55)                          -2,640
-      plan sweep, dispatch, draw records                -1,800
-      audio driver (budgeted, not yet written)           -600
-      5% slack                                         -1,190
-                                                       ----------
+      overheads (IRQ, logic, plan, audio, slack)       -6,630
       Available for blitting                           17,178 a
+    -> 18 objects per 50 Hz frame in a realistic mix
 
-| Mix                                    | acc/obj | Objects @ 50 Hz |
-|----------------------------------------|---------|-----------------|
-| All solid, flat backdrop               | 636     | 27              |
-| All hollow bubbles, flat backdrop      | 816     | 21              |
-| **Weighted Bubble Bobble mix**         | 936     | **18**          |
-| Worst case, all hollow over platforms  | 1457    | 11              |
+### What actually happens
 
-**Headline: 18 fully-redrawn objects per 50 Hz frame in the realistic mix,
-27 when everything is solid and over open backdrop.** Run
-`python3 tools/budget.py` to reproduce this from the measured costs.
+`python3 tools/profile.py` over 30 frames of live play, with 13.3 objects
+alive on average:
 
-That is short of the arcade's ~35-40 peak, and honestly so: the arcade had
-sprite hardware and we have a contended bus. Three things close the gap in
-practice, and a fourth would close it further.
+    measured mean     63,808 accesses     2.68x over budget
 
-### What makes the typical frame much cheaper
+    nearest label              a/frame  share
+    bb_bt_rowloop                28814   45.2%   tiled erase
+    bb_spr_bubble                 3245    5.1%   hollow bubble draw
+    bb_plan                       3157    4.9%   clearing bb_touched
+    bb_obj_grid                   3088    4.8%   clearing bb_cellgrid
+    bb_spr_enemy                  1867    2.9%
+    bb_box_is_flat                1516    2.4%
+    bb_cell_solid                 1252    2.0%
+    bb_ou_loop                    1036    1.6%
+    bb_mark_box                    978    1.5%
+    bb_blit_flat_8x16              890    1.4%
 
-1. **Static-object skip.** An object whose draw record for this buffer
-   already matches its position and frame costs **0 accesses** - no erase,
-   no draw. Fruit sits still for seconds and score popups never move.
-2. **Disturbance promotion.** Skipped objects are only redrawn if a moving
-   object's box marked one of their cells in `bb_touched`. Marking costs
-   ~48a and testing ~44a, against the 936a of redrawing something that did
-   not need it. Promoted objects have old box == new box, so they add no
-   new cells and one promotion sweep is provably sufficient.
-3. **Redundant-erase skip.** An unmoved object drawn opaquely has its box
-   completely covered by the draw, so the erase is dropped for 16a.
+So the honest figure is **around 5 objects per 50 Hz frame as the code
+stands**, not 18, and the prototype as recorded runs at roughly a third of
+field rate. The three things that make up the difference are all
+structural rather than instruction-level:
 
-On a representative mid-level frame - 2 players, 4 enemies and 9 bubbles
-moving, 6 fruit and 3 popups at rest - the budget comes to ~11,000
-accesses, under half the frame. That headroom is the point: it is what
-absorbs a bubble raft.
+1. **The tiled erase recomputes loop invariants** (45% of the frame).
+   Hoisting the tile-bank source out of the pixel-row loop - the tile id is
+   constant across a cell row and LDI already streams the source - takes it
+   from ~4,080a to ~2,250a. The **background master page** described below
+   takes it to **624a**, a 6.5x win on the single largest cost, and is now
+   clearly worth its paging machinery rather than being a nice-to-have.
+2. **Two 768-byte LDIR clears per frame** (`bb_touched`, `bb_cellgrid`)
+   cost 6,245a between them - 26% of the entire frame budget - to zero
+   grids that are then barely written. A generation tag compared against a
+   per-frame counter removes both clears outright.
+3. **`bb_cell_solid` and `bb_box_is_flat` at 2,768a combined.** Both walk
+   from cell coordinates to a bit every time they are called; caching the
+   map row pointer across a box's three rows would roughly halve them.
 
-### The largest optimisation still on the table
-
-The tiled erase at ~880a is 3.7x the flat one and is the single worst cost
-in the renderer. A **background master page**, mapped at the same offset as
-the framebuffer, turns erase into a straight `LDI` run at 4.9 acc/byte:
-**624a** for the exact 128-byte box, with no snapping out to whole cells.
-That would move the weighted mix from 936a to ~860a, about 20 objects.
-
-It is not free: all four memory sections are already spoken for, so it
-needs an `LMPR` switch and the erase routine duplicated at a common offset
-in both page pairs. That is a real SAM technique and the right next step,
-but it is paging machinery rather than rendering, so this prototype ships
-without it and with the cost measured rather than hidden.
-
-A second, cheaper win: erase only the region a moving object *vacated*
-rather than its whole old box. At 2 px/frame the vacated region is an
-L-shaped sliver of ~32 bytes against 128, taking a flat erase from 239a to
-roughly 80a. It needs a variable-size blitter, which the generated-code
-approach makes straightforward.
+Applying all three lands near 24,000a, which is the budget - at which
+point the 18-object figure becomes reachable rather than hypothetical.
+None of that is done here. What is done is the measurement, and the
+measurement is the point: **the per-instruction annotations in this
+project are verified correct to the last access, and the cost model built
+on top of them was still wrong by 2.7x.**
 
 ---
 
@@ -364,7 +366,10 @@ Three tools, all runnable:
 |--------------------------|--------------------------------------------------|
 | `tools/bbgfx.py`         | palette, tile bank, levels, and the two sprite compilers; prints the measured access cost of every frame it emits |
 | `tools/bbverify.py`      | reference model of the autotiler and the wind current; traces a bubble and fails if it does not circulate |
-| `tools/budget.py`        | the frame budget above, plus re-derives every `[nT / na]` annotation in the assembly from a Z80 timing table |
+| `tools/budget.py`        | the predicted frame budget, plus re-derives every `[nT / na]` annotation in the assembly from a Z80 timing table |
+| `tools/z80.py`, `tools/sam.py` | a Z80 core and enough SAM Coupe (paging, CLUT, keyboard, MODE 4 decode) to run the assembled image |
+| `tools/profile.py`       | runs the real code and attributes every memory access to the nearest label - the measured budget |
+| `tools/makegif.py`       | records the running prototype to `build/bubble-bobble-sam.gif` |
 
 `tools/bbverify.py --trace` prints the wind field as arrows with the
 bubble's path overlaid, which is the quickest way to see that a level's

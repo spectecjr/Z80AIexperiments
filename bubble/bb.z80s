@@ -20,6 +20,7 @@
 
                 ORG $0000
                 DI
+                LD   SP,$8000           ; top of section B, growing down
                 JP   bb_start
 
                 ; pad to the interrupt vector
