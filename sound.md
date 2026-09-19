@@ -133,10 +133,11 @@ snd_back:
 ```
 
 That is what makes a 70K register log affordable — it does not have to fit
-in the 5.5K the resident block has spare. **And `LMPR` does read back what
-was written**, so the tick needs no help from the band loop to put the chunk
-back: all three paging registers are read/write, and VMPR is the only one
-whose bit 7 means something different on read (MIDI receiving) from on
+in the 5.5K the resident block has spare. **And `LMPR` does read back what was
+written** — confirmed by the machine's owners and by SimCoupe, which returns
+it unmodified — so the tick needs no help from the band loop to put the
+chunk back. All three paging registers are read/write, and VMPR is the only
+one whose bit 7 means something different on read (MIDI receiving) from on
 write.
 
 ## The first tick is free, and so is the frame lock
@@ -169,12 +170,6 @@ bit is a demo running at a steady 25 Hz; one that finds it already low has
 overrun its two display frames and knows it. That is a frame counter for
 nothing, which is the other thing a demo wants and the reason not to
 measure the lock by counting T-states.
-
-**And `LMPR` does read back what was written**, so the tick can put the band
-loop's chunk back without the loop having to keep a copy - confirmed by the
-machine's owners and by SimCoupe, which returns `m_state.lmpr` unmodified.
-All three paging registers are read/write; VMPR is the only one whose bit 7
-means something different on read (MIDI receiving) from on write.
 
 ## When the frame is short, there is no mid-frame tick to place
 
