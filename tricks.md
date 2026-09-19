@@ -932,6 +932,18 @@ hundred bytes and several times the T-states every frame. 903 T-states to
 draw the smallest and 21,806 the largest, which is 14.2 a byte drawn - the
 floor for a masked compiled sprite with 7% of its bytes on an edge.
 
+**And the reason N exists is the packing, not the picture.** MODE 4 is two
+pixels a byte, so scaling *down the y axis is free* - a row either appears
+or it does not, and no pixel is ever combined with another - while any x
+scale that is not a whole number of bytes has to repack nibbles, at
+`roto`'s 109.7 T-states an arbitrary computed byte. So the widths have to
+exist already and the heights do not: `mipsprite.md` gets every height from
+80 rows down to 10 out of one compiled width with a row program, flat at
+283 to 297 T-states a row. The tree here compiles eight of each because
+eight sizes was all it needed; a bestiary would compile the widths and
+program the heights. **A chain like this is a memory for a packing, not a
+memory for a filter**, which is what makes it not a MIP chain.
+
 **One walk serves any sprite**, which is the reusable half. `tests/mksprite.py`
 is the descending `SP` walk above, and the pilot's generator and the tree's
 both call it: rows bottom upwards, bytes right to left, `PUSH DE` for runs,
@@ -998,6 +1010,7 @@ a walk of `SP`:
 | a solid box, 16x135 | 7.2 | taller is dearer, a step a row |
 | a masked sprite, 70% filled | **13 … 18** | per byte *drawn*, and it skips the air |
 | a masked sprite, 10x54 | 25 | seven bytes a row, two of them edges |
+| an opaque box of arbitrary pixels, 64x80 | **8.8** | `mipsprite`, measured the other way round |
 
 A masked draw costs 13 to 18 T-states a byte drawn and jumps over the air;
 a solid box costs 7 a byte of *box* and does not care what is in it.
@@ -1013,6 +1026,12 @@ put back. For a 16x135:
 |---|---|
 | masked draw + the old box wiped | 26,615 + 15,120 = **41,735** |
 | the box drawn solid, twice over | **31,036** |
+
+`mipsprite.md` arrives at the same place from the other direction and with
+a different sprite - an opaque box at **8.8 T-states a byte of arbitrary
+pixels**, against 13.4 a *covered* byte for the silhouette form of the same
+thing - which is worth more than either measurement alone: the two were
+taken on different shapes, by different generators, and they agree.
 
 The rule that comes out of it: **keep sprites over the repainted part of
 the screen**, and where they have to be against the sky, compile a solid

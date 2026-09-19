@@ -21,6 +21,15 @@ except where it says otherwise.
 And then take 10-25% off for contention, which none of these numbers
 carry — see the end.
 
+**These sprite figures are the masked form**, at 13 T-states a byte drawn,
+because that is what chequer10's trees are. `mipsprite.md` measures the
+other form of the same thing — an opaque box, which is what the section on
+sprites against the sky below argues for — at **8.8 T-states a byte**, and
+a z-bucket scheme that gets fifteen sprites over a 3:1 depth range into
+**77,129 T-states**. A game built that way rather than this one's way has
+appreciably more room than the tables above suggest: the ask is heavy
+*because it is masked and tall*, not because twelve sprites is a lot.
+
 ## The currency is bytes written
 
 A MODE 4 screen is 24,576 bytes. A 25 Hz frame is 240,000 T-states, and
@@ -182,6 +191,9 @@ That makes the recommendation:
 - **A byte-aligned horizon band**, twelve rows.
 - **Keep the sprites on the ground**, and compile solid-box variants of
   the ones that fly.
+- **Draw them as opaque boxes off a width chain**, per `mipsprite.md`, not
+  as masked silhouettes at eight fixed sizes: 8.8 T-states a byte rather
+  than 13 to 18, and the heights come free off a row program.
 - And measure the stretch factor on real hardware before believing any of
   it, because that is the one number here that is a guess.
 
