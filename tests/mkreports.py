@@ -27,14 +27,14 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 OUT = os.path.join(ROOT, "reports")
 
-STUDIES = {"budget": "mkbudget.py"}     # not a test but a study, and its
-                                        # report is read the same way
+STUDIES = {"budget": "mkbudget.py",     # not tests but studies, and their
+           "contend": "mkcontend.py"}   # reports are read the same way
 
 DEMOS = ("chequer", "chequer2", "chequer3", "chequer4", "chequer5",
          "chequer6", "chequer7", "chequer8", "chequer9", "chequer10",
          "harrier", "road", "road2", "zarch", "democube", "renderlit",
          "portal", "wolf3d", "twist", "roto", "vox", "prismpre",
-         "snd", "budget")
+         "snd", "budget", "contend")
 
 
 def run(name, timeout=900):

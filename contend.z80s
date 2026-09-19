@@ -1,0 +1,123 @@
+;------------------------------------------------------------------
+; contend.z80s - what the ASIC actually charges, measured on the machine
+;
+; A standalone program that measures the SAM's memory contention using
+; nothing but the machine itself: no debugger, no instrumentation, no
+; emulator hooks. Load it at 32768 and call it.
+;
+;   simcoupe build/contend.sbt
+;
+; SimCoupe wraps a raw file with a .sbt extension as a bootable disk -
+; CODE type, loaded at page 1 offset 0 which is logical 32768, and
+; auto-executed there under normal paging. That is the SAM's own entry
+; convention, so the same file also works from BASIC:
+;
+;   LOAD "contend" CODE 32768
+;   CALL 32768
+;
+; HOW IT WORKS. The frame interrupt is asserted for 128 T-states at the
+; top of every frame, and the light pen register HPEN reads back the
+; display line the raster is on - 0 to 191, and 192 when it is in the
+; border. So: wait for the interrupt's edge, run a known number of
+; instructions, and read HPEN. Where the raster has got to IS the
+; elapsed time, at 384 T-states a line.
+;
+; WHAT IT SETTLES. Three models of this machine disagree about what a
+; PUSH costs, and they disagree loudly:
+;
+;   no contention at all        HPEN =  49
+;   one access a slot           HPEN = 101
+;   every access aligned        HPEN = 131
+;
+; The third is what SimCoupe implements and what costs.md now budgets
+; against. NOP and LD (HL),A are controls: their accesses happen to fall
+; on the grid either way, so they separate "contended" from "not" but
+; not the last two from each other.
+;
+; The three answers are left as bytes at RESULT (0xFF00), which is where
+; to look in a memory view. Nothing is drawn: the screen would have to be
+; paged over the code that is running, and this is a test that wants to
+; be obviously correct rather than pretty.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+STATUS:         EQU 249         ; read: bit 3 low while the frame
+                                ; interrupt is asserted
+VMPR:           EQU 252
+HPEN:           EQU 0x01F8      ; the raster's display line, 192 in the
+                                ; border - and an ASIC port, so IN A,(n)
+                                ; would put A on the high byte: it has to
+                                ; be IN A,(C)
+SCRPAGE:        EQU 4           ; somewhere to put a MODE 4 screen
+MODE4:          EQU 0x60
+
+N_PUSH:         EQU 4096        ; sized so the answers land mid-display
+N_NOP:          EQU 8192
+N_LDHL:         EQU 6144
+
+        ORG 0x8000
+start:
+        DI
+        LD   SP,0x7FF0          ; section B, which is the system page and
+                                ; ours now: the PUSH test walks 8K down it
+        LD   A,MODE4 | SCRPAGE  ; the display must be ON and in MODE 4,
+        OUT  (VMPR),A           ; because that is what contends
+
+;------------------------------------------------------------------
+; Each test: wait for the top of a frame, run the instructions, read
+; off where the raster got to.
+;------------------------------------------------------------------
+
+        CALL sync
+        DUP  N_PUSH
+        PUSH DE
+        EDUP
+        CALL raster
+        LD   (RESULT + 0),A
+
+        CALL sync
+        DUP  N_NOP
+        NOP
+        EDUP
+        CALL raster
+        LD   (RESULT + 1),A
+
+        LD   HL,0x6000          ; somewhere harmless in section B
+        CALL sync
+        DUP  N_LDHL
+        LD   (HL),A
+        EDUP
+        CALL raster
+        LD   (RESULT + 2),A
+
+        DI
+        HALT                    ; SimCoupe's --exitonhalt stops here
+
+;------------------------------------------------------------------
+; sync - return just after the frame interrupt is asserted
+;------------------------------------------------------------------
+
+sync:
+        IN   A,(STATUS)         ; first wait for it to be clear, so that
+        AND  8                  ; the edge below is a real one
+        JR   Z,sync
+sync1:
+        IN   A,(STATUS)
+        AND  8
+        JR   NZ,sync1
+        RET
+
+;------------------------------------------------------------------
+; raster - A = the display line the raster is on, 192 in the border
+;------------------------------------------------------------------
+
+raster:
+        LD   BC,HPEN
+        IN   A,(C)
+        RET
+
+RESULT:         EQU 0xFF00      ; three bytes: the display line each test
+                                ; ended on. In section D, which is page 2
+                                ; and mapped on entry, and well clear of
+                                ; the code

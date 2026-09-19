@@ -176,6 +176,23 @@ few T-states it looks like:
 | tallest board, no trees | 187,261 | 49,903 | 1.56 | **2.10** | +34% |
 | shortest board, no trees | 92,526 | 24,217 | 0.77 | **1.02** | +32% |
 
+**And there is now a way to settle it on the machine.** `contend.z80s`
+measures the contention with nothing but the SAM itself - wait for the
+frame interrupt, run a known number of instructions, read the light pen's
+line register, and where the raster got to *is* the elapsed time at 384
+T-states a line. The three models disagree loudly about where a run of
+4,096 `PUSH DE` ends:
+
+| | display line it ends on |
+|---|---|
+| no contention at all | 49 |
+| one access a slot | 101 |
+| **every access aligned, which is what this budgets against** | **132** |
+
+`python3 tests/mkcontend.py` builds `build/contend.sbt`, which SimCoupe
+boots straight into, and prints what each model predicts. Whatever a
+machine writes into `0xFF00` decides it.
+
 The two slot rates are not this repository's guess: **SimCoupe implements
 exactly them**, `mask = main_screen ? 7 : 3` over a 256 T display window in
 a 384 T line, and its geometry gives 23,808 slots a frame on the nose.

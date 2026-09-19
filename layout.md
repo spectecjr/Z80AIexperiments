@@ -84,8 +84,13 @@ because page 0 is the system page and sits below the load address.
 **`tests/sam.py` allocates chunk 0 to page 0**, which a linear load cannot
 reach - so a real build either shifts the whole map up a page or copies that
 chunk into page 0 after taking control. That is a small, concrete piece of
-work, and it is the only thing between these routines and being timed on
-real hardware rather than modelled.
+work, and it is the only thing between these *demos* and running on a
+machine.
+
+The **timing** question no longer waits on it: `contend.z80s` is a
+standalone test that measures the contention with nothing but the machine,
+and `tests/mkcontend.py` builds it as a `.sbt` that SimCoupe boots
+directly. See `costs.md` §1b.
 
 ## If you add something
 
