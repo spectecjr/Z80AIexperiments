@@ -6,7 +6,9 @@ description: The SAM Coupé's ports, memory paging and screen modes, as the demo
 # The SAM Coupé, for this repo
 
 Source: the SAM Coupé Technical Manual
-(github.com/stefandrissen/sam-coupe-technical-manual). 
+(github.com/stefandrissen/sam-coupe-technical-manual), the machine's owners,
+and SimCoupe's source where a number had to be exact. A few things the
+manual does not state outright are still marked *inferred*.
 
 ## The machine
 
@@ -45,11 +47,28 @@ refresh the DRAM.
 
 As the system is intended to simulate a ZX Spectrum in one of its graphics modes, it must 
 emulate that system's CPU speed as well. The ZX Spectrum had a 3.5MHz Z80A CPU, so in graphics
-mode 0 (ZX Spectrum compatible) it slows the system down by inserting extra wake cycles, roughly
-reducing the speed of the CPU by half. 
+mode 0 (ZX Spectrum compatible - **MODE 1** in the user-facing numbering,
+since VMPR encodes `mode - 1`) it slows the system down by inserting extra
+wait cycles, roughly reducing the speed of the CPU by half. That is exactly
+what the contention table shows: MODE 1 contends in 64-cycle bands outside
+the display as well as inside it, which no other mode does.
 
 ## The Display
 
+The raster, which everything about timing hangs off:
+
+| | |
+|---|---|
+| a line | **384 T-states** - 64 border, **256 active display**, 64 border |
+| a frame | **119,808 T** over **312 lines**, 50.08 Hz |
+| the display | lines **68 to 259**: 68 blanked lines above it, 52 below |
+| `t = 0` | **the frame interrupt**, 68 lines before the display starts |
+
+8 T-states a cell, 48 cells a line, 8 of them side border each side. Those
+numbers are where the contention table comes from and where the light pen
+registers read from, so they are worth having in one place: **Contention**
+below works out what they cost, and **Reading the current raster position**
+is how a program finds out where it is.
 
 ## Internal Memory Paging - LMPR (250) and HMPR (251)
 
@@ -81,8 +100,14 @@ paging the other.
 A demo that wants plain RAM everywhere writes `page | 0x20` to LMPR (RAM0
 set, ROM1 and WPRAM clear) and `page` to HMPR.
 
-Both registers are readable, so a routine can save and restore the caller's
-paging rather than assuming it.
+**LMPR, HMPR and VMPR are all read/write**, and LMPR and HMPR read back
+exactly what was written - so a routine can save and restore the caller's
+paging rather than assuming it, and a routine called from inside someone
+else's paged window can put their page back without being told what it was.
+**VMPR is the one register whose bit 7 changes meaning between read and
+write**: written it is MIDI, read it is "MIDI receiving". Mask it before
+using a value read back from VMPR - `chequer9`'s buffer flip reads HMPR and
+`AND 31`s it for the same reason.
 
 Page numbers for LMPR, HMPR wrap - that is, if LMPR is set to page 31 (with RAM0 enabled), section
 A will contain page 31, and section B will contain page 0.
@@ -125,7 +150,9 @@ question then is what its jumper has been set to, which requires four probes to 
 ## The screen - VMPR (252)
 
 - bits 0-4: the page the **video hardware** displays. bits 5-6: MDE0/MDE1,
-  the screen mode. bit 7 is MIDI, not video.
+  the screen mode. bit 7 is MIDI, not video - and it is the one bit in any
+  of the three paging registers that means something different on read
+  (MIDI receiving) from on write.
 - *Inferred*: the mode bits are `mode - 1`, so MODE 4 is `0x60 | page`. The
   manual gives MDE0/MDE1 only as "first/second bit of screen mode control",
   but the ROM's `JMODE` takes 0-3 for MODEs 1-4.
@@ -167,6 +194,25 @@ The current line number (Y value) is available by reading HPEN (&01F8).
 The current horizontal position (X value) is available by reading LPEN (&00F8).
 
 The two LSB of LPEN must be masked off.
+
+**They are read at 248 and 504, which is the CLUT's own port pair** - the
+CLUT is write-only there and the light pen registers are what a *read*
+returns. So the CLUT's addressing trap applies in reverse: `IN A,(248)`
+puts **A** on the high address byte and therefore reads HPEN or LPEN
+depending on what happens to be in A. Use `LD BC,0x01F8 : IN A,(C)` for the
+line and `LD BC,0x00F8 : IN A,(C)` for the position.
+
+**And they are ASIC ports**, so each read waits for an 8 T-state boundary
+like every other port at 248 or above (see Contention) - which is not a
+problem for what they are good for.
+
+**What they are good for is measuring time on real hardware.** Read HPEN
+before a routine and after it and the difference in lines is its cost, at
+384 T-states a line; LPEN gives the position within the line to 4 T-states,
+so the pair is a cycle counter with no debugger, no instrumentation and no
+emulator. That is the measurement `game.md` and `costs.md` want in order to
+confirm the contention model against a machine: bracket `cq10_frame` with
+two reads and compare.
 
 | | LPEN (0x00F8) |
 |---|---|
@@ -339,9 +385,22 @@ everything costs `accesses x 8`:
 | **MODE 1** | 7 in the display *and* in 64-cycle bands outside it (`!(line_cycle & 0x40)`) - it is the worst mode, not the cheapest |
 
 **Only internal RAM is contended.** `afSectionContended[section] = (page <
-NUM_INTERNAL_PAGES)`, so ROM and external (megabyte) memory take no waits at
-all - which is why the manual notes ROM runs slightly faster for the same
-code.
+NUM_INTERNAL_PAGES)`, so ROM and external (megabyte) memory take **no waits
+at all** - which is why the manual notes ROM runs slightly faster for the
+same code.
+
+**Which is the most interesting consequence in this file.** External memory
+pages into sections C and D (see External Memory Paging), and a compiled
+sprite or run bank is mostly *instruction fetches* - the dominant slot cost
+in everything this repo does. A bank held in external RAM is fetched without
+contention even while the raster is in the display, where internal RAM would
+cost 8 T-states an access. It also lifts the 512K ceiling the map has been
+budgeted against: `game.md` counts pages out of the 32 that LMPR can
+address, and an external module is 64 more of them for data that does not
+need to be in the low block. Neither this nor the 4 MB it allows has been
+measured here - and the catch is that C and D are exactly where this repo's
+maps put the screen and the resident code, so using it means rearranging the
+map rather than just adding to it.
 
 **SOFF does not remove contention**, it removes the display window's share:
 a blanked frame uses the 4 T table throughout, **29,952 slots rather than
