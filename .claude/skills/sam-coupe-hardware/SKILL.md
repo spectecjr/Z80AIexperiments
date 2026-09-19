@@ -84,7 +84,11 @@ Section A can be selected to present either ROM0 or RAM.
 Section D can be selected to present ROM1, Internal Memory or External memory.
 Section C can be selected to present Internal Memory or External memory.
 The external/internal memory selector for sections C and D applies to both C and D.
-In order of priority, ROM > External Memory > Internal Memory.
+In order of priority, External Memory > ROM > Internal Memory. (Verified). 
+
+Code that needs to call ROM1 routines while External memory is paged into section C
+should copy the ROM contents into external memory, and ensure that external memory
+copy is set in XMEMH before enabling external memory.
 
 **Apply that per section**, taking the highest-priority source that is
 *enabled for that section*. So with `LMPR` bit 6 (ROM1) set and `HMPR` bit 7
@@ -95,32 +99,20 @@ In order of priority, ROM > External Memory > Internal Memory.
 | A | ROM0 unless RAM0 is set | ROM0, or internal |
 | B | internal only | internal, always the page above A |
 | C | external (MCNTRL), internal | **external** |
-| D | ROM1 (LMPR bit 6), external (MCNTRL), internal | **ROM 1** |
+| D | external (MCNTRL),  ROM1 (LMPR bit 6), internal | **ROM 1** |
 
-**⚠ SimCoupe resolves section D the other way round**, and one of the two is
-wrong. `Base/SAMIO.cpp`'s `UpdatePaging()` tests external *before* ROM 1:
+**SimCoupe handles it this way**:
 
+ `Base/SAMIO.cpp`'s `UpdatePaging()` tests external *before* ROM 1:
+
+```cpp
     // External RAM, ROM1, or internal RAM in section D
     if (m_state.hmpr & HMPR_MCNTRL_MASK)  PageIn(Section::D, EXTMEM + hepr);
     else if (m_state.lmpr & LMPR_ROM1)    PageIn(Section::D, ROM1);
     else                                  PageIn(Section::D, (hmpr + 1) & 31);
+```
 
-so it gives **external memory** for D where the rule above gives ROM 1. Its
-own comment lists the precedence as "External RAM, ROM1, or internal RAM".
-Everything else about the two agrees: section A is ROM0 unless RAM0, C and D
-take `LEPR` (128) and `HEPR` (129) independently when MCNTRL is set, and the
-pair rule holds.
-
-**The rule to code to, whichever it turns out to be: never set ROM1 and
-MCNTRL at the same time.** Clear `LMPR` bit 6 before enabling external
-memory, and section D is unambiguous under both readings. That is correct
-either way and costs nothing, because a program that wants 64 pages of
-external RAM in the high block is not also running out of ROM 1.
-
-And if the corner cannot be avoided: **SimCoupe's answer is the one that
-will happen in practice**, because that is what the code will be run and
-tested on. The question is out with the SAM developer community; when it
-comes back this note becomes one line either way.
+Its comment lists the precedence as "External RAM, ROM1, or internal RAM".
 
 `LMPR = 4` puts page 4 at `0000` and page 5 at `4000`. You cannot choose the
 two halves independently, so there is no way to hold one half still while
@@ -229,7 +221,8 @@ display being generated.
 The current line number (Y value) is available by reading HPEN (&01F8).
 The current horizontal position (X value) is available by reading LPEN (&00F8).
 
-The two LSB of LPEN must be masked off.
+The two least significant bits of LPEN can be masked off or ignored
+(or can be treated as random if you don't care).
 
 **They are read at 248 and 504, which is the CLUT's own port pair** - the
 CLUT is write-only there and the light pen registers are what a *read*
@@ -249,6 +242,11 @@ so the pair is a cycle counter with no debugger, no instrumentation and no
 emulator. That is the measurement `game.md` and `costs.md` want in order to
 confirm the contention model against a machine: bracket `cq10_frame` with
 two reads and compare.
+
+**They can also be used when performing careful timing for routines that
+chase the raster.** This is useful when you have a routine that needs to
+start writing to an unbuffered display at a certain point in the frame
+readout to avoid display tearing.
 
 | | LPEN (0x00F8) |
 |---|---|
