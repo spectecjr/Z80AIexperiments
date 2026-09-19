@@ -1,0 +1,64 @@
+{
+  "name": "spr_ship",
+  "source": "examples/ship14.txt",
+  "command_line": "compile examples/ship14.txt --name spr_ship --out-dir examples/generated --reloc patch --routines draw,erase,save,restore --x-align 2 --y-align 2",
+  "total_size": 779,
+  "variants": [
+    {
+      "variant": "spr_ship_draw_single_xe",
+      "form": "single",
+      "path": "examples/generated/spr_ship_draw_single_xe.z80s",
+      "size": 241,
+      "tstates": 1078,
+      "item_tstates": 34,
+      "patches": 2,
+      "uses_stack": false,
+      "lower_bound": 500,
+      "cells": 55,
+      "routine": "draw",
+      "gap_percent": 115.6
+    },
+    {
+      "variant": "spr_ship_erase_single_xe",
+      "form": "single",
+      "path": "examples/generated/spr_ship_erase_single_xe.z80s",
+      "size": 157,
+      "tstates": 762,
+      "item_tstates": 34,
+      "patches": 2,
+      "uses_stack": false,
+      "lower_bound": null,
+      "cells": 55,
+      "routine": "erase",
+      "gap_percent": null
+    },
+    {
+      "variant": "spr_ship_save_single_xe",
+      "form": "single",
+      "path": "examples/generated/spr_ship_save_single_xe.z80s",
+      "size": 178,
+      "tstates": 1123,
+      "item_tstates": 41,
+      "patches": 2,
+      "uses_stack": false,
+      "lower_bound": null,
+      "cells": 55,
+      "routine": "save",
+      "gap_percent": null
+    },
+    {
+      "variant": "spr_ship_restore_single_xe",
+      "form": "single",
+      "path": "examples/generated/spr_ship_restore_single_xe.z80s",
+      "size": 203,
+      "tstates": 1223,
+      "item_tstates": 41,
+      "patches": 2,
+      "uses_stack": false,
+      "lower_bound": null,
+      "cells": 55,
+      "routine": "restore",
+      "gap_percent": null
+    }
+  ]
+}

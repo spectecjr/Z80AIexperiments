@@ -1,0 +1,12 @@
+; spr_ship - compiled sprite variant manifest
+; Uncomment the variants this project uses.
+;
+;     1078T   241b  single  INCLUDE "spr_ship_draw_single_xe.z80s"
+;      762T   157b  single  INCLUDE "spr_ship_erase_single_xe.z80s"
+;     1123T   178b  single  INCLUDE "spr_ship_save_single_xe.z80s"
+;     1223T   203b  single  INCLUDE "spr_ship_restore_single_xe.z80s"
+
+; INCLUDE "spr_ship_draw_single_xe.z80s"
+; INCLUDE "spr_ship_erase_single_xe.z80s"
+; INCLUDE "spr_ship_save_single_xe.z80s"
+; INCLUDE "spr_ship_restore_single_xe.z80s"

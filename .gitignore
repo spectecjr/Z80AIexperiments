@@ -1,4 +1,10 @@
 **/*.map
 **/*.dsk
 **/__pycache__/
+__pycache__/
 build/
+out/
+*.egg-info/
+.pytest_cache/
+.hypothesis/
+tools/codesprite/tests/fixtures/external/
