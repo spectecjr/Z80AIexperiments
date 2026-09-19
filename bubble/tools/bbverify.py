@@ -12,7 +12,7 @@ bb_bubble.z80s do, then:
   * reports how many cells the trace visits, which is the thing that makes
     a Bubble Bobble level feel alive
 
-Run: python3 tools/bbverify.py [--trace]
+Run: python3 bubble/tools/bbverify.py [--trace]
 """
 
 import sys

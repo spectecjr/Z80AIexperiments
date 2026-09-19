@@ -4,7 +4,7 @@ z80.py - a Z80 CPU core, complete enough to run the Bubble Bobble
 prototype in bubble/ and watch what it actually draws.
 
 The bus is supplied by the caller: an object with rb/wb (memory) and
-in_/out (ports). tools/sam.py provides the SAM Coupe one.
+in_/out (ports). bubble/tools/sam.py provides the SAM Coupe one.
 
 Register file follows the Z80's own encoding, r[0..7] = B C D E H L - A,
 with index 6 standing for (HL) so the regular opcode blocks decode by

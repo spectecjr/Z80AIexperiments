@@ -14,7 +14,7 @@ Two jobs:
     timing table and report any that disagree. Hand-written cycle counts
     rot; this is how you keep them honest.
 
-Run: python3 tools/budget.py [--check]
+Run: python3 bubble/tools/budget.py [--check]
 """
 
 import os
@@ -22,7 +22,7 @@ import re
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-SRC = os.path.join(HERE, "..", "bubble")
+SRC = os.path.join(HERE, "..")
 
 # --------------------------------------------------------------------------
 # SAM Coupe frame timing
@@ -48,7 +48,7 @@ def frame_budget():
             per_display_line, per_blank_line)
 
 
-# Measured by tools/bbgfx.py from the compiled sprite code it emits.
+# Measured by bubble/tools/bbgfx.py from the compiled sprite code it emits.
 COSTS = {
     "erase, flat backdrop (PUSH fill)":        239,
     "erase, over a platform (tile bank)":      880,

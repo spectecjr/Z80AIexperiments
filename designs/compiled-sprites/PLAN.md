@@ -77,7 +77,7 @@ Horizontal clipping (crop-and-compile via `--rect` is available), SAM contention
 ## Architecture
 
 ```
-tools/codesprite/
+codesprite/
   pyproject.toml                 deps: pillow; dev: pytest, hypothesis
   codesprite/
     cli.py                       compile | inspect | bench
@@ -227,7 +227,7 @@ codesprite sizes DIR              re-print the size table from the manifest/JSON
 
 ## Verification of the plan itself (end-to-end acceptance for v1)
 
-1. `pip install -e tools/codesprite[dev] && pytest` green (emulator, codegen, property tests).
+1. `pip install -e codesprite[dev] && pytest` green (emulator, codegen, property tests).
 2. `codesprite compile examples/ship16.txt --name spr_ship --budget 60 --out-dir out/spr_ship` finishes within budget, verify passes for every variant file, the size table prints, and draw ≤ ~1 100T for the opaque 16×16 example with a reported lower-bound gap; `--x-align 2 --y-align 2 --form list --clip none` yields exactly one draw file per routine.
 3. With sjasmplus installed: `sjasmplus examples/demo_sam.z80s` assembles the demo that includes selected variant files and `runtime/sprite_rt.z80s`; bytes match our encoder (`--bin` diff).
 4. Load the demo in SimCoupe (manual, v1) and see the sprite drawn, erased, and restored at moving positions including odd x and odd y.

@@ -109,8 +109,8 @@ is **35-40 objects of 16x16**.
 
 A 16x16 object in MODE 4 is 8 bytes x 16 rows = **128 bytes**.
 
-Every figure below is **measured, not estimated**: `tools/bbgfx.py` counts
-the accesses in the straight-line code it emits, and `tools/budget.py`
+Every figure below is **measured, not estimated**: `bubble/tools/bbgfx.py` counts
+the accesses in the straight-line code it emits, and `bubble/tools/budget.py`
 re-derives every `[nT / na]` annotation in the assembly from a Z80 timing
 table (1,392 annotations currently checked, 0 disagreements).
 
@@ -168,7 +168,7 @@ estimated.** The estimate counted the LDI copies and dismissed the address
 arithmetic around them - `bb_blit_tiles` recomputes the tile-bank source
 pointer on every one of the 16 pixel rows, which is 69 accesses of setup
 wrapped around 16 accesses of copying, repeated for each of up to three
-cell columns. `tools/profile.py` runs the real code and attributes bus
+cell columns. `bubble/tools/profile.py` runs the real code and attributes bus
 traffic to the nearest label; it puts `bb_bt_rowloop` at **45% of the
 entire frame**. No amount of re-reading the source would have found that:
 the annotations were all individually correct, and the loop structure was
@@ -201,7 +201,7 @@ everything else. Running the code says otherwise.
 
 ### What actually happens
 
-`python3 tools/profile.py` over 30 frames of live play, with 13.3 objects
+`python3 bubble/tools/profile.py` over 30 frames of live play, with 13.3 objects
 alive on average:
 
     measured mean     63,808 accesses     2.68x over budget
@@ -338,9 +338,9 @@ and test only their 3x3 neighbourhood - ~8 tests each.
 
 ## 6. Asset pipeline
 
-`tools/bbgfx.py` converts source PNGs to MODE 4 4bpp data, fits a 16-entry SAM
+`bubble/tools/bbgfx.py` converts source PNGs to MODE 4 4bpp data, fits a 16-entry SAM
 palette (3-bit-per-channel + half-intensity), and emits **compiled sprite code**
-as `.z80s`. `tools/bblevel.py` packs level bitmaps. `tools/budget.py` recomputes
+as `.z80s`. `tools/bblevel.py` packs level bitmaps. `bubble/tools/budget.py` recomputes
 every number in this document from the instruction tables, so the budget cannot
 silently drift from the code.
 
@@ -353,7 +353,7 @@ so the prototype builds and runs without them.
 
 ## 7. Building, running and checking
 
-    ./build.sh
+    bubble/build.sh
 
 produces `build/bb.bin`, a 27,648-byte image for pages 0 and 1. It is
 entered at `$0000` with `LMPR` selecting page 0 and the ROM paged out. A
@@ -364,14 +364,14 @@ Three tools, all runnable:
 
 | Tool                     | What it does                                     |
 |--------------------------|--------------------------------------------------|
-| `tools/bbgfx.py`         | palette, tile bank, levels, and the two sprite compilers; prints the measured access cost of every frame it emits |
-| `tools/bbverify.py`      | reference model of the autotiler and the wind current; traces a bubble and fails if it does not circulate |
-| `tools/budget.py`        | the predicted frame budget, plus re-derives every `[nT / na]` annotation in the assembly from a Z80 timing table |
-| `tools/z80.py`, `tools/sam.py` | a Z80 core and enough SAM Coupe (paging, CLUT, keyboard, MODE 4 decode) to run the assembled image |
-| `tools/profile.py`       | runs the real code and attributes every memory access to the nearest label - the measured budget |
-| `tools/makegif.py`       | records the running prototype to `build/bubble-bobble-sam.gif` |
+| `bubble/tools/bbgfx.py`         | palette, tile bank, levels, and the two sprite compilers; prints the measured access cost of every frame it emits |
+| `bubble/tools/bbverify.py`      | reference model of the autotiler and the wind current; traces a bubble and fails if it does not circulate |
+| `bubble/tools/budget.py`        | the predicted frame budget, plus re-derives every `[nT / na]` annotation in the assembly from a Z80 timing table |
+| `bubble/tools/z80.py`, `bubble/tools/sam.py` | a Z80 core and enough SAM Coupe (paging, CLUT, keyboard, MODE 4 decode) to run the assembled image |
+| `bubble/tools/profile.py`       | runs the real code and attributes every memory access to the nearest label - the measured budget |
+| `bubble/tools/makegif.py`       | records the running prototype to `build/bubble-bobble-sam.gif` |
 
-`tools/bbverify.py --trace` prints the wind field as arrows with the
+`bubble/tools/bbverify.py --trace` prints the wind field as arrows with the
 bubble's path overlaid, which is the quickest way to see that a level's
 current closes into a loop:
 
@@ -391,8 +391,8 @@ under a platform works its way out to the edge and rejoins the stream.
 
 ## 8. Artwork
 
-Arcade artwork is not redistributed here. `tools/bbgfx.py` reads palettised
-16x16 PNGs from `tools/art/` (`bubble.png`, `player.png`, `enemy.png`,
+Arcade artwork is not redistributed here. `bubble/tools/bbgfx.py` reads palettised
+16x16 PNGs from `bubble/tools/art/` (`bubble.png`, `player.png`, `enemy.png`,
 `fruit.png`) with palette index 0 meaning transparent - the geometry the
 arcade itself uses. Without them it synthesises stand-ins at identical
 dimensions so the prototype builds and runs unchanged.

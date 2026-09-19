@@ -17,7 +17,9 @@ Each file is one test's output with a header saying whether it passed and
 how long it took. They are *generated* — edit the test, not the report.
 Two of them are studies rather than tests: `snd.txt` is what a 50 Hz music
 tick costs inside a frame that cannot be interrupted (`sound.md`), and
-`budget.txt` is whether a playable game fits in one (`game.md`).
+`budget.txt` is whether a playable game fits in one (`game.md`). A third,
+`machine.txt`, is the cross-check that the repository's two SAM models and
+its assembly agree about the hardware - see `layout.md`.
 
 **What is in one.** The demo tests all print the same three things:
 

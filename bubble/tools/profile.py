@@ -2,7 +2,7 @@
 """
 profile.py - measure what the prototype actually costs, by running it.
 
-Every memory access the Z80 makes goes through the SAM bus in tools/sam.py,
+Every memory access the Z80 makes goes through the SAM bus in bubble/tools/sam.py,
 and on a SAM one memory access is exactly one contention slot. So counting
 bus traffic per frame, attributed to the nearest label, gives the real
 per-routine cost in the only currency that matters on this machine.
@@ -11,7 +11,7 @@ This exists because the hand-built cost model in docs/BUBBLE_BOBBLE_SAM.md
 was wrong by 4.6x on its single largest item, and nothing but measurement
 would have caught it.
 
-Run: python3 tools/profile.py [frames] [warmup]
+Run: python3 bubble/tools/profile.py [frames] [warmup]
 """
 
 import bisect

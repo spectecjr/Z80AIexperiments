@@ -8,7 +8,7 @@ MODE 4 framebuffer after the real Z80 code has rendered into it. The only
 thing the host supplies is keypresses, because there is nobody at the
 keyboard.
 
-Run: python3 tools/makegif.py [seconds] [scale]
+Run: python3 bubble/tools/makegif.py [seconds] [scale]
 """
 
 import os

@@ -12,8 +12,8 @@ write path the Z80 offers used wherever it fits. The design document is
 ## Setup
 
 ```sh
-pip install -e "tools/codesprite[dev]"      # pillow; pytest + hypothesis for dev
-pytest tools/codesprite -q
+pip install -e "codesprite[dev]"      # pillow; pytest + hypothesis for dev
+pytest codesprite -q
 ```
 
 Optional but recommended — an external assembler to cross-check the

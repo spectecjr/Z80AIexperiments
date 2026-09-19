@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-sam.py - just enough SAM Coupe around tools/z80.py to run the prototype:
+sam.py - just enough SAM Coupe around bubble/tools/z80.py to run the prototype:
 512K of RAM behind the two paging registers, the CLUT, the keyboard
 matrix, and MODE 4 framebuffer decoding.
 

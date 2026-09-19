@@ -4,7 +4,7 @@ Notes toward an external debugger/automation interface for SimCoupe, written
 from one concrete use case: automated verification of generated Z80 code.
 
 This is a wishlist, not a specification. It comes from building
-[codesprite](../tools/codesprite/) — a compiler that turns sprites into
+[codesprite](../codesprite/) — a compiler that turns sprites into
 straight-line Z80 that draws itself on a SAM in mode 4 — and hitting two things
 that no amount of work inside that project can settle. Everything here is
 offered as input to someone else's design decisions; if a request is awkward to

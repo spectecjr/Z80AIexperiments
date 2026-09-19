@@ -7,7 +7,7 @@ than around its clock speed.
 Design, frame budget and the derivation of every number:
 **[../docs/BUBBLE_BOBBLE_SAM.md](../docs/BUBBLE_BOBBLE_SAM.md)**
 
-    ../build.sh          generate assets, assemble, verify
+    ./build.sh           generate assets, assemble, verify
 
 ## The short version
 
@@ -19,7 +19,7 @@ machine - which caps screen writes at 15,872 bytes a frame against a
 so the renderer is double-buffered dirty rectangles with compiled sprites.
 
 Predicted: 18 fully-redrawn 16x16 objects per 50 Hz frame. **Measured, by
-running the code: about 5.** `tools/profile.py` attributes every memory
+running the code: about 5.** `bubble/tools/profile.py` attributes every memory
 access to the nearest label and puts the tiled erase at 45% of the frame -
 4.6x what the cost model assumed, because it recomputes loop invariants.
 The per-instruction annotations were all correct; the model on top of them
@@ -53,7 +53,7 @@ of a Z80 emulator running the assembled image, one field at a time.
 
 ## Emulation
 
-`tools/z80.py` is a Z80 core and `tools/sam.py` wraps it in enough SAM
+`bubble/tools/z80.py` is a Z80 core and `bubble/tools/sam.py` wraps it in enough SAM
 Coupe - paging, CLUT, keyboard matrix, MODE 4 decode - to run the
 assembled image. It found four real bugs that reading the source had not:
 
@@ -69,7 +69,7 @@ assembled image. It found four real bugs that reading the source had not:
 ## Conventions
 
 Source carries `; [11T / 3a]` - natural T-states **and** memory accesses.
-`tools/budget.py` re-derives every one of them from a Z80 timing table and
+`bubble/tools/budget.py` re-derives every one of them from a Z80 timing table and
 fails on disagreement (1,395 annotations currently checked, 0 wrong).
 
 The blitter parks `SP` inside the framebuffer, so the render pass runs with
