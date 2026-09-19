@@ -11,8 +11,10 @@ the manual does not state outright is marked *inferred*.
 
 ## The machine
 
-- Z80B at 6 MHz. **120,000 T-states between 50 Hz interrupts, 240,000 at
-  25 Hz** - `costs.md` budgets against these.
+- Z80B at 6 MHz. A frame is **119,808 T-states** - 384 a line, 312 lines,
+  50.08 Hz. `costs.md` budgets against a round **120,000, and 240,000 at 25
+  Hz**, which is 0.16% out and never the thing that decides anything. The
+  number that does decide is not T-states at all: see Contention.
 - 256K fitted as standard, 512K with the internal expansion, addressed as
   **32 pages of 16K**. The lower 5 bits of a paging register pick the page,
   so a 256K machine uses pages 0-15.
@@ -136,7 +138,9 @@ for those.
 ## Interrupts and the border
 
 - **LINE INT (249, write)**: interrupt at the end of the scanline *before*
-  the one written, 0-191; write 192-255 to disable. This is the only
+  the one written, 0-191; write 192-255 to disable. Exactly: it fires at
+  frame cycle `(line + 68) * 384`, the start of that display line, because
+  the display starts 68 lines after the frame interrupt (see Contention). This is the only
   mid-screen palette or mode change, and it is always enabled.
   `road2.md` measures what it costs: ~150 T-states a line with entry and
   exit, **28,800 a frame over 192 lines**, and it cannot fire at all during
@@ -182,6 +186,22 @@ side:
 | screen lines | 68 to 259; 68 above, 52 below |
 | **slots a frame** | **23,808** = 192 x (32 + 32) + 120 x 96 |
 
+**`t = 0` is the frame interrupt**, and the display does not start until line
+68. So the frame goes: interrupt, **68 blanked lines**, 192 display lines, 52
+blanked lines, interrupt. Which gives a scheduling rule worth having:
+
+| after the frame interrupt | T-states | slots |
+|---|---|---|
+| **68 blanked lines, before the raster reaches the display** | 26,112 | **6,528** |
+| 192 display lines | 73,728 | 12,288 |
+| 52 blanked lines | 19,968 | 4,992 |
+
+**48% of a frame's slots are in the 38% of it that is blanked.** Work done
+in the first 26,112 T-states after the interrupt costs 4 T an access rather
+than 8 - so a routine with a heavy, order-free phase (a fill, a clear, a
+table build) should do it *first*, and a routine that draws top-down is
+already doing the right thing by accident.
+
 **The memory table.** For a frame cycle `t`, the wait before the access is
 
     line       = t / 384
@@ -190,10 +210,19 @@ side:
     mask       = main ? 7 : 3                   ; MODE 2, 3 and 4
     delay      = mask - ((t + 2) & mask)
 
-so inside the display window an access can only happen at `t == 5 (mod 8)`
-and outside it at `t == 1 (mod 4)`. An instruction therefore costs
+so well inside the display window an access can only happen at
+`t == 5 (mod 8)`, and outside it at `t == 1 (mod 4)`; the first access after
+the window opens can still land on the old phase. The `+ 2` is where in the
+machine cycle the bus is actually used - it shifts the phase and does not
+change the rate. An instruction therefore costs
 **`max(natural_T, accesses x slot_width)`**, and during the display almost
-everything costs `accesses x 8`.
+everything costs `accesses x 8`:
+
+| a `PUSH DE` in a run of them | | |
+|---|---|---|
+| uncontended | 11 T | 5.5 T a byte |
+| in the border or a blanked line | `max(11, 3 x 4)` = 12 T | 6.0 T a byte |
+| **in the display** | `3 x 8` = **24 T** | **12.0 T a byte** |
 
 | and the three tables | mask |
 |---|---|
@@ -230,9 +259,11 @@ a `PUSH` is 3 accesses for 2 bytes, so the ceiling on screen writes is
 `PUSH` fill is 1.55 frames and there is no arrangement of code that makes
 it one.
 
-Contention does **not** depend on the paging set-up - a routine's access
-count does not change because it pages - so the repo's figures are raw Z80
-T-states with this on top. `tests/sam.py`'s `traffic()` counts a routine's
+**Which page is mapped where does not change any of this** - the tables are
+indexed by frame cycle, not by address - but *what kind of memory* does, per
+the paragraph above: internal RAM contends, ROM and external memory do not.
+So a routine's access count does not change because it pages, and its cost
+changes only if it pages something that is not internal RAM. `tests/sam.py`'s `traffic()` counts a routine's
 accesses and `tests/mkbudget.py` divides them by 23,808; measured across
 chequer10 that is **a third more than the T-state count says**. `002B`
 holds a `DJNZ $` for uncontended timing loops.
