@@ -408,11 +408,23 @@ change the rate. An instruction therefore costs
 **`max(natural_T, accesses x slot_width)`**, and during the display almost
 everything costs `accesses x 8`:
 
-| a `PUSH DE` in a run of them | | |
-|---|---|---|
-| uncontended | 11 T | 5.5 T a byte |
-| in the border or a blanked line | `max(11, 3 x 4)` = 12 T | 6.0 T a byte |
-| **in the display** | `3 x 8` = **24 T** | **12.0 T a byte** |
+**But `max(natural_T, accesses x slot_width)` is a lower bound, not the
+answer**, because the accesses inside an instruction are not evenly spaced
+and cannot all land on the grid. A `PUSH`'s three accesses are 5, 3 and 3
+T-states apart. Measured by applying these rules to a real run
+(`tests/sam.py`'s `contended()`):
+
+| | nominal | in blanking | across a display line |
+|---|---|---|---|
+| `NOP` - one access, already on the grid | 4 | **4.0** | 6.0 |
+| `LD A,(HL)`, `LD (HL),A` | 7 | 8.0 | 12.0 |
+| **`PUSH DE`** | **11** | **16.0** | **20.5** |
+
+So the `PUSH` floor of 5.5 T-states a byte is nominal; the machine's is
+**8.0 in blanking and 10.2 across a display line**, a fill manages **12,930
+bytes a frame** rather than the 15,872 the slot count suggests, and a full
+screen is **1.90 frames**. Register work in blanking is the only thing that
+runs at the nominal rate.
 
 | and the three tables | mask |
 |---|---|
@@ -456,11 +468,11 @@ write, every paging switch and every sound register pays up to 7 T-states
 waiting for an 8 T boundary, in the border as much as in the display. Ports
 below 248 are free.
 
-**What it comes to**, for the write primitive this repository is built on:
-a `PUSH` is 3 accesses for 2 bytes, so the ceiling on screen writes is
-**15,872 bytes a frame against a 24,576 byte screen**. A full-screen
-`PUSH` fill is 1.55 frames and there is no arrangement of code that makes
-it one.
+**What it comes to**, for the write primitive this repository is built on: a
+`PUSH` is 3 accesses for 2 bytes, so the slot count puts the ceiling on
+screen writes at 15,872 bytes a frame - and measuring it puts the real
+figure at **12,930 against a 24,576 byte screen**. A full-screen `PUSH` fill
+is **1.90 frames** and there is no arrangement of code that makes it one.
 
 **Which page is mapped where does not change any of this** - the tables are
 indexed by frame cycle, not by address - but *what kind of memory* does, per

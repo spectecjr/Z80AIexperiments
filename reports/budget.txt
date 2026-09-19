@@ -52,6 +52,24 @@
   against which  a PUSH fill is 1.50 slots a byte and cannot draw a
                  picture; compiled code pays for its own fetches too
 
+  And the same frames with the wait states actually counted
+                                  natural contended  frames    cost
+  the tallest board, three trees   218520    341492    2.85     56%
+  the tallest board, no trees      187261    287192    2.40     53%
+  the shortest board, no trees      92526    135924    1.13     47%
+                                 started at the frame interrupt, 119808 T-states a frame.
+                                 A slot division says 2.44 for the first of those - the
+                                 difference is that a Z80 cannot put every access on a
+                                 slot, which is what the next table is about.
+
+  What an instruction costs, which is where that difference goes
+                              nominal   blanked display line
+  NOP                               4       4.0       6.0
+  LD A,(HL)                         7       8.0      12.0
+  LD (HL),A                         7       8.0      12.0
+  PUSH DE                          11      16.0      20.5
+  so a PUSH fill manages     12930 bytes a frame, not 15,872, and a screen is 1.90 frames
+
   and what a mix of sprites needs, in slots
                                 bytes T-states     slots
   the ask: 4 large, 8 medium    15012   226500     57345

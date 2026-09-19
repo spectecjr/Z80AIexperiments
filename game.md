@@ -1,22 +1,26 @@
 # Could this be a playable Space Harrier?
 
-**Yes, at 16.7 Hz — three display frames — with the board brought down to
+**Yes, at 12.5 Hz — four display frames — with the board brought down to
 about 70 scanlines and the horizon band shortened, and with the sprite load
-at about two thirds of what was asked. The full ask is a 12.5 Hz game.**
+at about two thirds of what was asked. The full ask is a 10 Hz game.** That
+is one frame worse than this note said before the wait states were actually
+counted rather than divided; the section at the end has the measurement.
 The arithmetic is in `tests/mkbudget.py` and `reports/budget.txt`;
 everything below is measured except where it says otherwise.
 
 **In the currency that binds**, which is memory slots rather than T-states
 — see the last section, which is no longer a list of caveats:
 
-| | slots | frames | |
-|---|---|---|---|
-| the picture without sprites | 33,888 | 1.42 | board at 70 rows, a 12 row band, the pilot, sound, the game's arithmetic |
-| **the ask: 4 large, 8 medium** | **91,233** | **3.83** | **12.5 Hz** |
-| **2 large, 4 medium, 6 small** | **71,224** | **2.99** | **16.7 Hz, with nothing to spare** |
-| 1 large, 5 medium, 6 small | 69,883 | 2.94 | 16.7 Hz |
+| | slots | frames by slots | frames contended | |
+|---|---|---|---|---|
+| the picture without sprites | 33,888 | 1.42 | 1.66 | board at 70 rows, a 12 row band, the pilot, sound, the game's arithmetic |
+| **the ask: 4 large, 8 medium** | **91,233** | 3.83 | **4.6** | **10 Hz** |
+| **2 large, 4 medium, 6 small** | **71,224** | 2.99 | **3.9** | **12.5 Hz** |
+| 1 large, 5 medium, 6 small | 69,883 | 2.94 | 3.8 | 12.5 Hz |
 
-A display frame is 23,808 slots.
+A display frame is 23,808 slots or 119,808 T-states. The slot column is the
+lower bound; the contended column takes the measured ratio for a frame of
+this kind of code, **1.55**, and is the one to believe.
 
 | the ask: 12 sprites, 4 of them 32x135 | T-states | |
 |---|---|---|
@@ -208,6 +212,15 @@ averages 5.0 — so the right hand column is the true one. **chequer10 at its
 worst needs three display frames, not two**: 16.7 Hz on the real machine
 where the emulator says 25.
 
+**And a slot division is still a lower bound**, because a Z80 cannot put
+every access on a slot: a `PUSH`'s three accesses are 5, 3 and 3 T-states
+apart and cannot all land on the grid. Counting the wait states through a
+real run — `tests/sam.py`'s `contended()`, applying SimCoupe's rules to the
+same CPU core SimCoupe uses — gives **341,492 T-states, 2.85 frames, +56%**
+for that frame against the division's 2.44. A `PUSH` costs 16 T-states in
+blanking and 20.5 across a display line rather than 11, so the fill floor of
+5.5 T-states a byte is really 8.0 and 10.2.
+
 **And a compiled sprite costs far more in slots than in T-states**, because
 the code stream is memory traffic too:
 
@@ -227,9 +240,10 @@ not by the margin the T-state tables suggest.
 
 That makes the recommendation:
 
-- **Design to 16.7 Hz**, three display frames, and a sprite budget of
-  **about 9,500 bytes a frame** — two large, four medium, six small, which
-  is 2.99 frames of slots and therefore has nothing in hand.
+- **Design to 12.5 Hz**, four display frames, and a sprite budget of
+  **about 9,500 bytes a frame** — two large, four medium, six small. That is
+  3.9 of the four frames, so it has almost nothing in hand; 16.7 Hz needs
+  the sprite load halved again.
 - **A 176 row playfield** under a 16 row status strip, the horizon at
   about 70 rows of it.
 - **A byte-aligned horizon band**, twelve rows.

@@ -180,9 +180,37 @@ The two slot rates are not this repository's guess: **SimCoupe implements
 exactly them**, `mask = main_screen ? 7 : 3` over a 256 T display window in
 a 384 T line, and its geometry gives 23,808 slots a frame on the nose.
 
-**So every Hz figure in the table above is the uncontended one, and the
-real machine is about a third slower.** chequer10 is a 16.7 Hz demo, not a
-25 Hz one. The model behind that - `cost_T = max(natural_T, accesses x
+**And a slot division is a lower bound, because a Z80 cannot put every
+access on a slot.** `tests/sam.py`'s `contended()` applies SimCoupe's two
+wait-state rules to a real run - the same CPU core SimCoupe itself uses, so
+the access stream is the same one - and the answer is worse than the
+division:
+
+| a `chequer10` frame, from the frame interrupt | natural | contended | frames | |
+|---|---|---|---|---|
+| tallest board, three trees | 218,520 | **341,492** | **2.85** | +56% |
+| tallest board, no trees | 187,261 | 287,192 | 2.40 | +53% |
+| shortest board, no trees | 92,526 | 135,924 | 1.13 | +47% |
+
+The difference between 2.44 by slots and 2.85 measured is the instruction's
+own shape. A `PUSH` is three accesses at 5, 3 and 3 T-states apart, and
+those cannot all land on a 4 or 8 T grid:
+
+| | nominal | in blanking | across a display line |
+|---|---|---|---|
+| `NOP` | 4 | **4.0** | 6.0 |
+| `LD A,(HL)`, `LD (HL),A` | 7 | 8.0 | 12.0 |
+| **`PUSH DE`** | **11** | **16.0** | **20.5** |
+
+So the `PUSH` floor of 5.5 T-states a byte is a nominal number: the machine's
+is **8.0 blanked and 10.2 across a display line**, a fill manages **12,930
+bytes a frame** rather than the slot model's 15,872, and a full screen is
+**1.90 frames**. Register work in blanking is the one thing that costs
+nothing - a `NOP` is already on the grid.
+
+**So every Hz figure in the table above is the uncontended one, and the real
+machine is about half as fast again.** chequer10 is a 16.7 Hz demo, not a 25
+Hz one, and it is at 2.85 of its three frames rather than 2.44. The model behind that - `cost_T = max(natural_T, accesses x
 slot_width)` - is `docs/BUBBLE_BOBBLE_SAM.md`'s, and it is the half this
 side of the repository was missing: these demos measured the accesses and
 never had the budget, that one derived the budget and never had a routine

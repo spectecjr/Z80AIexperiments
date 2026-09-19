@@ -553,11 +553,20 @@ is slot-limited from end to end, and takes `accesses / 23,808` frames
 however few T-states it looks like. Measured across chequer10 at three
 horizons that is **a third more than the T-state count says**, every time:
 
-| a frame | T-states | accesses | by T | by slots |
-|---|---|---|---|---|
-| the tallest board, three trees | 218,520 | 57,994 | 1.82 | **2.44** |
-| the tallest board, bare | 187,261 | 49,903 | 1.56 | **2.10** |
-| the shortest board, bare | 92,526 | 24,217 | 0.77 | **1.02** |
+| a frame | T-states | accesses | by T | by slots | measured |
+|---|---|---|---|---|---|
+| the tallest board, three trees | 218,520 | 57,994 | 1.82 | 2.44 | **2.85** |
+| the tallest board, bare | 187,261 | 49,903 | 1.56 | 2.10 | **2.40** |
+| the shortest board, bare | 92,526 | 24,217 | 0.77 | 1.02 | **1.13** |
+
+**And the slot division is a lower bound**, which is what the last column is
+about: a Z80 cannot put every access on a slot. `PUSH DE`'s three accesses
+are 5, 3 and 3 T-states apart, so aligning each to the grid costs more than
+three slots - **16 T-states in blanking and 20.5 across a display line,
+against a nominal 11**. The floor of 5.5 T-states a byte is really 8.0 and
+10.2, a fill manages 12,930 bytes a frame rather than 15,872, and a full
+screen is 1.90 frames. A `NOP` in blanking is the one thing that costs
+nothing extra: 4 T-states, one access, already on the grid.
 
 **And the ASIC's ports are contended everywhere in the frame.** Anything
 at 248 or above - the palette, `LMPR`, `HMPR`, `VMPR`, the border, and the

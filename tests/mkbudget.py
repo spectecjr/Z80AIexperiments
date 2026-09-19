@@ -45,6 +45,7 @@ import tree as T                                        # noqa: E402
 from test_chequer10 import CHUNKS, TALL, steady         # noqa: E402
 
 FRAME = 120000                  # T-states between 50 Hz interrupts
+FRAME_REAL = 119808             # the real one, against the round 120,000
 SLOTS = 23808                   # and memory accesses in one, which is the
                                 # budget that actually binds: see
                                 # bubble/tools/budget.py for the derivation
@@ -188,6 +189,54 @@ def main():
     print("  %-14s a PUSH fill is 1.50 slots a byte and cannot draw a"
           % "against which")
     print("  %-14s picture; compiled code pays for its own fetches too" % "")
+
+    print()
+    print("  And the same frames with the wait states actually counted")
+    print("  %-30s %8s %9s %7s %7s" % ("", "natural", "contended",
+                                       "frames", "cost"))
+    for name, fields in (("the tallest board, three trees",
+                          TALL + slots3((1, 100, 118), (4, 20, 140),
+                                        (7, 56, 191))),
+                         ("the tallest board, no trees", TALL + slots3()),
+                         ("the shortest board, no trees",
+                          [("cq10_hz", 77), ("cq10_px", 40),
+                           ("cq10_py", 10)] + slots3())):
+        steady(b, s, fields)
+        nat, con, n, w = b.contended(s["cq10_frame"], start=0)
+        print("  %-30s %8d %9d %7.2f %6.0f%%"
+              % (name, nat, con, con / FRAME_REAL, 100 * (con / nat - 1)))
+    print("  %-30s started at the frame interrupt, %d T-states a frame."
+          % ("", FRAME_REAL))
+    print("  %-30s A slot division says 2.44 for the first of those - the"
+          % "")
+    print("  %-30s difference is that a Z80 cannot put every access on a"
+          % "")
+    print("  %-30s slot, which is what the next table is about." % "")
+
+    print()
+    print("  What an instruction costs, which is where that difference goes")
+    print("  %-26s %8s %9s %9s" % ("", "nominal", "blanked", "display line"))
+    for name, gaps, nominal in (("NOP", (4,), 4), ("LD A,(HL)", (4, 3), 7),
+                                ("LD (HL),A", (4, 3), 7),
+                                ("PUSH DE", (5, 3, 3), 11)):
+        out = []
+        for start in (0, 68 * 384):
+            t, n = start, 0
+            while t < start + 384 * 4:
+                for g in gaps:
+                    t += g
+                    t += Sam._mem_wait(t)
+                n += 1
+            out.append((t - start) / n)
+        print("  %-26s %8d %9.1f %9.1f" % (name, nominal, out[0], out[1]))
+    t, bytes_out = 0, 0
+    while t < FRAME_REAL:
+        for g in (5, 3, 3):
+            t += g
+            t += Sam._mem_wait(t)
+        bytes_out += 2
+    print("  %-26s %d bytes a frame, not 15,872, and a screen is %.2f frames"
+          % ("so a PUSH fill manages", bytes_out, 24576 / bytes_out))
 
     print()
     print("  and what a mix of sprites needs, in slots")

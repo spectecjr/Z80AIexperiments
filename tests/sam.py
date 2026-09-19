@@ -243,6 +243,98 @@ class Sam:
         return (t,) + tuple(n)                  # a marked access is a
                                                 # call into Python
 
+    # SimCoupe's wait-state rules (Base/Memory.cpp, Base/SAMIO.h), applied
+    # to our own runs. The two line up exactly: SimCoupe computes its delay
+    # from `frame_cycles + 2` at the start of the machine cycle, and this
+    # module's access callbacks fire exactly 2 T-states into it - so the
+    # `t` a callback sees IS SimCoupe's `t + 2`.
+    T_LINE, LINES, SIDE, TOP, SCREEN_LINES = 384, 312, 64, 68, 192
+    FRAME_T = T_LINE * LINES                    # 119,808
+    SLOTS = 23808                               # and what it grants
+
+    @classmethod
+    def _mem_wait(cls, t, screen_on=True):
+        """The wait before a memory access at absolute frame cycle t."""
+        t %= cls.FRAME_T
+        line, lc = t // cls.T_LINE, (t + 4) % cls.T_LINE
+        main = (screen_on and cls.TOP <= line < cls.TOP + cls.SCREEN_LINES
+                and lc >= 2 * cls.SIDE)
+        mask = 7 if main else 3
+        return mask - (t & mask)
+
+    @classmethod
+    def _port_wait(cls, t, port):
+        """And before a port access - the ASIC's ports are 248 and above,
+        and they wait for an 8 T boundary wherever the raster is."""
+        if (port & 0xFF) < 0xF8:
+            return 0
+        return 7 - ((t % cls.FRAME_T) & 7)
+
+    def contended(self, entry, start=0, screen_on=True):
+        """One call, with the SAM's wait states counted into the clock.
+
+        `start` is the frame cycle the routine begins at - 0 is the frame
+        interrupt, and the display does not start until line 68. The
+        instruction stream cannot change with timing here (these routines
+        run DI from end to end), so the accesses are the same ones; what
+        moves is when each of them happens, and this tracks that.
+
+        Returns (natural T, contended T, accesses, waits).
+        """
+        m, view = self.m, self.view
+        st = {"t": start, "prev": 0, "wait": 0, "n": 0}
+
+        def clock(nat):
+            """The contended frame cycle for a natural tick count."""
+            step = nat - st["prev"]
+            if step < 0:
+                step += FRAME
+            st["prev"] = nat
+            st["t"] += step
+            return st["t"]
+
+        def rd(addr):
+            st["n"] += 1
+            w = self._mem_wait(clock(m.frame_tick), screen_on)
+            st["wait"] += w
+            st["t"] += w
+            return view[MEMOFF + addr]
+
+        def wr(addr, value):
+            st["n"] += 1
+            w = self._mem_wait(clock(m.frame_tick), screen_on)
+            st["wait"] += w
+            st["t"] += w
+            view[MEMOFF + addr] = value
+            return 0
+
+        def out(addr, value):
+            w = self._port_wait(clock(m.frame_tick), addr)
+            st["wait"] += w
+            st["t"] += w
+            self._out(addr, value)
+
+        def inp(addr):
+            w = self._port_wait(clock(m.frame_tick), addr)
+            st["wait"] += w
+            st["t"] += w
+            return self._in(addr)
+
+        marks = z80.Z80Machine.READ_MARK | z80.Z80Machine.WRITE_MARK
+        m.set_read_callback(rd)
+        m.set_write_callback(wr)
+        m.set_output_callback(out)
+        m.set_input_callback(inp)
+        m.mark_addrs(0, 0x10000, marks)
+        try:
+            st["prev"] = m.frame_tick
+            t = self.call(entry)
+        finally:
+            m.unmark_addrs(0, 0x10000, marks)
+            m.set_output_callback(self._out)
+            m.set_input_callback(self._in)
+        return t, t + st["wait"], st["n"], st["wait"]
+
     def call(self, entry):
         """T-states for one call, stopping on the HALT at RETADDR."""
         m = self.m
