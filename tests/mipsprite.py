@@ -8,8 +8,9 @@ so the emulator's memory can be checked against it.
 
 MODE 4: two pixels a byte, high nibble left, 128 bytes a scanline.
 
-    python3 tests/mipsprite.py            # the chain, sizes and stats
-    python3 tests/mipsprite.py art.png    # look at the levels, 4x
+    python3 tests/mipsprite.py                       # sizes and stats
+    python3 tests/mipsprite.py mipsprite.png         # look at them, 4x
+    python3 tests/mipsprite.py --buckets out.png     # the six of section 6
 """
 import sys
 from collections import Counter
@@ -252,7 +253,10 @@ def chain(master=None, widths=None):
 # ------------------------------------------------------------------ report
 
 def main():
-    ch = chain()
+    args = sys.argv[1:]
+    buckets = "--buckets" in args
+    args = [a for a in args if a != "--buckets"]
+    ch = chain(widths=BUCKETS if buckets else None)
     print("  %-9s %-9s %6s %6s %7s %7s  %s"
           % ("level", "pixels", "bytes", "rows", "covered", "of box", "values"))
     for lv in ch:
@@ -262,9 +266,9 @@ def main():
                  lv.wb * lv.hpx, lv.hpx, lv.area,
                  100.0 * lv.area / (lv.wb * lv.hpx), len(vals),
                  round(100 * vals.most_common(1)[0][1] / sum(vals.values()))))
-    if len(sys.argv) > 1:
-        write_png(sys.argv[1], ch)
-        print("\n  wrote %s" % sys.argv[1])
+    if args:
+        write_png(args[0], ch)
+        print("\n  wrote %s" % args[0])
     return 0
 
 

@@ -386,8 +386,18 @@ MODE 4 indices would be meaningless — index 7 is not halfway between 6 and
 8 — and this is `tricks.md`'s rule about generators that need a search
 going in Python.
 
-    python3 tests/mipsprite.py art.png      # look at the chain, 4x
-    python3 tests/test_mipsprite.py         # verify and time every level
+    python3 tests/mipsprite.py mipsprite.png    # look at the chain, 4x
+    python3 tests/mipsprite.py --buckets o.png  # and the six of section 6
+    python3 tests/test_mipsprite.py             # verify and time the chain
+    python3 tests/test_zbucket.py               # and the six variants
+
+![the chain](mipsprite.png)
+
+The ship is 64x80 of hull, canopy and two engines, and it is drawn out of
+profiles for the same reason `tests/jetpack.py` draws the pilot that way:
+flat regions are not decoration here, they are what the register cache
+(§2) has to hit, and a picture assembled from spans has them where a
+scribble does not.
 
 ## 9. What this does not do
 
