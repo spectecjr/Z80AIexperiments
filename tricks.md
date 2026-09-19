@@ -566,7 +566,7 @@ The models are the specification, not a preview: `tests/zarch.py` does the
 same 8.8 arithmetic in the same order as the assembly, so "the Z80 matches
 the model" means something.
 
-Two habits worth keeping:
+Four habits worth keeping:
 
 **Measure the floor before building on it.** `spanfill.z80s` exists only to
 answer "what does a flat-shaded span cost" (63.0 T-states, and 5.51 a byte)
@@ -577,6 +577,27 @@ once the runs and the list shared a page.
 **Write the number down even when it says no.** `costs.md` has the table;
 `demo-ideas.md` has the estimates, marked as estimates, and what they
 measured when they were built.
+
+**Feed both buffers before timing anything.** The paged map keeps a copy of
+the resident block behind each screen, which is what makes per-buffer state
+free - and it means a value poked from the bench lands in the copy behind
+the buffer about to be drawn, and *only* that one. Poke a setting once and
+call the frame four times and the cost alternates: this cost 12,323
+T-states of confusion once and 1,411 a second time, with a table of sprite
+costs that came out non-monotonic and a wrong conclusion nearly written
+down. The camera is the trap, because nothing about `chq4_camx` says "per
+buffer" - it is per buffer because *everything* in that block is. Poke,
+call, poke, call, and time the third.
+
+**Make the routine print what it holds, not just what it takes.** The
+tests report memory now - bytes held and pages claimed, chunk by chunk -
+and the first run of it caught a number that had been in three sets of
+notes: the tree's "3,773 bytes" is the size of its *picture*, and the
+compiled code is 10,384. Bytes and pages are not the same currency either,
+because a chunk gets a *pair* of 16K pages whatever fraction it fills; the
+same report showed the pilot using 12% of its pair. A number nobody
+re-reads is a number nobody checks, which is why `reports/` is checked in
+beside the notes that quote it.
 
 ---
 
@@ -836,6 +857,16 @@ What that costs:
   is 325, so the lookup is `ADD HL,HL` twice and an `ADD HL,DE` rather than
   the `ADD A,A` chain a shorter table allowed.
 
+**And it makes the cost flat per scanline, which makes the horizon a
+lever.** Measured at every horizon chequer9 can take: 1,213 T-states a row
+of board at 96 rows, 1,247 at 70, 1,426 at 19. It has to be flat - a
+shallow board is the deep one with rows left out, so every row drawn is an
+average row rather than a cheap one - and it means the cost of the ground
+is the number of scanlines it is given and nothing else. Moving the horizon
+from half the screen to 40% of it is 29,000 T-states back, which is the
+difference between two frame rates, and it is also what the arcade looks
+like.
+
 **A horizon is allowed when the screen's bottom row is the last row of its
 band**, because a band is drawn whole - 65 of the 78 rows in chequer9's
 range are. Near the horizon a band is a scanline or two, so nearly every row
@@ -953,6 +984,48 @@ the screen long before it arrives. Planting it beside where the camera will
 be when it gets there is one line, and it is the difference between scenery
 you fly past and scenery that never gets close.
 
+## Against a flat background, a solid box beats a mask
+
+Masking is what a sprite over a picture needs, and it is *not* obviously
+what a sprite over a flat sky needs. Measured on the same boxes, drawn as
+a walk of `SP`:
+
+| | T-states a byte | |
+|---|---|---|
+| `PUSH DE`, the floor | **5.5** | |
+| a solid box, 32x48 | 6.3 | the floor plus a step a row |
+| a solid box, 16x135 | 7.2 | taller is dearer, a step a row |
+| a masked sprite, 70% filled | **13 … 18** | per byte *drawn*, and it skips the air |
+| a masked sprite, 10x54 | 25 | seven bytes a row, two of them edges |
+
+A masked draw costs 13 to 18 T-states a byte drawn and jumps over the air;
+a solid box costs 7 a byte of *box* and does not care what is in it.
+**Below about 75% fill the solid box is cheaper outright** — and against a
+background that is one colour it is also *correct*, because the air can
+simply be that colour.
+
+Then it wins a second time. A sprite over a repainted background costs
+nothing to erase; a sprite over a sky painted once has to have its old box
+put back. For a 16x135:
+
+| | T-states |
+|---|---|
+| masked draw + the old box wiped | 26,615 + 15,120 = **41,735** |
+| the box drawn solid, twice over | **31,036** |
+
+The rule that comes out of it: **keep sprites over the repainted part of
+the screen**, and where they have to be against the sky, compile a solid
+variant rather than masking and wiping. Space Harrier keeps its action on
+the ground plane, and this is one of the reasons it can.
+
+**And a sprite's cost is its shape, not its size.** Every row of a walk of
+`SP` pays a `LD HL,-d / ADD HL,SP / LD SP,HL` to get to the next one, so
+wide and short beats tall and narrow at the same byte count: 32x48 is 6.3
+T-states a byte where 8x135 is 8.9. What is *in* it costs too — the tree's
+speckle is 17% of its draw and its black outline another 8%, because both
+turn long runs into short ones and every run change is a `LD DE,nn`. A flat
+enemy is a third cheaper than a textured one of the same silhouette.
+
 ## The copper is the most expensive thing on a SAM, and the pixels are free
 
 Every chequered floor here grades its distance in the palette: two entries
@@ -1017,6 +1090,47 @@ pilot gave up, for green palms and a deep shadow on the near pyramids. The
 sprite lost its flame's bright core and its white highlights to pay for
 them: about ten pixels at 24x48, against a horizon that now reads as the
 same place as the ground.
+
+## A DI stretch has seams, and they are where registers are reloaded
+
+A routine that draws through `SP` cannot be interrupted, so anything that
+has to happen *during* it - a music tick, fifty times a second, inside a
+frame that takes two display frames - has to be called by the drawing
+itself. The question is where, and the answer is not "somewhere quiet". It
+is a mechanical one: **find the point where the live register set is
+smallest, by looking for where each register is next written rather than
+next read.**
+
+In chequer4's board that is the top of the band loop. Inside a row every
+register is live - both sets, `IX` and `IY` are two of the six colour
+values a `POP` fill reads, `SP` is the screen. One instruction after the
+band boundary, `HL` is reloaded from the band table, `A`, `DE` and `BC`
+from cells, and `SP` is dead until the next row sets it. So at that one
+address the main set, `IX`, `IY` and `SP` are **all** free, and only the
+alternate set survives. A visitor that stays in the main set needs nothing
+saved at all: three instructions and 28 T-states to ask whether this is the
+band, and the tick itself when it is.
+
+**Schedule it rather than polling for it.** The SAM's frame interrupt is
+asserted for about 100 µs - 600 T-states, half a scanline of board - so a
+poll that is further apart than that misses one, and a missed music tick is
+not a glitch, it is the arrangement running slow. 600 T-states means
+polling from *inside* the row loop, which is exactly where there is no
+register to poll into. But the frame is locked to two display frames and
+every band's cost is known, so the caller knows which band is 120,000
+T-states in and pokes the number. Nothing can be missed, and the phase is
+re-zeroed by the next frame's interrupt, so error cannot accumulate. The
+only place polling belongs is the wait at the end of the frame, where the
+loop has nothing else to do and the window is twenty chances rather than
+one.
+
+**And a routine called from inside someone else's paged window has two
+rules of its own.** Its stack cannot be the caller's - that is in whichever
+chunk is *not* mapped - so it needs a few levels of its own in a page that
+is always there. And it may page the low block freely, because on a map
+like this one the screen and the resident code are both in the high block:
+save `LMPR`, page the data in, put the chunk back. Two `OUT`s and a byte,
+and a 70K log does not have to fit in the 5K the resident block has spare.
 
 ## Every CALL is a bet that the page underneath it has not moved
 
