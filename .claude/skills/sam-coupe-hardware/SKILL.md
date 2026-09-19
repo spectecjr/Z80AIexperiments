@@ -520,13 +520,23 @@ machine's own entry state depends on the page-number wrap** described above,
 which is worth knowing before writing a loader that "tidies up" LMPR to
 something that looks neater.
 
-**And a `LOAD CODE 32768` can fill at most 32K**, because that is all the
-address space there is above 32768. Anything with a bank bigger than that -
-which is every paged demo in this repository; `chequer10`'s map holds 341K -
-has to load a bootstrap into those 32K and then page and load the rest
-itself, from disk, under its own control. That is the gap between a routine
-being *measured* here and being *runnable* on a machine, and nothing in this
-repository crosses it yet.
+**`LOAD CODE 32768` is not limited to 32K.** The address is *logical*: 32768
+means page 1, offset 0, and the load fills as many 16K pages as the file
+needs, counting upwards - page 1, then 2, then 3. So a bank of any size
+loads in one go, and a 341K image like `chequer10`'s map is a single
+`LOAD CODE`, not a bootstrap and a disk loader.
+
+**What that fixes in place is the page numbering.** Byte offset `n` of the
+file lands at page `1 + n / 16384`, so the image *is* the memory map: a
+chunk that wants to be at page 14 has to sit at offset `13 * 16384` in the
+file, and the screen buffers' pages are holes in it. Two consequences worth
+knowing before laying out a map:
+
+- **the map starts at page 1**, because page 0 is the system page and is
+  below the load address. Anything that wants page 0 has to be copied there
+  after the demo takes control.
+- **holes cost file, not memory.** Padding over the two screen pages is 32K
+  of filler in the image and nothing at run time.
 
 The demo must then in response:
 

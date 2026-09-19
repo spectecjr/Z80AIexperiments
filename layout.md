@@ -74,11 +74,18 @@ that.
 
 The shapes agree, which is the good news: the bench's stack lives in section
 B and its code in the high block, exactly where the machine's entry state
-puts them. What is missing is the part no measurement can stand in for - a
-`LOAD CODE 32768` fills at most 32K, and `chequer10`'s map is 341K, so a
-runnable version needs a bootstrap that loads and pages the rest from disk.
-That is also the only thing standing between these routines and being timed
-on real hardware rather than modelled.
+puts them. And loading is not the problem it looks like - `LOAD CODE 32768`
+takes a *logical* address, so it fills page 1 onwards for as many 16K pages
+as the file has, and a 341K map is one `LOAD CODE`.
+
+What that does fix is the **page numbering**: byte offset `n` of the file is
+page `1 + n / 16384`, so the image is the map, and the map starts at page 1
+because page 0 is the system page and sits below the load address.
+**`tests/sam.py` allocates chunk 0 to page 0**, which a linear load cannot
+reach - so a real build either shifts the whole map up a page or copies that
+chunk into page 0 after taking control. That is a small, concrete piece of
+work, and it is the only thing between these routines and being timed on
+real hardware rather than modelled.
 
 ## If you add something
 
