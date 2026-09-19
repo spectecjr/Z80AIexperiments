@@ -62,6 +62,24 @@ the one thing here that will not build. Porting its sources is a real piece
 of work rather than a rename, so it is written down here rather than done
 quietly.
 
+## What is not here
+
+**A loader.** Everything in `tests/` is driven by Python: the bench sets the
+paging registers itself, puts a stack at `7FF0` and calls a routine. A real
+machine enters a demo at `8000` with ROM 0 in section A, the system page in
+B, pages 1 and 2 in C and D, interrupts on and the stack somewhere in
+`4000-7FFF` (see the hardware skill's **Demo configuration**), and the demo
+has to `DI`, move its stack, set up its own paging and go. Nothing here does
+that.
+
+The shapes agree, which is the good news: the bench's stack lives in section
+B and its code in the high block, exactly where the machine's entry state
+puts them. What is missing is the part no measurement can stand in for - a
+`LOAD CODE 32768` fills at most 32K, and `chequer10`'s map is 341K, so a
+runnable version needs a bootstrap that loads and pages the rest from disk.
+That is also the only thing standing between these routines and being timed
+on real hardware rather than modelled.
+
 ## If you add something
 
 - A new demo: sources and a `.md` note at the root, its model and

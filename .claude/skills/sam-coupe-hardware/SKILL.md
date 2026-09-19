@@ -509,7 +509,24 @@ Section B - the system page (page 0)
 Section C - Page 1
 Section D - Page 2 (ROM1 paged out)
 
-The stack will be in the range &4000-7FFF.
+The stack will be in the range &4000-7FFF, and **interrupts are enabled**,
+which is why the first thing the demo does is `DI`.
+
+**In register terms that is `LMPR = 0x1F`, `HMPR = 0x01`** - the only values
+that produce it, give or take the don't-care bits (LMPR bit 7 WPRAM, HMPR
+bits 5-6 which only matter in MODE 3). Note what LMPR is doing: its page
+field is **31**, and section B is page 0 because `(31 + 1) & 31 = 0`. **The
+machine's own entry state depends on the page-number wrap** described above,
+which is worth knowing before writing a loader that "tidies up" LMPR to
+something that looks neater.
+
+**And a `LOAD CODE 32768` can fill at most 32K**, because that is all the
+address space there is above 32768. Anything with a bank bigger than that -
+which is every paged demo in this repository; `chequer10`'s map holds 341K -
+has to load a bootstrap into those 32K and then page and load the rest
+itself, from disk, under its own control. That is the gap between a routine
+being *measured* here and being *runnable* on a machine, and nothing in this
+repository crosses it yet.
 
 The demo must then in response:
 
