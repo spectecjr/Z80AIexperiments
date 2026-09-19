@@ -575,9 +575,11 @@ It still wins - a data-driven blitter reads a source byte, a mask byte and
 the destination before it writes, which is four slots a byte before any
 loop overhead - but the margin is half what the T-state tables promise,
 and it narrows as the sprite gets smaller because a small sprite is nearly
-all code. **Measure the accesses, not just the time.** `tests/sam.py`'s
-`traffic()` counts them; `bubble/tools/budget.py` derives the budget they
-are spent against.
+all code. **Measure the accesses, not just the time.** `tests/sam.py`'s `traffic()`
+counts them; `bubble/tools/budget.py` derives the budget they are spent
+against; and SimCoupe, which is cycle accurate, builds the same table -
+`mask = main_screen ? 7 : 3`, one access per 8 T-states over a 256 T
+display window and per 4 T elsewhere.
 
 ## 13. How any of this is known
 

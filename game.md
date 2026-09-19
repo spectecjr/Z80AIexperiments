@@ -186,8 +186,9 @@ Every T-state figure in this repository is raw Z80 time. The machine does
 not work that way. **The ASIC shares one memory bus between the CPU and the
 display and grants the CPU one access per 8 T-states while the raster is in
 the display window, one per 4 T everywhere else** — 23,808 slots a frame,
-derived in `bubble/tools/budget.py` and set out in
-`docs/BUBBLE_BOBBLE_SAM.md`. Every access costs a slot: an opcode fetch, an
+derived in `bubble/tools/budget.py`, set out in
+`docs/BUBBLE_BOBBLE_SAM.md`, and implemented by SimCoupe in exactly that
+form. Every access costs a slot: an opcode fetch, an
 operand byte, a data read, a data write, each half of a `PUSH`. The cost of
 an instruction is `max(natural_T, accesses x slot_width)`.
 
@@ -237,9 +238,12 @@ That makes the recommendation:
 - **Draw them as opaque boxes off a width chain**, per `mipsprite.md`, not
   as masked silhouettes at eight fixed sizes: 8.8 T-states a byte rather
   than 13 to 18, and the heights come free off a row program.
-- And **confirm the slot rates on real hardware**. The 1-per-8-T display
-  grant is a model, stated in `docs/BUBBLE_BOBBLE_SAM.md` and not yet
-  checked against a machine; everything above hangs off it, and a rate of
-  1-per-6 or 1-per-12 moves every verdict here by a frame.
+- The slot rates are **confirmed against SimCoupe**, which is cycle
+  accurate and builds precisely this table: one access per 8 T-states over
+  a 256 T display window, one per 4 T elsewhere, 23,808 a frame. What is
+  left is to run one of these routines under it and compare the number it
+  reports against the one computed here — the debugger shows elapsed
+  cycles between two breakpoints, so it is an afternoon rather than a
+  project.
 
     python3 tests/mkbudget.py                 # every number above

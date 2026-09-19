@@ -10,6 +10,19 @@ that no amount of work inside that project can settle. Everything here is
 offered as input to someone else's design decisions; if a request is awkward to
 implement, it is almost certainly not worth the trouble.
 
+> **Note, later.** Two of the things below already exist in the debugger, and
+> this document was written without knowing it. `Base/Debug.cpp` draws the
+> frame cycle counter as `T <n>`, and under it a `+<n>` that is the cycles
+> elapsed **since the debugger was last left** — `dwLastCycle` and
+> `nLastFrames` are reset on exit and the difference spans frames, so
+> breaking at the start of a routine, continuing, and breaking at the end
+> reads off its real contended cost directly. And the contention question in
+> §2 below is answered by `Base/Memory.cpp`: the table is
+> `mask = main_screen ? 7 : 3; delay = mask - ((t + 2) & mask)`, which is one
+> memory access per 8 T-states over the 256 T display window and one per 4 T
+> everywhere else. What is still missing is only the *automation* — none of
+> it can be driven from outside, which is what the rest of this asks for.
+
 ## Why an external interface would help
 
 The sprite compiler is already checked fairly hard offline. Every routine it

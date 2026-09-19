@@ -176,6 +176,10 @@ few T-states it looks like:
 | tallest board, no trees | 187,261 | 49,903 | 1.56 | **2.10** | +34% |
 | shortest board, no trees | 92,526 | 24,217 | 0.77 | **1.02** | +32% |
 
+The two slot rates are not this repository's guess: **SimCoupe implements
+exactly them**, `mask = main_screen ? 7 : 3` over a 256 T display window in
+a 384 T line, and its geometry gives 23,808 slots a frame on the nose.
+
 **So every Hz figure in the table above is the uncontended one, and the
 real machine is about a third slower.** chequer10 is a 16.7 Hz demo, not a
 25 Hz one. The model behind that - `cost_T = max(natural_T, accesses x

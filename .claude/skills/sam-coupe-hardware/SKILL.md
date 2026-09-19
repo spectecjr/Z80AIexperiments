@@ -159,8 +159,10 @@ for those.
   polling only for the frame lock.
 - **BORDER (254, write)**: bits 0-2 and 5 are the CLUT address for the
   border colour, bit 3 MIC, bit 4 BEEP, bit 6 THROM (MIDI through),
-  **bit 7 SOFF** - blanks the display in MODEs 3 and 4 *and removes memory
-  contention while it is off*, which is worth having during a precompute.
+  **bit 7 SOFF** - blanks the display in MODEs 3 and 4 and drops memory
+  contention to the border rate while it is off (see Contention: 29,952
+  slots a frame rather than 23,808, not unbounded), which is worth having
+  during a precompute.
 - **KEYBOARD (254, read)**: bits 0-4 are matrix lines 1-5 (and the mouse),
   bit 7 reads back SOFF.
 
@@ -187,9 +189,29 @@ every 3.67 T and is therefore slot-limited throughout, which means it takes
 more than the T-state count says**, measured across chequer10 at three
 horizons. `docs/BUBBLE_BOBBLE_SAM.md` derives it, `bubble/tools/budget.py`
 computes it, `tests/sam.py`'s `traffic()` counts what a routine spends and
-`tests/mkbudget.py` works the example. It is a model rather than a hardware
-measurement: confirming the two slot rates on a real machine is the open
-question, and every frame-rate claim in this repository hangs off it.
+`tests/mkbudget.py` works the example.
+
+**And SimCoupe implements exactly that**, which is as close to a second
+opinion as this gets - it is cycle accurate and its author developed it
+against the machine. `Base/Memory.cpp` builds the table at boot:
+
+    mask = main_screen ? 7 : 3;
+    contention_mode234[t] = mask - ((t + 2) & mask);
+
+The delay is however many T-states it takes to reach the next multiple of
+8 during the active display and of 4 everywhere else - one access per 8 T
+and per 4 T, the two rates above. Its geometry agrees too: 8 T a cell, 48
+cells a line, 8 of them side border each side, so 384 T a line, a 256 T
+display window, 312 lines, 119,808 T and **23,808 slots a frame** on the
+nose. `Base/CPU.cpp` calls it "perfect contended memory timings on each
+memory/port access".
+
+**One correction from the same table.** SOFF does not remove contention,
+it removes the *display window's* share of it: a screen-disabled frame
+uses `contention_4T`, the border rate, which is 29,952 slots rather than
+23,808. A precompute with the screen off is 26% better off, not unbounded.
+MODE 1 is worse than MODE 4 rather than better, because it contends in
+64-cycle bands outside the screen as well.
 
 The manual notes ROM runs slightly faster than
 RAM for the same code, and that `002B` holds a `DJNZ $` for uncontended
