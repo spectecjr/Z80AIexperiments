@@ -1,0 +1,142 @@
+;------------------------------------------------------------------
+; bb_init.z80s - bring the machine up and build the runtime tables
+;------------------------------------------------------------------
+
+bb_init:
+                DI                              ; [4T / 1a]
+                ; SP is set by the reset stub in bb.z80s, not here: this
+                ; routine is CALLed, so resetting SP would discard its own
+                ; return address.
+
+                ; ROM out, so $0038 belongs to us and IM 1 works.
+                LD   A,LMPR_VALUE               ; [7T / 2a]
+                OUT  (P_LMPR),A                 ; [11T / 2a]
+
+                ; Blank the display while we build: with no display
+                ; fetch the ASIC grants the CPU a slot every 4T instead
+                ; of every 8T, so level setup runs at nearly double
+                ; speed (29,952 accesses per frame instead of 23,808).
+                LD   A,BORD_SOFF                ; [7T / 2a]
+                OUT  (P_BORD),A                 ; [11T / 2a]
+
+                LD   A,BUF0_PAGE | VMPR_MODE4   ; [7T / 2a]
+                OUT  (P_VMPR),A                 ; [11T / 2a]
+                LD   A,BUF1_PAGE                ; [7T / 2a]
+                OUT  (P_HMPR),A                 ; [11T / 2a]
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_frontbuf),A            ; [13T / 4a]
+                INC  A                          ; [4T / 1a]
+                LD   (bb_backbuf),A             ; [13T / 4a]
+
+                CALL bb_build_tables            ; [17T / 5a]
+                CALL bb_set_palette             ; [17T / 5a]
+
+                ; The tile bank lives in its own aligned block so the
+                ; autotiler's "tile id * 32" is five ADD HL,HLs and no
+                ; carry handling; the generated source is copied in.
+                LD   HL,bb_tilesrc              ; [10T / 3a]
+                LD   DE,bb_tilebank             ; [10T / 3a]
+                LD   BC,BB_TILESRC_LEN          ; [10T / 3a]
+                LDIR
+
+                ; IM 1: the frame interrupt lands at $0038.
+                IM   1                          ; [8T / 2a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_build_tables --------------------------------------------
+;
+; Row addresses, cell bit masks, and the pre-scaled wind acceleration
+; vectors. Built rather than assembled so the source stays readable and
+; the image stays small; it is ~1500 accesses, once.
+
+bb_build_tables:
+                ; bb_rowaddr_lo/hi[y] = SCR_BASE + y*128
+                LD   HL,SCR_BASE                ; [10T / 3a]
+                LD   DE,bb_rowaddr_lo           ; [10T / 3a]
+                LD   BC,bb_rowaddr_hi           ; [10T / 3a]
+                PUSH BC                         ; [11T / 3a]
+                POP  IY                         ; [14T / 4a]
+                LD   B,SCR_HEIGHT               ; [7T / 2a]
+bb_ini_rowaddr:
+                LD   A,L                        ; [4T / 1a]
+                LD   (DE),A                     ; [7T / 2a]
+                LD   A,H                        ; [4T / 1a]
+                LD   (IY+0),A                   ; [19T / 5a]
+                INC  DE                         ; [6T / 1a]
+                INC  IY                         ; [10T / 2a]
+                LD   A,L                        ; [4T / 1a]
+                ADD  A,SCR_STRIDE               ; [7T / 2a]
+                LD   L,A                        ; [4T / 1a]
+                JR   NC,bb_ini_nocarry           ; [12T / 2a]
+                INC  H                          ; [4T / 1a]
+bb_ini_nocarry:
+                DJNZ bb_ini_rowaddr              ; [13T / 2a]
+
+                ; bb_cellbyte[cx] = cx >> 3 ; bb_cellmask[cx] = $80 >> (cx&7)
+                LD   HL,bb_cellbyte             ; [10T / 3a]
+                LD   DE,bb_cellmask             ; [10T / 3a]
+                LD   B,MAP_W                    ; [7T / 2a]
+                LD   C,0                        ; [7T / 2a]
+bb_ini_cells:
+                LD   A,C                        ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                RRCA                            ; [4T / 1a]
+                AND  3                          ; [7T / 2a]
+                LD   (HL),A                     ; [7T / 2a]
+                INC  HL                         ; [6T / 1a]
+                LD   A,C                        ; [4T / 1a]
+                AND  7                          ; [7T / 2a]
+                PUSH BC                         ; [11T / 3a]
+                LD   B,A                        ; [4T / 1a]
+                LD   A,$80                      ; [7T / 2a]
+                INC  B                          ; [4T / 1a]
+                JR   bb_ini_shift_in             ; [12T / 2a]
+bb_ini_shift:
+                RRCA                            ; [4T / 1a]
+bb_ini_shift_in:
+                DJNZ bb_ini_shift                ; [13T / 2a]
+                POP  BC                         ; [10T / 3a]
+                LD   (DE),A                     ; [7T / 2a]
+                INC  DE                         ; [6T / 1a]
+                INC  C                          ; [4T / 1a]
+                DJNZ bb_ini_cells                ; [13T / 2a]
+
+                ; Wind acceleration vectors, pre-multiplied by BUB_ACCEL
+                ; so the per-bubble path is a plain table read.
+                LD   HL,bb_dir_src              ; [10T / 3a]
+                LD   DE,bb_dir_dx               ; [10T / 3a]
+                LD   BC,32                      ; [10T / 3a]
+                LDIR
+                RET                             ; [10T / 3a]
+
+BA              EQU BUB_ACCEL
+NBA             EQU (-BUB_ACCEL) & $FF
+
+                ;    U   UR   R    DR   D    DL   L    UL   NONE
+bb_dir_src:     DEFB 0,  BA,  BA,  BA,  0,   NBA, NBA, NBA, 0
+                DEFB 0,  0,   0,   0,   0,   0,   0              ; pad to 16
+                DEFB NBA, NBA, 0,  BA,  BA,  BA,  0,   NBA, 0
+                DEFB 0,  0,   0,   0,   0,   0,   0              ; pad to 16
+
+; ---- bb_set_palette ---------------------------------------------
+;
+; The SAM CLUT is 16 write-only registers reached at port 248 + n*256.
+; Colour bits are GRN1 RED1 BLU1 BRIGHT GRN0 RED0 BLU0 - two bits per
+; channel plus a shared half-intensity bit, giving 128 colours.
+
+bb_set_palette:
+                LD   HL,bb_palette              ; [10T / 3a]
+                LD   B,16                       ; [7T / 2a]
+                LD   C,P_CLUT                   ; [7T / 2a]
+                LD   D,0                        ; [7T / 2a]  CLUT index
+bb_sp_loop:
+                LD   A,(HL)                     ; [7T / 2a]
+                INC  HL                         ; [6T / 1a]
+                PUSH BC                         ; [11T / 3a]
+                LD   B,D                        ; [4T / 1a]  port high = index
+                OUT  (C),A                      ; [12T / 2a]
+                POP  BC                         ; [10T / 3a]
+                INC  D                          ; [4T / 1a]
+                DJNZ bb_sp_loop                 ; [13T / 2a]
+                RET                             ; [10T / 3a]

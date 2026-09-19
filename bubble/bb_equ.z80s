@@ -1,0 +1,195 @@
+;------------------------------------------------------------------
+; bb_equ.z80s - hardware equates, memory map, data layout
+;
+; Target: SAM Coupe, Z80B @ 6 MHz, MODE 4 (256x192, 4bpp, 16 of 128)
+;
+; Annotation convention used throughout this project:
+;
+;       ; [11T / 3a]
+;             |     \__ memory accesses (opcode fetch + operands + data)
+;             \________ natural Z80 T-states
+;
+; On a SAM the ASIC shares the memory bus with the display and grants
+; the CPU one access per 8T while the raster is in the 256-pixel window
+; and one per 4T over border/blanking. So the true cost of a sequence is
+;
+;       cost_T ~= max( natural_T , accesses x slot_width )
+;
+; and during the display area that is essentially accesses x 8T. The
+; access column is therefore the one that decides whether a frame fits.
+;
+; Frame budget (see docs/BUBBLE_BOBBLE_SAM.md for the derivation):
+;       192 display lines x 64 slots  = 12288
+;       120 blank lines   x 96 slots  = 11520
+;       -----------------------------------------
+;       FRAME_SLOTS                   = 23808 accesses / frame
+;------------------------------------------------------------------
+
+; ---- SAM I/O ports ----------------------------------------------
+
+P_CLUT          EQU 248         ; palette; entry n is at port 248 + n*256
+P_STAT          EQU 249         ; read = status, write = line interrupt
+P_LMPR          EQU 250         ; low  memory page register  (sections A,B)
+P_HMPR          EQU 251         ; high memory page register  (sections C,D)
+P_VMPR          EQU 252         ; video memory page register + mode
+P_BORD          EQU 254         ; border colour / SOFF
+
+; Status register bits (read P_STAT). All are ACTIVE LOW.
+ST_LINE         EQU $01
+ST_MOUSE        EQU $02
+ST_MIDIIN       EQU $04
+ST_FRAME        EQU $08
+ST_MIDOUT       EQU $10
+
+; LMPR bits
+LMPR_RAM0       EQU $20         ; RAM replaces the first half of the ROM
+LMPR_ROM1       EQU $40         ; ROM replaces RAM in section D
+LMPR_WPRAM      EQU $80         ; write-protect section A
+
+; VMPR mode bits (MDE1:MDE0)
+VMPR_MODE1      EQU $00
+VMPR_MODE2      EQU $20
+VMPR_MODE3      EQU $40
+VMPR_MODE4      EQU $60
+
+BORD_SOFF       EQU $80         ; blanks the display in modes 3 and 4
+
+; ---- Memory map -------------------------------------------------
+;
+; The SAM maps two 32K windows: LMPR picks section A and gets B = A+1
+; free, HMPR picks C and gets D = C+1. Three things want to be resident
+; - code, background source, and the back buffer - and only two can be.
+; We resolve it by having NO background master page: erase regenerates
+; the background from the resident tile bank. That buys a full 32K for
+; code and compiled sprites, which is what the sprite compiler needs.
+
+CODE_PAGE       EQU 0           ; sections A,B = pages 0,1 -> $0000-$7FFF
+BUF0_PAGE       EQU 4           ; sections C,D = pages 4,5
+BUF1_PAGE       EQU 6           ; sections C,D = pages 6,7
+
+LMPR_VALUE      EQU CODE_PAGE | LMPR_RAM0      ; ROM out, $0038 is ours
+
+SCR_BASE        EQU $8000       ; back buffer as seen through HMPR
+SCR_WIDTH       EQU 256         ; pixels
+SCR_HEIGHT      EQU 192         ; pixels
+SCR_STRIDE      EQU 128         ; bytes per line (2 pixels per byte)
+SCR_BYTES       EQU SCR_STRIDE * SCR_HEIGHT     ; 24576 = $6000
+SCR_END         EQU SCR_BASE + SCR_BYTES        ; $E000
+
+; ---- Playfield geometry -----------------------------------------
+;
+; Faithful to the arcade: an 8x8 cell grid with the level held as one
+; bit per cell. The arcade playfield is 32x25 with the top and bottom
+; rows implicit; the SAM's 192-line display gives us 32x24 exactly.
+
+CELL_W          EQU 8
+CELL_H          EQU 8
+MAP_W           EQU 32          ; cells across
+MAP_H           EQU 24          ; cells down
+MAP_STRIDE      EQU MAP_W / 8   ; 4 bytes per row of the 1-bit bitmap
+MAP_BYTES       EQU MAP_STRIDE * MAP_H          ; 96 bytes per level
+MAP_CELLS       EQU MAP_W * MAP_H               ; 768
+
+; ---- Object table -----------------------------------------------
+;
+; 48 slots. Above the observed arcade gameplay peak of 35-40, and
+; 48 x 16 = 768 bytes fits inside a 1K alignment.
+
+OBJ_MAX         EQU 48
+OBJ_SIZE        EQU 16          ; power of two: index = slot << 4
+
+O_TYPE          EQU 0           ; 0 = free slot
+O_SPR           EQU 1           ; sprite id -> bb_sprite_table
+O_XL            EQU 2           ; x, 8.8 fixed point
+O_XH            EQU 3           ;   integer pixel 0..255
+O_YL            EQU 4           ; y, 8.8 fixed point
+O_YH            EQU 5           ;   integer pixel 0..191
+O_VXL           EQU 6           ; velocity x, 8.8 signed
+O_VXH           EQU 7
+O_VYL           EQU 8           ; velocity y, 8.8 signed
+O_VYH           EQU 9
+O_TIMER         EQU 10          ; lifetime / state countdown
+O_FLAGS         EQU 11
+O_STATE         EQU 12          ; per-type substate, animation phase
+O_PRIO          EQU 13          ; render priority for the budget governor
+O_CELLL         EQU 14          ; cached address in bb_cellgrid, low byte
+O_CELLH         EQU 15          ; ... and high byte (the index is 0..767,
+                                ; so it does not fit in one byte)
+
+; O_FLAGS bits
+OF_MASKED       EQU $01         ; hollow: needs the compiled masked path
+OF_MOVED        EQU $02         ; position or frame changed this tick
+OF_DRAWN0       EQU $04         ; has pixels standing in buffer 0
+OF_DRAWN1       EQU $08         ; has pixels standing in buffer 1
+OF_FLIP         EQU $10         ; facing left
+OF_STATIC       EQU $20         ; at rest; skip unless disturbed
+OF_DIRTY        EQU $40         ; forced redraw (a mover crossed it)
+OF_INSET        EQU $80         ; selected for redraw this frame
+
+; Draw record fields (bb_drawn), 4 bytes per slot per buffer
+D_X             EQU 0
+D_Y             EQU 1
+D_SPR           EQU 2           ; $FF = this buffer holds nothing for the slot
+D_SIZE          EQU 4
+
+; Object types
+OT_FREE         EQU 0
+OT_PLAYER       EQU 1
+OT_ENEMY        EQU 2
+OT_BUBBLE       EQU 3           ; empty player bubble (hollow)
+OT_BUBBLE_MOB   EQU 4           ; bubble with an enemy inside (solid)
+OT_FRUIT        EQU 5
+OT_POPUP        EQU 6
+
+; ---- Sprite descriptor ------------------------------------------
+;
+; bb_sprite_table is an array of these, indexed by O_SPR.
+
+SPR_SIZE        EQU 8
+S_W             EQU 0           ; width in bytes (pixels / 2)
+S_H             EQU 1           ; height in rows
+S_XOFF          EQU 2           ; signed hotspot offset, pixels
+S_YOFF          EQU 3
+S_DRAW          EQU 4           ; word: address of the compiled draw routine
+S_FILL          EQU 6           ; word: reserved / erase hint
+
+; ---- Wind current -----------------------------------------------
+;
+; One direction nibble per cell. Bubbles read it and accelerate along
+; it; this is what makes them queue along ceilings and pour down the
+; far wall the way the arcade's authored wind data does.
+
+DIR_U           EQU 0
+DIR_UR          EQU 1
+DIR_R           EQU 2
+DIR_DR          EQU 3
+DIR_D           EQU 4
+DIR_DL          EQU 5
+DIR_L           EQU 6
+DIR_UL          EQU 7
+DIR_NONE        EQU 8
+
+; ---- Tunables ---------------------------------------------------
+
+BUB_ACCEL       EQU 12          ; wind acceleration, 1/256 px per frame^2
+BUB_VMAX        EQU 192         ; terminal speed, 1/256 px per frame
+BUB_RISE        EQU 24          ; buoyancy while below the current
+BUB_REPEL       EQU 20          ; bubble-bubble separation impulse
+GRAVITY         EQU 24          ; for solid objects, 1/256 px per frame^2
+
+; Render budget governor. Expressed in memory accesses; the render pass
+; stops issuing low-priority objects once this is spent. See section 4
+; of docs/BUBBLE_BOBBLE_SAM.md.
+RENDER_BUDGET   EQU 17768
+BUDGET_UNIT     EQU 64          ; budget is counted in units of 64 accesses
+                                ; so it fits a byte counter: 17768/64 = 277
+BUDGET_TICKS    EQU RENDER_BUDGET / BUDGET_UNIT
+
+; ---- Negative immediates ----------------------------------------
+;
+; pasmo treats a leading '(' in an operand as an indirection, so
+; expressions like (-OBJ_SIZE) & $FFFF cannot appear inline.
+
+NEG_OBJ_SIZE    EQU (-OBJ_SIZE) & $FFFF
+NEG_MAP_W       EQU (-MAP_W) & $FFFF
+NEG_ONE         EQU $FF

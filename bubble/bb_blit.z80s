@@ -1,0 +1,220 @@
+;------------------------------------------------------------------
+; bb_blit.z80s - screen primitives
+;
+; Everything here runs with interrupts DISABLED, because the flat
+; blitter parks SP inside the framebuffer.
+;
+; CONVENTION: any routine that moves SP into the screen saves it to
+; bb_savesp on entry and restores it before returning - 12 accesses per
+; call. Saving it once per frame instead would be 3 accesses cheaper but
+; would not survive being called from inside a CALL, which is exactly
+; how the render pass reaches these. Compiled sprites follow the same
+; convention.
+;
+; Cost summary (see docs/BUBBLE_BOBBLE_SAM.md section 3):
+;
+;   bb_blit_flat_8x16    224a   PUSH fill, 1.50 acc/byte  <- the floor
+;   bb_blit_tiles        704a   2 cells wide, LDI from the tile bank
+;                       1056a   3 cells wide
+;   bb_screen_addr        15a
+;------------------------------------------------------------------
+
+; ---- bb_screen_addr ---------------------------------------------
+;
+; Entry : B = y (0..191), C = x in pixels (0..255)
+; Exit  : HL = byte address in the back buffer
+; Trash : AF, C, D
+; Cost  : [65T / 15a]
+;
+; MODE 4 is a clean linear framebuffer: addr = $8000 + y*128 + x/2.
+; The row base's low byte is therefore always $00 or $80, and x/2 is at
+; most $7F, so the add can never carry out of L. That is what makes
+; this nine instructions with no 16-bit arithmetic.
+
+bb_screen_addr:
+                LD   H,bb_rowaddr_lo / 256      ; [7T / 2a]
+                LD   L,B                        ; [4T / 1a]
+                LD   A,(HL)                     ; [7T / 2a]  row base lo
+                INC  H                          ; [4T / 1a]
+                LD   D,(HL)                     ; [7T / 2a]  row base hi
+                SRL  C                          ; [8T / 2a]  x -> byte offset
+                ADD  A,C                        ; [4T / 1a]  cannot carry
+                LD   L,A                        ; [4T / 1a]
+                LD   H,D                        ; [4T / 1a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_blit_flat_8x16 ------------------------------------------
+;
+; Fill a 16x16 pixel box (8 bytes x 16 rows) with a solid colour pair.
+; This is the erase fast path: it is taken whenever the box lies
+; entirely on plain backdrop cells, which on a Bubble Bobble screen is
+; about 70% of the time.
+;
+; Entry : HL = top-left byte address
+;         DE = fill pattern, one byte per pixel pair
+;         bb_savesp holds the real SP
+; Exit  : SP restored
+; Trash : AF, BC, HL
+; Cost  : [~1190T / 239a]  setup 15a + 16 rows x 14a
+;
+; PUSH writes downward and puts E at the lower address, so SP is parked
+; one byte past the end of the row and the four pushes lay the row down
+; right to left.
+
+                MACRO FLATROW
+                LD   SP,HL                      ; [6T / 1a]
+                PUSH DE                         ; [11T / 3a]
+                PUSH DE                         ; [11T / 3a]
+                PUSH DE                         ; [11T / 3a]
+                PUSH DE                         ; [11T / 3a]
+                ADD  HL,BC                      ; [11T / 1a]
+                ENDM
+
+bb_blit_flat_8x16:
+                LD   (bb_savesp),SP             ; [20T / 6a]
+                LD   BC,SCR_STRIDE              ; [10T / 3a]
+                LD   A,L                        ; [4T / 1a]
+                ADD  A,8                        ; [7T / 2a]  HL -> row 0 end
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]  carry-safe
+                SUB  L                          ; [4T / 1a]  16-bit add of a
+                LD   H,A                        ; [4T / 1a]  byte, 6 accesses
+                FLATROW                         ; row 0
+                FLATROW
+                FLATROW
+                FLATROW
+                FLATROW
+                FLATROW
+                FLATROW
+                FLATROW
+                FLATROW
+                FLATROW
+                FLATROW
+                FLATROW
+                FLATROW
+                FLATROW
+                FLATROW
+                FLATROW                         ; row 15
+                LD   SP,(bb_savesp)             ; [20T / 6a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_blit_tiles ----------------------------------------------
+;
+; Erase slow path: regenerate 16 rows of background from the tile bank,
+; for a box that has been snapped out to whole cells horizontally.
+;
+; Entry : B  = y of the top row (0..176)
+;         C  = x of the left edge, a multiple of 8
+;         A  = number of cells across (2 or 3)
+; Exit  : SP untouched (this path does not use it)
+; Trash : all
+; Cost  : 2 cells [~704a], 3 cells [~1056a]
+;
+; Iterating cell column first is what makes this affordable: within one
+; cell the source rows are 4 contiguous bytes each and the whole 32-byte
+; tile is contiguous, so the source pointer needs no fixup between rows
+; at all - LDI walks it for free. Only the destination needs stepping.
+;
+; The 5.5 acc/byte this achieves is the price of not having a background
+; master page resident. A master page mapped at the same offset as the
+; framebuffer would make this a straight LDI run at 4.9 acc/byte (624a
+; for the exact 128-byte box, no cell snapping) at the cost of an LMPR
+; switch and a duplicated stub at a common offset in both page pairs.
+
+bb_blit_tiles:
+                LD   (bb_bt_ncells),A           ; [13T / 4a]
+                LD   (bb_bt_x),BC               ; [20T / 6a]  C->x, B->y
+                SRL  C                          ; [8T / 2a]
+                SRL  C                          ; [8T / 2a]
+                SRL  C                          ; [8T / 2a]   C = cell column
+                LD   A,C                        ; [4T / 1a]
+                LD   (bb_bt_cx),A               ; [13T / 4a]
+
+bb_bt_colloop:
+                ; --- set up this cell column -------------------------
+                LD   A,(bb_bt_y)                ; [13T / 4a]
+                LD   B,A                        ; [4T / 1a]
+                LD   A,(bb_bt_cx)               ; [13T / 4a]
+                ADD  A,A                        ; [4T / 1a]   cell -> pixels
+                ADD  A,A                        ; [4T / 1a]
+                ADD  A,A                        ; [4T / 1a]
+                LD   C,A                        ; [4T / 1a]
+                CALL bb_screen_addr             ; [17T / 5a] + 15a
+                EX   DE,HL                      ; [4T / 1a]   DE = dest
+                LD   A,16                       ; [7T / 2a]
+                LD   (bb_bt_rows),A             ; [13T / 4a]
+                LD   A,(bb_bt_y)                ; [13T / 4a]
+                LD   (bb_bt_yy),A               ; [13T / 4a]
+
+bb_bt_rowloop:
+                ; --- source pointer for this pixel row ---------------
+                ; src = bb_tilebank + tilemap[cy*32 + cx]*32 + (y&7)*4
+                ; Recomputed per row rather than hoisted per cell row:
+                ; 22a of setup against 16a of copy is not worth the
+                ; extra state, and it keeps this loop reentrant.
+                LD   A,(bb_bt_yy)               ; [13T / 4a]
+                AND  $F8                        ; [7T / 2a]   y & ~7
+                LD   L,A                        ; [4T / 1a]   cy*8 in low bits
+                LD   H,0                        ; [7T / 2a]
+                ADD  HL,HL                      ; [11T / 1a]  cy*16
+                ADD  HL,HL                      ; [11T / 1a]  cy*32  (y&~7 = cy*8)
+                LD   A,(bb_bt_cx)               ; [13T / 4a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                LD   BC,bb_tilemap              ; [10T / 3a]
+                ADD  HL,BC                      ; [11T / 1a]
+                LD   L,(HL)                     ; [7T / 2a]   tile id
+                LD   H,0                        ; [7T / 2a]
+                ADD  HL,HL                      ; [11T / 1a]  x2
+                ADD  HL,HL                      ; [11T / 1a]  x4
+                ADD  HL,HL                      ; [11T / 1a]  x8
+                ADD  HL,HL                      ; [11T / 1a]  x16
+                ADD  HL,HL                      ; [11T / 1a]  x32
+                LD   BC,bb_tilebank             ; [10T / 3a]
+                ADD  HL,BC                      ; [11T / 1a]
+                LD   A,(bb_bt_yy)               ; [13T / 4a]
+                AND  7                          ; [7T / 2a]
+                ADD  A,A                        ; [4T / 1a]
+                ADD  A,A                        ; [4T / 1a]   (y&7)*4
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                ADC  A,H                        ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]   HL = source
+
+                ; --- copy 4 bytes and step the destination row -------
+                ; BC is preloaded to 128 so that after four LDIs it
+                ; holds 124, which is exactly the gap back to the start
+                ; of the next screen row.
+                LD   BC,SCR_STRIDE              ; [10T / 3a]
+                LDI                             ; [16T / 4a]
+                LDI                             ; [16T / 4a]
+                LDI                             ; [16T / 4a]
+                LDI                             ; [16T / 4a]  BC now = 124
+                EX   DE,HL                      ; [4T / 1a]
+                ADD  HL,BC                      ; [11T / 1a]
+                EX   DE,HL                      ; [4T / 1a]   DE = next row
+
+                LD   HL,bb_bt_yy                ; [10T / 3a]
+                INC  (HL)                       ; [11T / 3a]
+                LD   HL,bb_bt_rows              ; [10T / 3a]
+                DEC  (HL)                       ; [11T / 3a]
+                JR   NZ,bb_bt_rowloop           ; [12T / 2a]
+
+                ; --- next cell column --------------------------------
+                LD   HL,bb_bt_cx                ; [10T / 3a]
+                INC  (HL)                       ; [11T / 3a]
+                LD   HL,bb_bt_ncells            ; [10T / 3a]
+                DEC  (HL)                       ; [11T / 3a]
+                JR   NZ,bb_bt_colloop           ; [12T / 2a]
+                RET                             ; [10T / 3a]
+
+bb_bt_ncells:   DEFB 0
+bb_bt_x:        DEFB 0          ; LD (bb_bt_x),BC lands C here and B in y
+bb_bt_y:        DEFB 0
+bb_bt_cx:       DEFB 0
+bb_bt_yy:       DEFB 0
+bb_bt_rows:     DEFB 0

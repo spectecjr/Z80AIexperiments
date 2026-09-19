@@ -1,0 +1,321 @@
+;------------------------------------------------------------------
+; bb_actors.z80s - players, enemies, pickups, and the bubble spawner
+;
+; Deliberately thin. This prototype exists to prove out the tile
+; background, the wind current, and the renderer's frame budget, so the
+; actors do just enough to put a realistic object mix on screen.
+;------------------------------------------------------------------
+
+; ---- input ------------------------------------------------------
+;
+; The SAM's main key matrix is read like a Spectrum's: port 254 with the
+; row selected by the address high byte, active low.
+
+KEY_LEFT        EQU $01
+KEY_RIGHT       EQU $02
+KEY_JUMP        EQU $04
+KEY_FIRE        EQU $08
+
+bb_read_input:
+                LD   C,0                        ; [7T / 2a]
+                LD   BC,$DFFE                   ; [10T / 3a]  P O I U Y
+                IN   A,(C)                      ; [12T / 2a]
+                LD   E,A                        ; [4T / 1a]
+                LD   D,0                        ; [7T / 2a]
+                BIT  1,E                        ; [8T / 2a]   O
+                JR   NZ,bb_ri_no_o              ; [12T / 2a]
+                SET  0,D                        ; [8T / 2a]   left
+bb_ri_no_o:
+                BIT  0,E                        ; [8T / 2a]   P
+                JR   NZ,bb_ri_no_p              ; [12T / 2a]
+                SET  1,D                        ; [8T / 2a]   right
+bb_ri_no_p:
+                LD   BC,$7FFE                   ; [10T / 3a]  SPACE SYM M N B
+                IN   A,(C)                      ; [12T / 2a]
+                BIT  0,A                        ; [8T / 2a]   SPACE
+                JR   NZ,bb_ri_no_sp             ; [12T / 2a]
+                SET  2,D                        ; [8T / 2a]   jump
+bb_ri_no_sp:
+                BIT  2,A                        ; [8T / 2a]   M
+                JR   NZ,bb_ri_no_m              ; [12T / 2a]
+                SET  3,D                        ; [8T / 2a]   fire
+bb_ri_no_m:
+                LD   A,D                        ; [4T / 1a]
+                LD   (bb_keys),A                ; [13T / 4a]
+                RET                             ; [10T / 3a]
+
+; ---- player -----------------------------------------------------
+
+PLR_WALK        EQU 320                         ; 1.25 px/frame, 8.8
+PLR_JUMP        EQU 1024                        ; 4 px/frame upward
+PLR_WALK_NEG    EQU (-PLR_WALK) & $FFFF
+PLR_JUMP_NEG    EQU (-PLR_JUMP) & $FFFF
+BUB_SHOT_NEG    EQU (-512) & $FFFF
+
+bb_upd_player:
+                LD   A,(bb_keys)                ; [13T / 4a]
+                LD   B,A                        ; [4T / 1a]
+
+                LD   HL,0                       ; [10T / 3a]
+                BIT  0,B                        ; [8T / 2a]
+                JR   Z,bb_up_noleft             ; [12T / 2a]
+                LD   HL,PLR_WALK_NEG            ; [10T / 3a]
+                SET  4,(IX+O_FLAGS)             ; [23T / 6a]  face left
+bb_up_noleft:
+                BIT  1,B                        ; [8T / 2a]
+                JR   Z,bb_up_noright            ; [12T / 2a]
+                LD   HL,PLR_WALK                ; [10T / 3a]
+                RES  4,(IX+O_FLAGS)             ; [23T / 6a]
+bb_up_noright:
+                LD   (IX+O_VXL),L               ; [19T / 5a]
+                LD   (IX+O_VXH),H               ; [19T / 5a]
+
+                ; jump only when standing on something
+                BIT  2,B                        ; [8T / 2a]
+                JR   Z,bb_up_nojump             ; [12T / 2a]
+                CALL bb_on_ground               ; [17T / 5a]
+                JR   Z,bb_up_nojump             ; [12T / 2a]
+                LD   HL,PLR_JUMP_NEG            ; [10T / 3a]
+                LD   (IX+O_VYL),L               ; [19T / 5a]
+                LD   (IX+O_VYH),H               ; [19T / 5a]
+bb_up_nojump:
+                ; fire a bubble, rate limited by O_TIMER
+                LD   A,(IX+O_TIMER)             ; [19T / 4a]
+                OR   A                          ; [4T / 1a]
+                JR   Z,bb_up_canfire            ; [12T / 2a]
+                DEC  (IX+O_TIMER)               ; [23T / 6a]
+                JR   bb_up_gravity              ; [12T / 2a]
+bb_up_canfire:
+                BIT  3,B                        ; [8T / 2a]
+                JR   Z,bb_up_gravity            ; [12T / 2a]
+                CALL bb_fire_bubble             ; [17T / 5a]
+                LD   (IX+O_TIMER),12            ; [19T / 5a]
+
+bb_up_gravity:
+                LD   A,GRAVITY                  ; [7T / 2a]
+                LD   E,(IX+O_VYL)               ; [19T / 4a]
+                LD   D,(IX+O_VYH)               ; [19T / 4a]
+                CALL bb_addsigned               ; [17T / 5a]
+                LD   DE,1024                    ; [10T / 3a]  terminal fall
+                CALL bb_clamp16                 ; [17T / 5a]
+                LD   (IX+O_VYL),L               ; [19T / 5a]
+                LD   (IX+O_VYH),H               ; [19T / 5a]
+                CALL bb_move_x                  ; [17T / 5a]
+                JP   bb_move_y                  ; [10T / 3a]
+
+; NZ if there is solid ground directly under the object's feet.
+bb_on_ground:
+                LD   A,(IX+O_YH)                ; [19T / 4a]
+                ADD  A,16                       ; [7T / 2a]
+                LD   B,A                        ; [4T / 1a]
+                LD   A,(IX+O_XH)                ; [19T / 4a]
+                ADD  A,8                        ; [7T / 2a]
+                LD   C,A                        ; [4T / 1a]
+                JP   bb_point_solid             ; [10T / 3a]
+
+; ---- enemy ------------------------------------------------------
+;
+; Walks until it meets a wall or runs out of floor, then turns around.
+
+ENE_WALK        EQU 192
+
+bb_upd_enemy:
+                LD   L,(IX+O_VXL)               ; [19T / 4a]
+                LD   H,(IX+O_VXH)               ; [19T / 4a]
+                LD   A,H                        ; [4T / 1a]
+                OR   L                          ; [4T / 1a]
+                JR   NZ,bb_ue_moving            ; [12T / 2a]
+                LD   HL,ENE_WALK                ; [10T / 3a]
+                LD   (IX+O_VXL),L               ; [19T / 5a]
+                LD   (IX+O_VXH),H               ; [19T / 5a]
+bb_ue_moving:
+                LD   A,GRAVITY                  ; [7T / 2a]
+                LD   E,(IX+O_VYL)               ; [19T / 4a]
+                LD   D,(IX+O_VYH)               ; [19T / 4a]
+                CALL bb_addsigned               ; [17T / 5a]
+                LD   DE,1024                    ; [10T / 3a]
+                CALL bb_clamp16                 ; [17T / 5a]
+                LD   (IX+O_VYL),L               ; [19T / 5a]
+                LD   (IX+O_VYH),H               ; [19T / 5a]
+
+                CALL bb_move_x                  ; [17T / 5a]
+                LD   A,(bb_blocked)             ; [13T / 4a]
+                LD   (bb_scratch),A             ; [13T / 4a]  move_y clears it
+                CALL bb_move_y                  ; [17T / 5a]
+
+                ; Turn round if the wall stopped us, or if there is no
+                ; floor under our feet any more.
+                LD   A,(bb_scratch)             ; [13T / 4a]
+                OR   A                          ; [4T / 1a]
+                JR   NZ,bb_ue_turn              ; [12T / 2a]
+                CALL bb_on_ground               ; [17T / 5a]
+                RET  NZ                         ; [11T / 3a]
+bb_ue_turn:
+                LD   L,(IX+O_VXL)               ; [19T / 4a]
+                LD   H,(IX+O_VXH)               ; [19T / 4a]
+                CALL bb_negate_hl               ; [17T / 5a]
+                LD   (IX+O_VXL),L               ; [19T / 5a]
+                LD   (IX+O_VXH),H               ; [19T / 5a]
+                RET                             ; [10T / 3a]
+
+; ---- fruit ------------------------------------------------------
+;
+; Falls, then sits still. Once at rest it costs the renderer nothing:
+; its draw record already matches, so the plan sweep skips it entirely
+; unless a moving object crosses its cells.
+
+bb_upd_fruit:
+                CALL bb_on_ground               ; [17T / 5a]
+                JR   Z,bb_uf_fall               ; [12T / 2a]
+                LD   (IX+O_VYL),0               ; [19T / 5a]
+                LD   (IX+O_VYH),0               ; [19T / 5a]
+                SET  5,(IX+O_FLAGS)             ; [23T / 6a]  OF_STATIC
+                RET                             ; [10T / 3a]
+bb_uf_fall:
+                RES  5,(IX+O_FLAGS)             ; [23T / 6a]
+                LD   A,GRAVITY                  ; [7T / 2a]
+                LD   E,(IX+O_VYL)               ; [19T / 4a]
+                LD   D,(IX+O_VYH)               ; [19T / 4a]
+                CALL bb_addsigned               ; [17T / 5a]
+                LD   DE,768                     ; [10T / 3a]
+                CALL bb_clamp16                 ; [17T / 5a]
+                LD   (IX+O_VYL),L               ; [19T / 5a]
+                LD   (IX+O_VYH),H               ; [19T / 5a]
+                JP   bb_move_y                  ; [10T / 3a]
+
+; ---- score popup ------------------------------------------------
+
+bb_upd_popup:
+                LD   (IX+O_VXL),0               ; [19T / 5a]
+                LD   (IX+O_VXH),0               ; [19T / 5a]
+                LD   (IX+O_VYL),0               ; [19T / 5a]
+                LD   (IX+O_VYH),NEG_ONE         ; [19T / 5a]  1 px/frame up
+                CALL bb_move_y                  ; [17T / 5a]
+                DEC  (IX+O_TIMER)               ; [23T / 6a]
+                RET  NZ                         ; [11T / 3a]
+                JP   bb_obj_free                ; [10T / 3a]
+
+; ---- spawning ---------------------------------------------------
+
+bb_fire_bubble:
+                PUSH IX                         ; [15T / 4a]
+                LD   B,(IX+O_YH)                ; [19T / 4a]
+                LD   C,(IX+O_XH)                ; [19T / 4a]
+                LD   A,(IX+O_FLAGS)             ; [19T / 4a]
+                LD   E,A                        ; [4T / 1a]
+                CALL bb_obj_alloc_hi            ; [17T / 5a]
+                JR   C,bb_fb_none               ; [12T / 2a]
+                LD   (IX+O_TYPE),OT_BUBBLE      ; [19T / 5a]
+                LD   (IX+O_SPR),SPR_BUBBLE      ; [19T / 5a]
+                LD   (IX+O_FLAGS),OF_MASKED     ; [19T / 5a]  hollow
+                LD   (IX+O_XH),C                ; [19T / 5a]
+                LD   (IX+O_YH),B                ; [19T / 5a]
+                LD   (IX+O_XL),0                ; [19T / 5a]
+                LD   (IX+O_YL),0                ; [19T / 5a]
+                LD   (IX+O_VYL),0               ; [19T / 5a]
+                LD   (IX+O_VYH),0               ; [19T / 5a]
+                LD   (IX+O_TIMER),200           ; [19T / 5a]  ~4 seconds
+                ; launch left or right depending on which way we face
+                LD   HL,512                     ; [10T / 3a]
+                BIT  4,E                        ; [8T / 2a]
+                JR   Z,bb_fb_right              ; [12T / 2a]
+                LD   HL,BUB_SHOT_NEG            ; [10T / 3a]
+bb_fb_right:
+                LD   (IX+O_VXL),L               ; [19T / 5a]
+                LD   (IX+O_VXH),H               ; [19T / 5a]
+bb_fb_none:
+                POP  IX                         ; [14T / 4a]
+                RET                             ; [10T / 3a]
+
+; Keep a light background stream of bubbles so the wind current is
+; visible without having to play the game.
+bb_spawner:
+                LD   HL,bb_spawn_timer          ; [10T / 3a]
+                DEC  (HL)                       ; [11T / 3a]
+                RET  NZ                         ; [11T / 3a]
+                LD   (HL),40                    ; [10T / 3a]
+                CALL bb_obj_alloc_lo            ; [17T / 5a]
+                RET  C                          ; [11T / 3a]
+                LD   (IX+O_TYPE),OT_BUBBLE      ; [19T / 5a]
+                LD   (IX+O_SPR),SPR_BUBBLE      ; [19T / 5a]
+                LD   (IX+O_FLAGS),OF_MASKED     ; [19T / 5a]
+                LD   A,(bb_tick)                ; [13T / 4a]
+                AND  $3E                        ; [7T / 2a]   even x, spread out
+                ADD  A,96                       ; [7T / 2a]
+                LD   (IX+O_XH),A                ; [19T / 5a]
+                LD   (IX+O_YH),160              ; [19T / 5a]
+                LD   (IX+O_XL),0                ; [19T / 5a]
+                LD   (IX+O_YL),0                ; [19T / 5a]
+                LD   (IX+O_VXL),0               ; [19T / 5a]
+                LD   (IX+O_VXH),0               ; [19T / 5a]
+                LD   (IX+O_VYL),0               ; [19T / 5a]
+                LD   (IX+O_VYH),0               ; [19T / 5a]
+                LD   (IX+O_TIMER),220           ; [19T / 5a]
+                RET                             ; [10T / 3a]
+
+; Populate a freshly loaded level: two players, a few enemies, fruit.
+bb_spawn_level:
+                CALL bb_obj_alloc_hi            ; [17T / 5a]
+                RET  C                          ; [11T / 3a]
+                CALL bb_actor_common            ; [17T / 5a]
+                LD   (IX+O_TYPE),OT_PLAYER      ; [19T / 5a]
+                LD   (IX+O_SPR),SPR_PLAYER      ; [19T / 5a]
+                LD   (IX+O_XH),32               ; [19T / 5a]
+                LD   (IX+O_YH),152              ; [19T / 5a]
+
+                LD   B,4                        ; [7T / 2a]   four enemies
+                LD   C,64                       ; [7T / 2a]
+bb_sl_enemy:
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_obj_alloc_hi            ; [17T / 5a]
+                JR   C,bb_sl_enemy_done         ; [12T / 2a]
+                CALL bb_actor_common            ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+                PUSH BC                         ; [11T / 3a]
+                LD   (IX+O_TYPE),OT_ENEMY       ; [19T / 5a]
+                LD   (IX+O_SPR),SPR_ENEMY       ; [19T / 5a]
+                LD   (IX+O_XH),C                ; [19T / 5a]
+                LD   (IX+O_YH),40               ; [19T / 5a]
+bb_sl_enemy_done:
+                POP  BC                         ; [10T / 3a]
+                LD   A,C                        ; [4T / 1a]
+                ADD  A,40                       ; [7T / 2a]
+                LD   C,A                        ; [4T / 1a]
+                DJNZ bb_sl_enemy                ; [13T / 2a]
+
+                LD   B,3                        ; [7T / 2a]   three fruit
+                LD   C,80                       ; [7T / 2a]
+bb_sl_fruit:
+                PUSH BC                         ; [11T / 3a]
+                CALL bb_obj_alloc_lo            ; [17T / 5a]
+                JR   C,bb_sl_fruit_done         ; [12T / 2a]
+                CALL bb_actor_common            ; [17T / 5a]
+                POP  BC                         ; [10T / 3a]
+                PUSH BC                         ; [11T / 3a]
+                LD   (IX+O_TYPE),OT_FRUIT       ; [19T / 5a]
+                LD   (IX+O_SPR),SPR_FRUIT       ; [19T / 5a]
+                LD   (IX+O_XH),C                ; [19T / 5a]
+                LD   (IX+O_YH),100              ; [19T / 5a]
+bb_sl_fruit_done:
+                POP  BC                         ; [10T / 3a]
+                LD   A,C                        ; [4T / 1a]
+                ADD  A,48                       ; [7T / 2a]
+                LD   C,A                        ; [4T / 1a]
+                DJNZ bb_sl_fruit                ; [13T / 2a]
+                RET                             ; [10T / 3a]
+
+; Zero the fields every actor needs cleared. Leaves IX alone.
+bb_actor_common:
+                LD   (IX+O_XL),0                ; [19T / 5a]
+                LD   (IX+O_YL),0                ; [19T / 5a]
+                LD   (IX+O_VXL),0               ; [19T / 5a]
+                LD   (IX+O_VXH),0               ; [19T / 5a]
+                LD   (IX+O_VYL),0               ; [19T / 5a]
+                LD   (IX+O_VYH),0               ; [19T / 5a]
+                LD   (IX+O_FLAGS),0             ; [19T / 5a]
+                LD   (IX+O_TIMER),0             ; [19T / 5a]
+                LD   (IX+O_STATE),0             ; [19T / 5a]
+                RET                             ; [10T / 3a]
+
+bb_keys:        DEFB 0
+bb_spawn_timer: DEFB 1

@@ -1,0 +1,246 @@
+;------------------------------------------------------------------
+; bb_bubble.z80s - bubble physics: riding the wind current
+;
+; Per bubble, per frame:
+;   1. read the wind direction for the cell it is sitting in
+;   2. accelerate along it, plus a constant buoyancy term
+;   3. clamp to terminal speed
+;   4. integrate each axis separately, reverting that axis alone if it
+;      would enter a solid cell
+;   5. push apart from bubbles in the four adjacent cells
+;   6. age, and pop when the timer runs out
+;
+; Step 1 is a single table read because bb_obj_grid already worked out
+; the cell address, and bb_flowfield is a parallel array to bb_cellgrid,
+; so the flow entry is at a constant offset from the grid entry.
+;
+; Cost: ~330 accesses per bubble, against the ~55a/object line in the
+; frame budget - bubbles are the expensive objects to simulate as well
+; as to draw, which is why they get high-priority slots.
+;------------------------------------------------------------------
+
+FLOW_BIAS       EQU (bb_flowfield - bb_cellgrid) & $FFFF
+BUB_REPEL_NEG   EQU (-BUB_REPEL) & $FF
+
+bb_upd_bubble:
+                ; ---- 1. wind direction at this cell -----------------
+                LD   L,(IX+O_CELLL)             ; [19T / 4a]
+                LD   H,(IX+O_CELLH)             ; [19T / 4a]
+                LD   DE,FLOW_BIAS               ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   A,(HL)                     ; [7T / 2a]   direction 0..8
+                AND  $0F                        ; [7T / 2a]   see bb_dir_dx
+
+                ; ---- 2. accelerate along it -------------------------
+                LD   HL,bb_dir_dx               ; [10T / 3a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                LD   A,(HL)                     ; [7T / 2a]   pre-scaled ax
+                LD   E,(IX+O_VXL)               ; [19T / 4a]
+                LD   D,(IX+O_VXH)               ; [19T / 4a]
+                CALL bb_addsigned               ; [17T / 5a]  HL = DE + sext(A)
+                LD   DE,BUB_VMAX                ; [10T / 3a]
+                CALL bb_clamp16                 ; [17T / 5a]
+                LD   (IX+O_VXL),L               ; [19T / 5a]
+                LD   (IX+O_VXH),H               ; [19T / 5a]
+
+                LD   L,(IX+O_CELLL)             ; [19T / 4a]
+                LD   H,(IX+O_CELLH)             ; [19T / 4a]
+                LD   DE,FLOW_BIAS               ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   A,(HL)                     ; [7T / 2a]
+                AND  $0F                        ; [7T / 2a]
+                LD   HL,bb_dir_dy               ; [10T / 3a]
+                ADD  A,L                        ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                LD   A,(HL)                     ; [7T / 2a]   pre-scaled ay
+                SUB  BUB_RISE                   ; [7T / 2a]   plus buoyancy
+                LD   E,(IX+O_VYL)               ; [19T / 4a]
+                LD   D,(IX+O_VYH)               ; [19T / 4a]
+                CALL bb_addsigned               ; [17T / 5a]
+                LD   DE,BUB_VMAX                ; [10T / 3a]
+                CALL bb_clamp16                 ; [17T / 5a]
+                LD   (IX+O_VYL),L               ; [19T / 5a]
+                LD   (IX+O_VYH),H               ; [19T / 5a]
+
+                ; ---- 4. integrate, one axis at a time ---------------
+                CALL bb_move_x                  ; [17T / 5a]
+                CALL bb_move_y                  ; [17T / 5a]
+
+                ; ---- 5. separation ----------------------------------
+                CALL bb_bubble_repel            ; [17T / 5a]
+
+                ; ---- 6. age -----------------------------------------
+                DEC  (IX+O_TIMER)               ; [23T / 6a]
+                RET  NZ                         ; [11T / 3a]
+                JP   bb_obj_free                ; [10T / 3a]  pop
+
+; ---- bb_addsigned -----------------------------------------------
+; HL = DE + sign_extend(A). Trash: AF.
+bb_addsigned:
+                LD   L,A                        ; [4T / 1a]
+                ADD  A,A                        ; [4T / 1a]   CF = sign bit
+                SBC  A,A                        ; [4T / 1a]   A = 0 or $FF
+                LD   H,A                        ; [4T / 1a]
+                ADD  HL,DE                      ; [11T / 1a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_clamp16 -------------------------------------------------
+; Clamp signed HL to [-DE, +DE]. DE must be positive. Trash: AF, DE.
+bb_clamp16:
+                BIT  7,H                        ; [8T / 2a]
+                JR   NZ,bb_cl_neg               ; [12T / 2a]
+                PUSH HL                         ; [11T / 3a]
+                OR   A                          ; [4T / 1a]
+                SBC  HL,DE                      ; [15T / 2a]
+                POP  HL                         ; [10T / 3a]
+                RET  C                          ; [11T / 3a]  below the limit
+                EX   DE,HL                      ; [4T / 1a]
+                RET                             ; [10T / 3a]
+bb_cl_neg:
+                PUSH HL                         ; [11T / 3a]
+                CALL bb_negate_hl               ; [17T / 5a]
+                OR   A                          ; [4T / 1a]
+                SBC  HL,DE                      ; [15T / 2a]
+                POP  HL                         ; [10T / 3a]
+                RET  C                          ; [11T / 3a]
+                EX   DE,HL                      ; [4T / 1a]
+                ; fall through: HL = limit, wanted -limit
+
+; HL = -HL. Trash: AF.
+bb_negate_hl:
+                XOR  A                          ; [4T / 1a]
+                SUB  L                          ; [4T / 1a]
+                LD   L,A                        ; [4T / 1a]
+                LD   A,0                        ; [7T / 2a]
+                SBC  A,H                        ; [4T / 1a]
+                LD   H,A                        ; [4T / 1a]
+                RET                             ; [10T / 3a]
+
+; ---- bb_move_x / bb_move_y --------------------------------------
+;
+; Integrate one axis and undo just that axis if the object's centre
+; would end up inside a solid cell. Separating the axes is what lets a
+; bubble slide along a ceiling instead of sticking to it.
+
+; bb_blocked is set when the axis was reverted, so callers can tell
+; "I hit something" from "I moved less than a whole pixel this frame" -
+; at under 1 px/frame a position delta cannot distinguish the two.
+
+bb_move_x:
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_blocked),A             ; [13T / 4a]
+                LD   L,(IX+O_XL)                ; [19T / 4a]
+                LD   H,(IX+O_XH)                ; [19T / 4a]
+                LD   E,(IX+O_VXL)               ; [19T / 4a]
+                LD   D,(IX+O_VXH)               ; [19T / 4a]
+                PUSH HL                         ; [11T / 3a]  old position
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   (IX+O_XL),L                ; [19T / 5a]
+                LD   (IX+O_XH),H                ; [19T / 5a]
+                CALL bb_centre_solid            ; [17T / 5a]
+                POP  HL                         ; [10T / 3a]
+                RET  Z                          ; [11T / 3a]  open, keep it
+                LD   A,1                        ; [7T / 2a]
+                LD   (bb_blocked),A             ; [13T / 4a]
+                LD   (IX+O_XL),L                ; [19T / 5a]  revert
+                LD   (IX+O_XH),H                ; [19T / 5a]
+                LD   (IX+O_VXL),0               ; [19T / 5a]
+                LD   (IX+O_VXH),0               ; [19T / 5a]
+                RET                             ; [10T / 3a]
+
+bb_move_y:
+                XOR  A                          ; [4T / 1a]
+                LD   (bb_blocked),A             ; [13T / 4a]
+                LD   L,(IX+O_YL)                ; [19T / 4a]
+                LD   H,(IX+O_YH)                ; [19T / 4a]
+                LD   E,(IX+O_VYL)               ; [19T / 4a]
+                LD   D,(IX+O_VYH)               ; [19T / 4a]
+                PUSH HL                         ; [11T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]
+                LD   (IX+O_YL),L                ; [19T / 5a]
+                LD   (IX+O_YH),H                ; [19T / 5a]
+                CALL bb_centre_solid            ; [17T / 5a]
+                POP  HL                         ; [10T / 3a]
+                RET  Z                          ; [11T / 3a]
+                LD   A,1                        ; [7T / 2a]
+                LD   (bb_blocked),A             ; [13T / 4a]
+                LD   (IX+O_YL),L                ; [19T / 5a]
+                LD   (IX+O_YH),H                ; [19T / 5a]
+                LD   (IX+O_VYL),0               ; [19T / 5a]
+                LD   (IX+O_VYH),0               ; [19T / 5a]
+                RET                             ; [10T / 3a]
+
+bb_blocked:     DEFB 0
+
+; NZ if the cell under the object's centre (+8,+8 from its top-left) is
+; solid. Trash: AF, BC, DE, HL.
+bb_centre_solid:
+                LD   A,(IX+O_YH)                ; [19T / 4a]
+                ADD  A,8                        ; [7T / 2a]
+                LD   B,A                        ; [4T / 1a]
+                LD   A,(IX+O_XH)                ; [19T / 4a]
+                ADD  A,8                        ; [7T / 2a]
+                LD   C,A                        ; [4T / 1a]
+                JP   bb_point_solid             ; [10T / 3a]
+
+; ---- bb_bubble_repel --------------------------------------------
+;
+; Bubbles push each other apart; that is what builds the rafts you climb
+; on. An O(n^2) sweep over 24 bubbles would be 276 pairs. This reads the
+; four orthogonally adjacent cells of the occupancy grid instead - four
+; lookups, constant cost, and it produces the same visible behaviour
+; because bubbles only ever crowd their immediate neighbours.
+
+bb_bubble_repel:
+                LD   L,(IX+O_CELLL)             ; [19T / 4a]
+                LD   H,(IX+O_CELLH)             ; [19T / 4a]
+                PUSH HL                         ; [11T / 3a]
+
+                DEC  HL                         ; [6T / 1a]   cell to the left
+                LD   A,(HL)                     ; [7T / 2a]
+                OR   A                          ; [4T / 1a]
+                LD   A,BUB_REPEL                ; [7T / 2a]   push right
+                CALL NZ,bb_repel_x              ; [17T / 5a]
+                POP  HL                         ; [10T / 3a]
+                PUSH HL                         ; [11T / 3a]
+
+                INC  HL                         ; [6T / 1a]   cell to the right
+                LD   A,(HL)                     ; [7T / 2a]
+                OR   A                          ; [4T / 1a]
+                LD   A,BUB_REPEL_NEG               ; [7T / 2a]   push left
+                CALL NZ,bb_repel_x              ; [17T / 5a]
+                POP  HL                         ; [10T / 3a]
+                PUSH HL                         ; [11T / 3a]
+
+                LD   DE,NEG_MAP_W                         ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]  cell above
+                LD   A,(HL)                     ; [7T / 2a]
+                OR   A                          ; [4T / 1a]
+                LD   A,BUB_REPEL                ; [7T / 2a]   push down
+                CALL NZ,bb_repel_y              ; [17T / 5a]
+                POP  HL                         ; [10T / 3a]
+
+                LD   DE,MAP_W                   ; [10T / 3a]
+                ADD  HL,DE                      ; [11T / 1a]  cell below
+                LD   A,(HL)                     ; [7T / 2a]
+                OR   A                          ; [4T / 1a]
+                LD   A,BUB_REPEL_NEG               ; [7T / 2a]   push up
+                RET  Z                          ; [11T / 3a]
+                ; fall through
+
+bb_repel_y:
+                LD   E,(IX+O_VYL)               ; [19T / 4a]
+                LD   D,(IX+O_VYH)               ; [19T / 4a]
+                CALL bb_addsigned               ; [17T / 5a]
+                LD   (IX+O_VYL),L               ; [19T / 5a]
+                LD   (IX+O_VYH),H               ; [19T / 5a]
+                RET                             ; [10T / 3a]
+
+bb_repel_x:
+                LD   E,(IX+O_VXL)               ; [19T / 4a]
+                LD   D,(IX+O_VXH)               ; [19T / 4a]
+                CALL bb_addsigned               ; [17T / 5a]
+                LD   (IX+O_VXL),L               ; [19T / 5a]
+                LD   (IX+O_VXH),H               ; [19T / 5a]
+                RET                             ; [10T / 3a]
