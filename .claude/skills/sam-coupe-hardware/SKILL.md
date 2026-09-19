@@ -502,6 +502,15 @@ For a basic program, this looks like:
 10 LOAD "code" CODE 32768
 20 CALL 32768
 
+On entry, paging is set up as follows:
+
+Section A - ROM 0
+Section B - the system page (page 0)
+Section C - Page 1
+Section D - Page 2 (ROM1 paged out)
+
+The stack will be in the range &4000-7FFF.
+
 The demo must then in response:
 
 1. Disable interrupts.
