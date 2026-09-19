@@ -6,25 +6,61 @@ description: The SAM Coupé's ports, memory paging and screen modes, as the demo
 # The SAM Coupé, for this repo
 
 Source: the SAM Coupé Technical Manual
-(github.com/stefandrissen/sam-coupe-technical-manual). Anything below that
-the manual does not state outright is marked *inferred*.
+(github.com/stefandrissen/sam-coupe-technical-manual). 
 
 ## The machine
 
-- Z80B at 6 MHz. **120,000 T-states between 50 Hz interrupts, 240,000 at
-  25 Hz** - `costs.md` budgets against these.
+- Zilog Z80B at 6 MHz. Ignoring memory contention it can execut **120,000 T-states between 50 Hz interrupts, 240,000 at 25 Hz** - `costs.md` budgets against these. Real budgets are lower.
 - 256K fitted as standard, 512K with the internal expansion, addressed as
-  **32 pages of 16K**. The lower 5 bits of a paging register pick the page,
+  **32 pages of 16K**. Nearly all users have 512K of memory.
+- The lower 5 bits of a paging register pick the page,
   so a 256K machine uses pages 0-15.
 - The Z80's 64K is four 16K **sections**: A `0000`, B `4000`, C `8000`,
   D `C000`. A+B is the **low block**, C+D the **high block**.
+- Up to 4MB of external memory, available as up to four 1MB modules. Each module has
+  a hardware ID from 0-3, which form the upper 2-bits of a 16KB page register. Ownership of
+  external memory modules is much rarer. 
+- External memory can be paged into sections C+D only.
+- Sound is played through a Philips SAA1099 6-channel sound chip
+- The disk controller is a WD1772 chip; there are 0-2 of these in each machine. It's reasonable
+  to assume that there is at least one per system. SAM disks normally have 80 tracks, 2 sides, and
+  10 x 512-byte sectors per track - although some schemes increase the capacity beyond this.
+- Other hardware includes a comms chip, and a realtime clock which can act as a high-frequency
+  timer, a mouse, joysticks (mapped to keyboard keys), a lightpen/light gun, and a parallel/printer
+  port.
 
-## Paging - LMPR (250) and HMPR (251)
+### The CPU
+
+The Z80B is an in-order execution CPU with a single combined IO/Memory bus but two IO/Memory
+address spaces. It has no cache; all memory operations occur directly to main memory.
+
+On the SAM Coupe the CPU has to share memory access with the main system control module
+(the ASIC), which needs to access memory to isochronously update the display and to
+refresh the DRAM.
+
+As the system is intended to simulate a ZX Spectrum in one of its graphics modes, it must 
+emulate that system's CPU speed as well. The ZX Spectrum had a 3.5MHz Z80A CPU, so in graphics
+mode 0 (ZX Spectrum compatible) it slows the system down by inserting extra wake cycles, roughly
+reducing the speed of the CPU by half. 
+
+## The Display
+
+
+## Internal Memory Paging - LMPR (250) and HMPR (251)
 
 **LMPR** pages the low block, **HMPR** the high block, and the rule that
 shapes every memory map is:
 
 > the second section of a block is *always* the page above the first.
+
+Note that **LMPR** and **HMPR** can both have sections overridden with 16KB regions of the 32KB
+ROM. 
+
+Section A can be selected to present either ROM0 or RAM.
+Section D can be selected to present ROM1, Internal Memory or External memory.
+Section C can be selected to present Internal Memory or External memory.
+The external/internal memory selector for sections C and D applies to both C and D.
+In order of priority, ROM > External Memory > Internal Memory.
 
 `LMPR = 4` puts page 4 at `0000` and page 5 at `4000`. You cannot choose the
 two halves independently, so there is no way to hold one half still while
@@ -43,6 +79,44 @@ set, ROM1 and WPRAM clear) and `page` to HMPR.
 Both registers are readable, so a routine can save and restore the caller's
 paging rather than assuming it.
 
+Page numbers for LMPR, HMPR wrap - that is, if LMPR is set to page 31 (with RAM0 enabled), section
+A will contain page 31, and section B will contain page 0.
+
+Similarly, HMPR set to 31 will leave page 31 in section C, and page 0 in section D.
+
+## External Memory Paging
+
+XMEML (128) and XMEMH (129) both control the external memory pages presented in
+sections C + D when MCNTRL (external memory enabled when high) is set.
+
+XMEML and XMEMH are both independently addressible, and both are used
+to index a 16KB memory page.
+
+- XMEML controls section C
+- XMEMH controls section D
+
+| | Page |
+|---|---|
+| bits 0-5 | Page number within a 1MB module |
+| bits 6-7 | 1MB module number (set with a jumper on the board) from 0-3 |
+
+### Testing for external memory presence
+
+While MasterDOS and MasterBASIC both maintain a page allocation table for external memory for
+application use, most games and demos avoid using this and take over all of memory for
+themselves.
+
+Most games/demos therefore need to identify what memory is present on the machine.
+
+Typically internal memory is assumed (512k), but external memory is probed by cycling through the
+port numbers and reading/writing values in a loop. If the CPU can successfully write and 
+read back a variety of values (not just 0x00 and 0xff), it can be assumed to be present. This
+is then repeated for each page until an idea of the external memory available on the device
+has been built up.
+
+For games and demos it's not unreasonable to expect a maximum of one single module, the only
+question then is what its jumper has been set to, which requires four probes to determine.
+
 ## The screen - VMPR (252)
 
 - bits 0-4: the page the **video hardware** displays. bits 5-6: MDE0/MDE1,
@@ -52,10 +126,12 @@ paging rather than assuming it.
   but the ROM's `JMODE` takes 0-3 for MODEs 1-4.
 - **MODE 4**: 256x192, 16 colours from 128, 4 bits a pixel, high nibble is
   the *left* pixel of the two, 128 bytes a line, **24,576 bytes** a screen.
-  MODE 3 is 512x192 in 4 colours over the same 24K.
+  MODE 3 is 512x192 in 4 colours over the same 24K (two bits in HMPR select
+  the palette section to use for pixels emitted in mode 3; they're effectively
+  substituted in as the upper two bits of the CLUT index for each pixel).
 - A 24K screen crosses a page boundary, so **the video page must be even**:
   the hardware wraps from the even page into the odd one above it, always
-  within the same pair.
+  within the same pair. (In hardware, bit 0 of VMPR is ignored in modes 3/4).
 - A screen therefore leaves **8K spare** at the end of its odd page. The ROM
   uses it as scratch (`JGRAB`, `JFILL`); a demo can put code or tables there.
 
@@ -63,6 +139,35 @@ paging rather than assuming it.
 space.** VMPR points the display hardware straight at RAM. Double buffering
 costs 24K of address space, not 48K: map the back buffer, draw, then flip
 with one `OUT` to VMPR and one to HMPR.
+
+## Interrupting at different points within a frame
+
+- There is a 50Hz frame interrupt.
+- Line interrupts can be configured by writing the line number they should trigger on to
+  the LINE INT registers (0xF9) and the interrupts occur in the border area at the end of the previous line. Line interrupts can be disabled by writing any value between 192-255 to the
+  line interrupt register. 
+- MIDI can also be used to provide a 16.5kHz interrupt, by continuously writing data to it.
+
+## Reading the current raster position
+
+It's reasonable to assume that no user has a lightpen - they were either never created
+for the system, or are so rare that they're never found.
+
+The light pen - when connected - latches the raster X and Y position in the display
+when the raster passes the tip of the light pen. When one is not connected, the
+HPEN and LPEN registers can be used to read the X and Y position of the current
+display being generated.
+
+The current line number (Y value) is available by reading HPEN (&01F8).
+The current horizontal position (X value) is available by reading LPEN (&00F8).
+
+The two LSB of LPEN must be masked off.
+
+| | LPEN (0x00F8) |
+|---|---|
+| bit 7-2 | bits 7-2 of the X coordinate of the raster (you must treat bits 1-0 as zero by masking) |
+| bit 1 | Set if MIDI is being transmitted (busy) |
+| bit 0 | Bit 0 of the CLUT index for the pixel being written to the display |
 
 ## Laying out a demo that pages
 
@@ -245,3 +350,15 @@ with the port in the low byte, so the paging registers can be emulated
 exactly: keep physical RAM as a `bytearray`, and on a write to 250 or 251
 copy the outgoing 32K back and the incoming 32K in. T-state counts stay
 honest because the `OUT` is really executed.
+
+## Joysticks
+
+Joysticks 0 and 1 are mapped to keys 6,7,8,9,0 and 1,2,3,4,5. The mappings are:
+
+| Direction | Joystick 0 | Joystick 1 |
+|-----------|------------|------------|
+| Left | 6 | 1 |
+| Right | 7 | 2 |
+| Down | 8 | 3 | 
+| Up | 9 | 4 |
+| Fire | 0 | 5 |
