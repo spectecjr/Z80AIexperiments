@@ -99,7 +99,13 @@ copy is set in XMEMH before enabling external memory.
 | A | ROM0 unless RAM0 is set | ROM0, or internal |
 | B | internal only | internal, always the page above A |
 | C | external (MCNTRL), internal | **external** |
-| D | external (MCNTRL),  ROM1 (LMPR bit 6), internal | **ROM 1** |
+| D | external (MCNTRL), ROM1 (LMPR bit 6), internal | **external** |
+
+**So ROM 1 is unreachable while MCNTRL is set** - external memory outranks
+it, and setting `LMPR` bit 6 does nothing until MCNTRL is cleared again.
+That is what the paragraph above is about: a routine that needs ROM 1 *and*
+external memory has to copy the ROM into an external page and point `XMEMH`
+at the copy.
 
 **SimCoupe handles it this way**:
 
