@@ -559,6 +559,14 @@ horizons that is **a third more than the T-state count says**, every time:
 | the tallest board, bare | 187,261 | 49,903 | 1.56 | **2.10** |
 | the shortest board, bare | 92,526 | 24,217 | 0.77 | **1.02** |
 
+**And the ASIC's ports are contended everywhere in the frame.** Anything
+at 248 or above - the palette, `LMPR`, `HMPR`, `VMPR`, the border, and the
+SAA1099's 255 and 511 - waits for an 8 T-state boundary wherever the raster
+is, border and display alike, up to 7 T-states a write. Ports below 248 are
+free. That is a few T-states on a paging switch and it is the whole
+argument about the copper again: 192 scanlines x 2 palette writes is 384
+port accesses that cannot be scheduled away.
+
 **Which puts a price on compiling the picture into code.** The whole of
 §3 above is worth a factor of three or four in T-states. In slots it is
 worth less than two, because the code stream goes through the same bus as
@@ -1175,11 +1183,11 @@ saved at all: three instructions and 28 T-states to ask whether this is the
 band, and the tick itself when it is.
 
 **Schedule it rather than polling for it.** The SAM's frame interrupt is
-asserted for about 100 µs - 600 T-states, half a scanline of board - so a
-poll that is further apart than that misses one, and a missed music tick is
-not a glitch, it is the arrangement running slow. 600 T-states means
-polling from *inside* the row loop, which is exactly where there is no
-register to poll into. But the frame is locked to two display frames and
+asserted for **128 T-states** - 21 µs, a third of a scanline, and not the
+100 µs it is usually quoted at - so a poll further apart than that misses
+one, and a missed music tick is not a glitch, it is the arrangement running
+slow. 128 T-states means polling from *inside* the row loop, several times
+a row, which is exactly where there is no register to poll into. But the frame is locked to two display frames and
 every band's cost is known, so the caller knows which band is 120,000
 T-states in and pokes the number. Nothing can be missed, and the phase is
 re-zeroed by the next frame's interrupt, so error cannot accumulate. The

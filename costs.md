@@ -188,6 +188,12 @@ side of the repository was missing: these demos measured the accesses and
 never had the budget, that one derived the budget and never had a routine
 this heavy to measure.
 
+**And the ASIC's ports are contended wherever the raster is** - everything
+at 248 and above, which is the palette, the three paging registers, the
+border and the SAA1099's two - up to 7 T-states a write, in the border as
+much as in the display. It is small change on a paging switch and it is not
+small change on a screen of palette writes.
+
 And it changes what compiling a picture into code is worth, because the
 code stream is traffic too: the largest tree is 14.5 T-states a byte drawn
 and **3.82 slots**, against a `PUSH` fill's 5.5 and **1.50**. Three or four

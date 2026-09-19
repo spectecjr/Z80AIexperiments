@@ -150,72 +150,92 @@ for those.
   frame**, bit 4 MIDI out - each *low* when requesting. Bits 5-7 are
   keyboard matrix lines 6-8. All five interrupts share IM 1, so the handler
   has to read this to know which fired.
-- **A request is held for about 100 µs and then clears itself**, rather
-  than latching until an interrupt is acknowledged - so a routine that
-  runs `DI` from end to end can *poll* this register instead of ever
-  taking an interrupt. 100 µs is 600 T-states, which is far too tight to
-  poll from inside a fill, and plenty from a wait loop: that is the whole
-  of the argument in `sound.md` for scheduling a mid-frame music tick and
-  polling only for the frame lock.
-- **BORDER (254, write)**: bits 0-2 and 5 are the CLUT address for the
-  border colour, bit 3 MIC, bit 4 BEEP, bit 6 THROM (MIDI through),
-  **bit 7 SOFF** - blanks the display in MODEs 3 and 4 and drops memory
-  contention to the border rate while it is off (see Contention: 29,952
-  slots a frame rather than 23,808, not unbounded), which is worth having
-  during a precompute.
-- **KEYBOARD (254, read)**: bits 0-4 are matrix lines 1-5 (and the mouse),
-  bit 7 reads back SOFF.
+- **A request is held for 128 T-states and then clears itself**, rather
+  than latching until an interrupt is acknowledged - SimCoupe's
+  `Base/Events.cpp` clears the status bit on `FrameInterrupt` and sets it
+  again on `FrameInterruptEnd`, scheduled `CPU_CYCLES_INT_ACTIVE` = 128 T
+  later, and the line interrupt behaves the same way. **128 T-states is
+  21 µs**, not the 100 µs it is often quoted at. So a routine that runs
+  `DI` from end to end can *poll* this register instead of ever taking an
+  interrupt - but only from a loop tight enough to look four or five times
+  in 128 T-states, which a wait loop is and the inside of a fill is not.
+  That is the whole of the argument in `sound.md` for scheduling a
+  mid-frame music tick and polling only for the frame lock.
 
-## Contention
+## Contention, and the table SimCoupe builds
 
-Contention is **consistent in internal memory whatever the paging set-up**,
-so a routine's T-state count does not change because it pages. The repo's
-figures are raw Z80 T-states with real contention on top - `costs.md` says
-so at the head of the table, and `costs.md` §1b measures the thing
-contention is actually charged on: **memory cycles a frame**, counted by
-`tests/sam.py`'s `traffic()`. chequer9 runs at 3.73 T-states a cycle against
-a `PUSH` fill's floor of 3.67, so these routines are as exposed as a Z80
-program can be.
+**The currency on a SAM is memory accesses, not T-states.** The ASIC shares
+one bus between the CPU and the display and lets the CPU through only on a
+boundary: every 8 T-states while the raster is in the active display, every
+4 T-states everywhere else. `costs.md` §1b and `game.md` work out what that
+does to a frame; this is the table itself, transcribed from SimCoupe, which
+is cycle accurate and whose author developed it against the machine
+(`Base/Memory.cpp`, `Base/SAMIO.h`, `Base/SAM.h`).
 
-**And the stretch factor is modelled now.** The ASIC grants the CPU one
-memory access per 8 T-states while the raster is in the display window
-(256 of a line's 384 T) and one per 4 T over the rest of the line and the
-120 blanked lines: 192 x (32 + 32) + 120 x 96 = **23,808 memory accesses a
-frame**, against 119,808 T-states. An instruction costs
-`max(natural_T, accesses x slot_width)`, so during the display almost
-everything costs `accesses x 8`. Anything built on `PUSH` wants an access
-every 3.67 T and is therefore slot-limited throughout, which means it takes
-`accesses / 23,808` frames however few T-states it looks like - **a third
-more than the T-state count says**, measured across chequer10 at three
-horizons. `docs/BUBBLE_BOBBLE_SAM.md` derives it, `bubble/tools/budget.py`
-computes it, `tests/sam.py`'s `traffic()` counts what a routine spends and
-`tests/mkbudget.py` works the example.
+**The geometry.** 8 T a cell, 48 cells a line, 8 of them side border each
+side:
 
-**And SimCoupe implements exactly that**, which is as close to a second
-opinion as this gets - it is cycle accurate and its author developed it
-against the machine. `Base/Memory.cpp` builds the table at boot:
+| | |
+|---|---|
+| a line | **384 T** - 64 border, **256 active display**, 64 border |
+| a frame | **119,808 T** over **312 lines**, 50.08 Hz |
+| screen lines | 68 to 259; 68 above, 52 below |
+| **slots a frame** | **23,808** = 192 x (32 + 32) + 120 x 96 |
 
-    mask = main_screen ? 7 : 3;
-    contention_mode234[t] = mask - ((t + 2) & mask);
+**The memory table.** For a frame cycle `t`, the wait before the access is
 
-The delay is however many T-states it takes to reach the next multiple of
-8 during the active display and of 4 everywhere else - one access per 8 T
-and per 4 T, the two rates above. Its geometry agrees too: 8 T a cell, 48
-cells a line, 8 of them side border each side, so 384 T a line, a 256 T
-display window, 312 lines, 119,808 T and **23,808 slots a frame** on the
-nose. `Base/CPU.cpp` calls it "perfect contended memory timings on each
-memory/port access".
+    line       = t / 384
+    line_cycle = (t + 4) % 384                  ; CONTENTION_OFFSET is 4
+    main       = 68 <= line < 260 and line_cycle >= 128
+    mask       = main ? 7 : 3                   ; MODE 2, 3 and 4
+    delay      = mask - ((t + 2) & mask)
 
-**One correction from the same table.** SOFF does not remove contention,
-it removes the *display window's* share of it: a screen-disabled frame
-uses `contention_4T`, the border rate, which is 29,952 slots rather than
-23,808. A precompute with the screen off is 26% better off, not unbounded.
-MODE 1 is worse than MODE 4 rather than better, because it contends in
-64-cycle bands outside the screen as well.
+so inside the display window an access can only happen at `t == 5 (mod 8)`
+and outside it at `t == 1 (mod 4)`. An instruction therefore costs
+**`max(natural_T, accesses x slot_width)`**, and during the display almost
+everything costs `accesses x 8`.
 
-The manual notes ROM runs slightly faster than
-RAM for the same code, and that `002B` holds a `DJNZ $` for uncontended
-timing loops.
+| and the three tables | mask |
+|---|---|
+| MODE 2/3/4, in the display | 7 |
+| anywhere else, and the whole frame with the screen off | 3 |
+| **MODE 1** | 7 in the display *and* in 64-cycle bands outside it (`!(line_cycle & 0x40)`) - it is the worst mode, not the cheapest |
+
+**Only internal RAM is contended.** `afSectionContended[section] = (page <
+NUM_INTERNAL_PAGES)`, so ROM and external (megabyte) memory take no waits at
+all - which is why the manual notes ROM runs slightly faster for the same
+code.
+
+**SOFF does not remove contention**, it removes the display window's share:
+a blanked frame uses the 4 T table throughout, **29,952 slots rather than
+23,808**, so a precompute with the screen off is 26% better off and not
+unbounded.
+
+**And the ASIC ports are contended everywhere in the frame**, wherever the
+raster is:
+
+    if ((port & 0xFF) < 0xF8) return 0;         ; BASE_ASIC_PORT
+    delay = 7 - ((t + 2) & 7);
+
+Ports 248 upward are all of them: **CLUT (248), STATUS and LINE INT (249),
+LMPR (250), HMPR (251), VMPR (252), BORDER and KEYBOARD (254) - and the
+SAA1099's data port at 255 and register select at 511.** Every palette
+write, every paging switch and every sound register pays up to 7 T-states
+waiting for an 8 T boundary, in the border as much as in the display. Ports
+below 248 are free.
+
+**What it comes to**, for the write primitive this repository is built on:
+a `PUSH` is 3 accesses for 2 bytes, so the ceiling on screen writes is
+**15,872 bytes a frame against a 24,576 byte screen**. A full-screen
+`PUSH` fill is 1.55 frames and there is no arrangement of code that makes
+it one.
+
+Contention does **not** depend on the paging set-up - a routine's access
+count does not change because it pages - so the repo's figures are raw Z80
+T-states with this on top. `tests/sam.py`'s `traffic()` counts a routine's
+accesses and `tests/mkbudget.py` divides them by 23,808; measured across
+chequer10 that is **a third more than the T-state count says**. `002B`
+holds a `DJNZ $` for uncontended timing loops.
 
 ## Testing paged code in this repo
 

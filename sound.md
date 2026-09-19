@@ -9,6 +9,7 @@ and why it is scheduled rather than interrupted.
 | | T-states | |
 |---|---|---|
 | the check, at a band that is not the one | **28** | 532 … 2,240 a frame, 19 bands to 80 |
+| *and on hardware, a register pair* | *+0 … 14* | *the SAA's ports are ASIC ports: see below* |
 | a tick, nothing to say that frame | **185** | most frames of an arrangement change nothing |
 | a tick, the median frame | 422 | two register pairs |
 | a tick, the worst frame in three minutes | 2,662 | 31 pairs, 80 T-states each |
@@ -43,10 +44,13 @@ The obvious answer is to check STATUS (port 249, bit 3 low when the frame
 interrupt is asserted) here and there through the drawing. It does not
 work, for two reasons and they are both about the row loop:
 
-**The window is about 100 µs, which is 600 T-states.** A poll that is
-further apart than that misses a tick, and a missed tick is not a glitch
-in the sound, it is the arrangement running slow. 600 T-states is half a
-scanline of board: the check would have to go *inside* the row loop.
+**The window is 128 T-states.** SimCoupe clears the status bit and
+schedules the clear-back `CPU_CYCLES_INT_ACTIVE` = 128 T later, which at 6
+MHz is 21 µs rather than the 100 µs it is usually quoted at. A poll further
+apart than that misses a tick, and a missed tick is not a glitch in the
+sound, it is the arrangement running slow. 128 T-states is a third of a
+scanline of board: the check would have to go *inside* the row loop,
+several times a row.
 
 **Inside a row loop there are no spare registers at all.** Both sets are
 live — the row pointer, the mask pointer and the count in the alternate
@@ -141,12 +145,15 @@ place: the frame has to wait for the display anyway to run at a steady 25
 Hz, and that wait is the one place in the whole demo where `SP` is a
 normal stack and nothing is half-drawn.
 
-**Poll it there.** Bit 3 goes low for about 100 µs and then clears itself —
+**Poll it there.** Bit 3 goes low for 128 T-states and then clears itself —
 it does not latch until an interrupt is acknowledged — so a tight loop is
 all it takes. Reading STATUS is about 30 T-states a turn, so the window is
-twenty chances rather than one, and no interrupt is ever taken: `IM 1`
-never has to be set up, the ROM's handler never runs, and the "interrupt
-pushes `PC` into the picture" problem never arises anywhere in the demo.
+four chances rather than one, and no interrupt is ever taken: `IM 1` never
+has to be set up, the ROM's handler never runs, and the "interrupt pushes
+`PC` into the picture" problem never arises anywhere in the demo. **Keep
+that loop tight**: it is four chances, not twenty, and `IN A,(249)` is an
+ASIC port so it pays up to 7 T-states of its own waiting for an 8 T
+boundary.
 
 ```
 snd_wait:
@@ -198,6 +205,25 @@ arrangement's own worst frame, twice over, and it still fits. The mean is
 `soundchip/`'s `ensemble` is 3,360 T-states *every* frame and would cost
 6,720 a frame here — three times the mean of a log that rewrites only what
 changed. See `soundchip/chiparr.md` for how a recording becomes one.
+
+## What it costs on the real machine
+
+Every figure above is uncontended. Two things change on hardware, and they
+pull the same way:
+
+**The SAA's ports are ASIC ports.** The data port is 255 and the register
+select is 511, both with 255 in the low byte, so both are above SimCoupe's
+`BASE_ASIC_PORT` of 248 — and an ASIC port access waits for an 8 T-state
+boundary *wherever the raster is*, border and display alike. A register
+pair is two `OUT`s, so it pays **0 to 14 T-states** on top of `saa.z80s`'s
+measured 74, and the worst frame of an arrangement pays it 31 times: 2,662
+T-states becomes up to 3,096. Still under 1.3% of a 25 Hz frame.
+
+**And the tick's own memory accesses cost slots like everything else.** The
+mid-frame tick lands inside the board, which is the contended part of the
+frame, so its 185 to 2,662 T-states are close to `accesses x 8`. It does
+not change the conclusion — the tick is under 1% of the frame either way —
+but it is the reason not to spend the saving on a fatter player.
 
 ## Sound effects
 
