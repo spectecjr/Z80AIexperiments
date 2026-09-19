@@ -491,3 +491,30 @@ Joysticks 0 and 1 are mapped to keys 6,7,8,9,0 and 1,2,3,4,5. The mappings are:
 | Down | 8 | 3 | 
 | Up | 9 | 4 |
 | Fire | 0 | 5 |
+
+## Demo configuration
+
+For the most part, to run a demo, the binary should be loaded into page 1 upwards, at origin
+32768, and called at that address (&8000) by BASIC. 
+
+For a basic program, this looks like:
+
+10 LOAD "code" CODE 32768
+20 CALL 32768
+
+The demo must then in response:
+
+1. Disable interrupts.
+2. Adjust the stack.
+3. Set up paging, trampolining down to section A-B if necessary (especially if interrupts must
+   be serviced regularly). (Note: It's okay to stay in 0x8000-0xffff if necessary).
+4. If interrupts are needed, re-enable them.
+5. Run the demo code.
+
+It's okay to assume that a user must press the RESET button to reboot the machine to get out of
+a demo. It's also okay to assume that they don't have MIDI or Lightpen hardware plugged in, 
+they have at least a single disk drive, and that they will never press the NMI button while
+the demo is running (or that corruption/crashing is acceptable in that case).
+
+If needed the system page can be used as memory after the demo takes control, but this should be
+avoided unless memory is scarce as it's more complexity.
