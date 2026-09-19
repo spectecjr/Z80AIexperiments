@@ -420,6 +420,12 @@ T-states apart. Measured by applying these rules to a real run
 | `LD A,(HL)`, `LD (HL),A` | 7 | 8.0 | 12.0 |
 | **`PUSH DE`** | **11** | **16.0** | **20.5** |
 
+**And this has been measured rather than only modelled.** `contend.z80s`
+in this repository runs the test on the machine - wait for the frame
+interrupt, run 4,096 `PUSH DE`, read the raster off HPEN - and under
+SimCoupe it ends on display line **132**, which is what the table above
+predicts. One access a slot would have been 101; no contention at all, 49.
+
 So the `PUSH` floor of 5.5 T-states a byte is nominal; the machine's is
 **8.0 in blanking and 10.2 across a display line**, a fill manages **12,930
 bytes a frame** rather than the 15,872 the slot count suggests, and a full

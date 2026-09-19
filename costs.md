@@ -190,8 +190,15 @@ T-states a line. The three models disagree loudly about where a run of
 | **every access aligned, which is what this budgets against** | **132** |
 
 `python3 tests/mkcontend.py` builds `build/contend.sbt`, which SimCoupe
-boots straight into, and prints what each model predicts. Whatever a
-machine writes into `0xFF00` decides it.
+boots straight into, and prints what each model predicts.
+
+**It has been run, and the answer is 132.** Also 26 for `NOP` and 90 for
+`LD (HL),A` - the model's three predictions, to the line, from a cycle
+accurate emulator booting the file through SAMDOS with a real raster and
+real interrupts. So the figures below are not a transcription that might
+have gone wrong somewhere: they are what the machine does. The measured
+values are the oracle in `tests/mkcontend.py` now, and a change to the
+contention model that moves any of them fails it.
 
 The two slot rates are not this repository's guess: **SimCoupe implements
 exactly them**, `mask = main_screen ? 7 : 3` over a 256 T display window in

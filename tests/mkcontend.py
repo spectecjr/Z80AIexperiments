@@ -38,6 +38,15 @@ T_LINE, TOP, FRAME_T = 384, 68, 119808
 RESULT, ENTRY = 0xFF00, 0x8000
 TESTS = ("PUSH DE", "NOP", "LD (HL),A")
 
+# WHAT THE MACHINE SAID. Run under SimCoupe, which is cycle accurate:
+# booted from this very .sbt, through SAMDOS, with a real raster and real
+# interrupts, and the three answers read out of B, C and D.
+#
+# They are the model's, exactly. That is the oracle now: if a change to
+# the contention model in tests/sam.py moves any of these, the model has
+# drifted away from the machine and this fails.
+MEASURED = {"PUSH DE": 132, "NOP": 26, "LD (HL),A": 90}
+
 
 def build():
     out = os.path.join(ROOT, "build")
@@ -134,16 +143,22 @@ def main():
     held, t = run(image, contend=True)
     print()
     print("  the display line each test ends on")
-    print("  %-14s %14s %14s" % ("", "no contention", "this repo's model"))
+    print("  %-14s %13s %10s %10s" % ("", "no contention", "the model",
+                                      "SimCoupe"))
+    bad = []
     for i, name in enumerate(TESTS):
-        print("  %-14s %14d %14d" % (name, free[i], held[i]))
+        want = MEASURED[name]
+        flag = "" if held[i] == want else "   <-- DRIFTED"
+        if held[i] != want:
+            bad.append(name)
+        print("  %-14s %13d %10d %10d%s" % (name, free[i], held[i], want,
+                                            flag))
     print()
-    print("  %-14s and a slot division would put PUSH DE at 101, so the"
+    print("  %-14s a slot division would put PUSH DE at 101 and no"
           % "")
-    print("  %-14s three models are 49, 101 and %d lines apart."
-          % ("", held[0]))
-    print("  %-14s Whatever a machine prints into 0x%04X settles it."
-          % ("", RESULT))
+    print("  %-14s contention at all at 49. The machine says %d."
+          % ("", MEASURED["PUSH DE"]))
+    print()
     print()
     print("  to run it:  simcoupe build/contend.sbt     (or insert the disk)")
     print("  %-14s it boots itself, runs for about three frames and halts;"
@@ -151,9 +166,10 @@ def main():
     print("  %-14s then read three bytes at 0x%04X in the debugger."
           % ("", RESULT))
 
-    ok = held[0] != free[0]
-    print("\n%s" % ("ALL TESTS PASSED" if ok else "FAILURES"))
-    return 0 if ok else 1
+    print("\n%s" % ("ALL TESTS PASSED" if not bad
+                    else "FAILURES: the model disagrees with the machine "
+                         "about " + ", ".join(bad)))
+    return 0 if not bad else 1
 
 
 if __name__ == "__main__":

@@ -87,10 +87,10 @@ chunk into page 0 after taking control. That is a small, concrete piece of
 work, and it is the only thing between these *demos* and running on a
 machine.
 
-The **timing** question no longer waits on it: `contend.z80s` is a
+The **timing** question is settled and did not need it: `contend.z80s` is a
 standalone test that measures the contention with nothing but the machine,
-and `tests/mkcontend.py` builds it as a `.sbt` that SimCoupe boots
-directly. See `costs.md` §1b.
+`tests/mkcontend.py` builds it as a `.sbt` that SimCoupe boots directly,
+and it has been run - the model is right to the line. See `costs.md` §1b.
 
 ## If you add something
 

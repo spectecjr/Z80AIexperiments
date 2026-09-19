@@ -9,7 +9,8 @@ The arithmetic is in `tests/mkbudget.py` and `reports/budget.txt`;
 everything below is measured except where it says otherwise.
 
 **In the currency that binds**, which is memory slots rather than T-states
-— see the last section, which is no longer a list of caveats:
+— and the model behind it has since been measured on the machine and is
+right to the line:
 
 | | slots | frames by slots | frames contended | |
 |---|---|---|---|---|
@@ -252,12 +253,12 @@ That makes the recommendation:
 - **Draw them as opaque boxes off a width chain**, per `mipsprite.md`, not
   as masked silhouettes at eight fixed sizes: 8.8 T-states a byte rather
   than 13 to 18, and the heights come free off a row program.
-- The slot rates are **confirmed against SimCoupe**, which is cycle
-  accurate and builds precisely this table: one access per 8 T-states over
-  a 256 T display window, one per 4 T elsewhere, 23,808 a frame. What is
-  left is to run one of these routines under it and compare the number it
-  reports against the one computed here — the debugger shows elapsed
-  cycles between two breakpoints, so it is an afternoon rather than a
-  project.
+- The slot rates are **confirmed against SimCoupe**, and so is everything
+  built on top of them. `contend.z80s` measures the contention with
+  nothing but the machine - wait for the frame interrupt, run a known
+  number of instructions, read the raster off the light pen register - and
+  run under SimCoupe it lands on **exactly** the three lines this model
+  predicts: 132, 26 and 90. A slot division would have said 101 for the
+  first and no contention at all would have said 49.
 
     python3 tests/mkbudget.py                 # every number above
