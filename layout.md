@@ -92,6 +92,13 @@ standalone test that measures the contention with nothing but the machine,
 `tests/mkcontend.py` builds it as a `.sbt` that SimCoupe boots directly,
 and it has been run - the model is right to the line. See `costs.md` §1b.
 
+## Moving to another machine
+
+`setup.md` is the list: what has to be installed, what is per project, and
+one command that says whether it worked. Everything is in git and nothing
+is generated at clone time that is not also checked in, so it is a clone
+plus a handful of tools.
+
 ## If you add something
 
 - A new demo: sources and a `.md` note at the root, its model and
