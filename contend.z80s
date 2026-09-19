@@ -34,10 +34,12 @@
 ; on the grid either way, so they separate "contended" from "not" but
 ; not the last two from each other.
 ;
-; The three answers are left as bytes at RESULT (0xFF00), which is where
-; to look in a memory view. Nothing is drawn: the screen would have to be
-; paged over the code that is running, and this is a test that wants to
-; be obviously correct rather than pretty.
+; The three answers are left in **B, C and D** when it halts - PUSH DE,
+; NOP and LD (HL),A - and also as bytes at RESULT (0xFF00). Registers
+; because the debugger's panel always shows them; nothing is drawn on
+; screen, because that would mean paging the display over the code that
+; is running, and this is a test that wants to be obviously correct
+; rather than pretty.
 ;
 ; Written by Claude (Opus) for the Z80AIexperiments repo.
 ;------------------------------------------------------------------
@@ -91,8 +93,14 @@ start:
         CALL raster
         LD   (RESULT + 2),A
 
+        LD   A,(RESULT + 0)     ; and into registers as well, because the
+        LD   B,A                ; debugger's panel always shows those and
+        LD   A,(RESULT + 1)     ; its memory views take more finding:
+        LD   C,A                ;
+        LD   A,(RESULT + 2)     ;   B = PUSH DE   C = NOP   D = LD (HL),A
+        LD   D,A
         DI
-        HALT                    ; SimCoupe's --exitonhalt stops here
+        HALT                    ; break in here and read them off
 
 ;------------------------------------------------------------------
 ; sync - return just after the frame interrupt is asserted
