@@ -255,6 +255,49 @@ is scheduled rather than polled for - see `sound.md`, and
 | **sound, mean** | **2,242** | 0.9% of a 25 Hz frame |
 | **sound, worst** | **7,564** | 3.2%, taking chequer10's worst frame to 95.8% |
 
+## 1c. A compiled sprite that zooms
+
+`mipsprite`, measured on a chain of seven widths from 64x80 down to 8x10.
+Opaque box, moving, clearing the L it leaves, a 22 T-state interrupt window
+every fourth row:
+
+| | T-states | % of a 50 Hz frame | how many fit |
+|---|---|---|---|
+| **64x80** | 28,475 | **23.7%** | 4.2 |
+| 32x40 | 9,753 | 8.1% | 12.3 |
+| 16x20 | 3,789 | 3.2% | 31.7 |
+| **8x10** | 1,749 | **1.5%** | 68.6 |
+| one big, two mid, four small, eight tiny | 77,129 | 64.3% | fifteen sprites |
+
+| and the parts of it | T-states | |
+|---|---|---|
+| 64x80 silhouette, one block a height | 15,486 | 13.4 a covered byte |
+| 64x80 silhouette, a block a row and a row program | 22,599 | +89 a row for a free height |
+| 64x80 opaque box | 22,489 | **8.8 a byte** of arbitrary pixels |
+| the box erased, 2,560 bytes | 18,045 | `5.5·wb·h + 49·h + 50` at every size |
+| the register cache, at the top level | −2,724 | 15%; 7% by 24x30 |
+| the chain compiled, one pose, one x phase | 7,550 bytes | against 7,680 free above the buffers |
+
+See `mipsprite.md`.
+
+And the other way round — six variants on a z-bucket, nothing scaled per
+sprite, so every variant is one straight-line block with no row program
+and no dispatcher (`mipsprite.md` §6):
+
+| z | size | a frame, with the L it leaves | % of a 50 Hz frame | how many fit |
+|---|---|---|---|---|
+| 0 | 64x80 | 28,475 | 23.7% | 4.2 |
+| 2 | 28x35 | 7,397 | 6.2% | 16.2 |
+| 5 | 8x10 | 1,428 | 1.2% | 84.0 |
+| | fifteen, spread over the six | 87,192 | 72.7% | |
+
+| | |
+|---|---|
+| six variants compiled, against the seven-level chain | **7,867 bytes** against 9,001 |
+| a bucket crossing, shrinking: the ring, in both buffers | 1.5 to 1.7x a steady frame |
+| the same crossing as a padded form instead | −1,000 T-states for 222 bytes at the bottom, −1,871 for 3,373 at the top |
+| smooth height on bucket 0 alone (dispatch, opaque) | +6,698 T-states and +414 bytes |
+
 ## 2. The rasteriser (`renderlit`), before and after
 
 Measured by timing `rndl_six` on one quad of a known size.

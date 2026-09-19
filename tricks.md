@@ -28,6 +28,7 @@ Read `costs.md` for what each demo came out at. This file is the other half:
 | a textured column, two pixels wide | 22.8 | `wolf3d` |
 | an `LD (HL),0` erase loop | ~30 | what `render` replaced |
 | a textured column, stepping by a fraction | 72.6 | what `wolf3d`'s scalers replaced |
+| a compiled sprite, arbitrary pixels | **8.8** | `mipsprite` |
 | **an arbitrary computed byte** | **109.7** | `roto` |
 
 † an instruction timing, not a measured loop; everything else was timed.
