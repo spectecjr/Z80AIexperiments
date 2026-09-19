@@ -86,6 +86,32 @@ Section C can be selected to present Internal Memory or External memory.
 The external/internal memory selector for sections C and D applies to both C and D.
 In order of priority, ROM > External Memory > Internal Memory.
 
+**Apply that per section**, taking the highest-priority source that is
+*enabled for that section*. So with `LMPR` bit 6 (ROM1) set and `HMPR` bit 7
+(MCNTRL) set:
+
+| section | what is enabled | what wins |
+|---|---|---|
+| A | ROM0 unless RAM0 is set | ROM0, or internal |
+| B | internal only | internal, always the page above A |
+| C | external (MCNTRL), internal | **external** |
+| D | ROM1 (LMPR bit 6), external (MCNTRL), internal | **ROM 1** |
+
+**⚠ SimCoupe resolves section D the other way round**, and one of the two is
+wrong. `Base/SAMIO.cpp`'s `UpdatePaging()` tests external *before* ROM 1:
+
+    // External RAM, ROM1, or internal RAM in section D
+    if (m_state.hmpr & HMPR_MCNTRL_MASK)  PageIn(Section::D, EXTMEM + hepr);
+    else if (m_state.lmpr & LMPR_ROM1)    PageIn(Section::D, ROM1);
+    else                                  PageIn(Section::D, (hmpr + 1) & 31);
+
+so it gives **external memory** for D where the rule above gives ROM 1.
+Everything else about the two agrees: section A is ROM0 unless RAM0, C and D
+take `LEPR` (128) and `HEPR` (129) independently when MCNTRL is set, and the
+pair rule holds. **This corner only bites a program that wants ROM 1 and
+external memory at once**, which is unusual - but until it is settled, do not
+rely on either answer.
+
 `LMPR = 4` puts page 4 at `0000` and page 5 at `4000`. You cannot choose the
 two halves independently, so there is no way to hold one half still while
 paging the other.
