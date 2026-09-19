@@ -163,6 +163,32 @@ Against the floor for each way of moving bytes:
 | `POP BC` / `PUSH BC` | 21 | 5 | 4.20 |
 | `LD (HL),A` / `INC HL` | 13 | 3 | 4.33 |
 
+**And here is what that is charged at.** The ASIC grants the CPU one
+memory access per 8 T-states while the raster is in the display window and
+one per 4 T everywhere else - **23,808 slots a frame**, derived in
+`bubble/tools/budget.py`. Every access costs a slot, including every opcode
+fetch, so a slot-limited routine takes `accesses / 23,808` frames however
+few T-states it looks like:
+
+| a `chequer10` frame | T-states | accesses | by T | by slots | |
+|---|---|---|---|---|---|
+| tallest board, three trees | 218,520 | 57,994 | 1.82 | **2.44** | +34% |
+| tallest board, no trees | 187,261 | 49,903 | 1.56 | **2.10** | +34% |
+| shortest board, no trees | 92,526 | 24,217 | 0.77 | **1.02** | +32% |
+
+**So every Hz figure in the table above is the uncontended one, and the
+real machine is about a third slower.** chequer10 is a 16.7 Hz demo, not a
+25 Hz one. The model behind that - `cost_T = max(natural_T, accesses x
+slot_width)` - is `docs/BUBBLE_BOBBLE_SAM.md`'s, and it is the half this
+side of the repository was missing: these demos measured the accesses and
+never had the budget, that one derived the budget and never had a routine
+this heavy to measure.
+
+And it changes what compiling a picture into code is worth, because the
+code stream is traffic too: the largest tree is 14.5 T-states a byte drawn
+and **3.82 slots**, against a `PUSH` fill's 5.5 and **1.50**. Three or four
+times better in T-states, under two in slots.
+
 **3.73 against a floor of 3.67 means the bus is saturated.** There is no
 register-heavy slack in this frame for contention to come out of - which is
 the answer to how exposed these routines are: maximally. A demo built out of

@@ -14,6 +14,18 @@ THE CURRENCY IS BYTES WRITTEN. A MODE 4 screen is 24,576 bytes and a 25
 Hz frame is 240,000 T-states, so at the board's measured 9.5 T-states a
 byte a frame can write the screen about once. Everything below is an
 argument about which bytes.
+
+AND THE REAL CURRENCY IS MEMORY SLOTS. The ASIC shares one bus between
+the CPU and the display and grants the CPU one access per 8 T-states
+while the raster is in the display window, one per 4 T everywhere else -
+23,808 slots a frame, which bubble/tools/budget.py derives and
+docs/BUBBLE_BOBBLE_SAM.md states. Every access costs a slot: an opcode
+fetch, an operand byte, a data read, a data write, each half of a PUSH.
+So a routine that is slot-limited - and everything here is, at 3.7
+T-states an access against a frame that averages 5.0 - takes
+accesses / 23,808 frames however few T-states it looks like. That is
+worth about a THIRD more than the T-state count says, and it is the
+number game.md used to call a guess.
 """
 import os
 import sys
@@ -29,10 +41,17 @@ for k, v in dict(HARRIER_MINP="1", DESERT_PAL="board4", CHQ_SWAP="0xBB",
 import chequer10 as C                                   # noqa: E402
 import mksprite as S                                    # noqa: E402
 from sam import Sam                                     # noqa: E402
-from test_chequer10 import CHUNKS                       # noqa: E402
+import tree as T                                        # noqa: E402
+from test_chequer10 import CHUNKS, TALL, steady         # noqa: E402
 
 FRAME = 120000                  # T-states between 50 Hz interrupts
+SLOTS = 23808                   # and memory accesses in one, which is the
+                                # budget that actually binds: see
+                                # bubble/tools/budget.py for the derivation
 SCREEN = 128 * 192              # bytes of a MODE 4 screen
+T_PER_SLOT = 3.78               # what this code runs at, measured: the
+PER_BYTE = 3.82                 # frame averages 5.03, and a sprite costs
+                                # this many slots a byte it draws
 
 
 def solid(wb, h):
@@ -61,6 +80,14 @@ def masked(wb, h, fill=0.70):
         rows.append((by, kind))
     _, t = S.walk("y", rows, wb, h, "R")
     return t, sum(1 for _, k in rows for v in k if v)
+
+
+def slots3(*trees):
+    """The three tree slots as the Z80 holds them."""
+    trees = list(trees) + [(255, 0, 0)] * (3 - len(trees))
+    return [("cq10_tk", [t[0] for t in trees]),
+            ("cq10_tx", [t[1] for t in trees]),
+            ("cq10_ty", [t[2] for t in trees])]
 
 
 def board(b, s, rows):
@@ -125,20 +152,47 @@ def main():
           % "and")
 
     print()
-    print("  A game's frame, and what is left for sprites")
-    for rows, band, name in ((96, 49866, "the board at 96 rows, chequer10's band"),
-                             (70, 18000, "the board at 70 rows, a 12 row band")):
-        fixed = boards[rows] + band + 8056 + 2242 + 7500 + 5000
-        print("  %s" % name)
-        for mult, rate in ((2, "25 Hz"), (3, "16.7 Hz"), (4, "12.5 Hz")):
-            left = mult * FRAME - fixed
-            print("    %-20s %7d T fixed, %7d left = %5d bytes of sprite"
-                  % (rate, fixed, left, max(0, int(left / 13))))
-    print("  %-22s 13 T-states a byte drawn: a masked sprite over the board"
-          % "at")
+    print("  The same frames in the currency that binds: memory slots")
+    print("  %-30s %8s %8s %6s %7s" % ("", "T-states", "accesses",
+                                       "by T", "by slots"))
+    for name, fields in (("the tallest board, three trees",
+                          TALL + slots3((1, 100, 118), (4, 20, 140),
+                                        (7, 56, 191))),
+                         ("the tallest board, no trees", TALL + slots3()),
+                         ("the shortest board, no trees",
+                          [("cq10_hz", 77), ("cq10_px", 40),
+                           ("cq10_py", 10)] + slots3())):
+        steady(b, s, fields)
+        t, r, w, _ = b.traffic(s["cq10_frame"])
+        print("  %-30s %8d %8d %6.2f %7.2f   %+.0f%%"
+              % (name, t, r + w, t / FRAME, (r + w) / SLOTS,
+                 100 * ((r + w) / SLOTS) / (t / FRAME) - 100))
+    print("  %-30s a frame is %d T-states or %d slots, and this code is"
+          % ("", FRAME, SLOTS))
+    print("  %-30s slot-limited, so the right hand column is the true one"
+          % "")
 
     print()
-    print("  and what a mix of sprites needs")
+    print("  What a sprite costs in slots, which is not what it costs in T")
+    print("  %-14s %8s %9s %10s %11s"
+          % ("", "T", "accesses", "T a byte", "slots a byte"))
+    b.poke(s["cq10_tx"], bytes([0, 0, 0]))
+    b.poke(s["cq10_ty"], bytes([0, 0, 191]))
+    for k, h in enumerate(T.SIZES):
+        b.poke(s["cq10_tk"], bytes([255, 255, k]))
+        t, r, w, _ = b.traffic(s["cq10_tree"])
+        px, wd, _ = T.tree(h)
+        n = sum(1 for _, kind in T.rows(px) for v in kind if v)
+        print("  %-14s %8d %9d %10.1f %11.2f"
+              % ("%dx%d" % (wd, h), t, r + w, t / n, (r + w) / n))
+    print("  %-14s a PUSH fill is 1.50 slots a byte and cannot draw a"
+          % "against which")
+    print("  %-14s picture; compiled code pays for its own fetches too" % "")
+
+    print()
+    print("  and what a mix of sprites needs, in slots")
+    print("  %-28s %6s %8s %9s" % ("", "bytes", "T-states", "slots"))
+    mixes = []
     for name, mix in (("the ask: 4 large, 8 medium", ((16, 135, 4), (20, 81, 8))),
                       ("2 large, 4 medium, 6 small",
                        ((16, 135, 2), (20, 81, 4), (10, 54, 6))),
@@ -146,8 +200,24 @@ def main():
                        ((16, 135, 1), (20, 81, 5), (10, 54, 6)))):
         sbytes = sum(masked(wb, h)[1] * n for wb, h, n in mix)
         st = sum(masked(wb, h)[0] * n for wb, h, n in mix)
-        print("    %-26s %2d sprites, %5d bytes, %6d T-states"
-              % (name, sum(n for _, _, n in mix), sbytes, st))
+        sslots = int(sbytes * PER_BYTE)
+        mixes.append((name, sbytes, st, sslots))
+        print("  %-28s %6d %8d %9d" % (name, sbytes, st, sslots))
+    print("  %-28s at %.2f slots a byte, the measured figure for the"
+          % ("", PER_BYTE))
+    print("  %-28s largest compiled sprite here" % "")
+
+    print()
+    print("  The verdict, in slots: a display frame is %d of them" % SLOTS)
+    fixed = int((boards[70] + 18000 + 8056 + 2242 + 7500 + 5000) / T_PER_SLOT)
+    print("  %-28s %6d slots for the board at 70 rows, a 12 row band,"
+          % ("the picture, without sprites", fixed))
+    print("  %-28s the pilot, sound and the game's own arithmetic" % "")
+    for name, sbytes, st, sslots in mixes:
+        need = (fixed + sslots) / SLOTS
+        rate = 50 / max(1, -(-need // 1))
+        print("  %-28s %6d slots = %.2f frames -> %.1f Hz"
+              % (name, fixed + sslots, need, rate))
 
     print("\nALL TESTS PASSED")          # it is a study, not a test, but
     return 0                             # mkreports.py reads this

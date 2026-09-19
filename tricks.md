@@ -538,6 +538,47 @@ the bookkeeping around it to be the larger half.**
 
 ---
 
+## The currency is memory slots, and code costs them too
+
+Every number in this file is T-states, and the machine does not work that
+way. **The ASIC shares one bus between the CPU and the display: one access
+per 8 T-states while the raster is in the display window, one per 4 T
+everywhere else, 23,808 slots a frame** against 119,808 T-states. An
+opcode fetch is an access. An operand byte is an access. Each half of a
+`PUSH` is an access. An instruction costs
+`max(natural_T, accesses x slot_width)`.
+
+So anything built on `PUSH` - which wants an access every 3.67 T-states -
+is slot-limited from end to end, and takes `accesses / 23,808` frames
+however few T-states it looks like. Measured across chequer10 at three
+horizons that is **a third more than the T-state count says**, every time:
+
+| a frame | T-states | accesses | by T | by slots |
+|---|---|---|---|---|
+| the tallest board, three trees | 218,520 | 57,994 | 1.82 | **2.44** |
+| the tallest board, bare | 187,261 | 49,903 | 1.56 | **2.10** |
+| the shortest board, bare | 92,526 | 24,217 | 0.77 | **1.02** |
+
+**Which puts a price on compiling the picture into code.** The whole of
+§3 above is worth a factor of three or four in T-states. In slots it is
+worth less than two, because the code stream goes through the same bus as
+the pixels:
+
+| | T-states a byte drawn | slots a byte drawn |
+|---|---|---|
+| the tree at 32x135, compiled | 14.5 | **3.82** |
+| at 20x81 | 17.8 | 4.61 |
+| at 8x27 | 27.8 | 6.84 |
+| a `PUSH` fill, which cannot draw a picture | 5.5 | **1.50** |
+
+It still wins - a data-driven blitter reads a source byte, a mask byte and
+the destination before it writes, which is four slots a byte before any
+loop overhead - but the margin is half what the T-state tables promise,
+and it narrows as the sprite gets smaller because a small sprite is nearly
+all code. **Measure the accesses, not just the time.** `tests/sam.py`'s
+`traffic()` counts them; `bubble/tools/budget.py` derives the budget they
+are spent against.
+
 ## 13. How any of this is known
 
 Every routine in this repo is verified **byte for byte against a Python

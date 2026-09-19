@@ -31,20 +31,40 @@
   10 x 54                masked   9470 + wipe  3780 =  13250, solid box twice   8842
   and                    over the BOARD neither applies: it repaints every byte
 
-  A game's frame, and what is left for sprites
-  the board at 96 rows, chequer10's band
-    25 Hz                 189112 T fixed,   50888 left =  3914 bytes of sprite
-    16.7 Hz               189112 T fixed,  170888 left = 13145 bytes of sprite
-    12.5 Hz               189112 T fixed,  290888 left = 22376 bytes of sprite
-  the board at 70 rows, a 12 row band
-    25 Hz                 128097 T fixed,  111903 left =  8607 bytes of sprite
-    16.7 Hz               128097 T fixed,  231903 left = 17838 bytes of sprite
-    12.5 Hz               128097 T fixed,  351903 left = 27069 bytes of sprite
-  at                     13 T-states a byte drawn: a masked sprite over the board
+  The same frames in the currency that binds: memory slots
+                                 T-states accesses   by T by slots
+  the tallest board, three trees   218520    57994   1.82    2.44   +34%
+  the tallest board, no trees      187261    49903   1.56    2.10   +34%
+  the shortest board, no trees      92526    24217   0.77    1.02   +32%
+                                 a frame is 120000 T-states or 23808 slots, and this code is
+                                 slot-limited, so the right hand column is the true one
 
-  and what a mix of sprites needs
-    the ask: 4 large, 8 medium 12 sprites, 15012 bytes, 226500 T-states
-    2 large, 4 medium, 6 small 12 sprites,  9774 bytes, 170070 T-states
-    1 large, 5 medium, 6 small 12 sprites,  9423 bytes, 158460 T-states
+  What a sprite costs in slots, which is not what it costs in T
+                        T  accesses   T a byte slots a byte
+  4x13               1287       307       53.6       12.79
+  4x19               1497       353       44.0       10.38
+  8x27               2672       657       27.8        6.84
+  8x39               3609       888       25.8        6.34
+  12x54              5454      1364       21.0        5.25
+  20x81             11119      2875       17.8        4.61
+  28x105            16217      4255       15.3        4.01
+  32x135            22190      5861       14.5        3.82
+  against which  a PUSH fill is 1.50 slots a byte and cannot draw a
+                 picture; compiled code pays for its own fetches too
+
+  and what a mix of sprites needs, in slots
+                                bytes T-states     slots
+  the ask: 4 large, 8 medium    15012   226500     57345
+  2 large, 4 medium, 6 small     9774   170070     37336
+  1 large, 5 medium, 6 small     9423   158460     35995
+                               at 3.82 slots a byte, the measured figure for the
+                               largest compiled sprite here
+
+  The verdict, in slots: a display frame is 23808 of them
+  the picture, without sprites  33888 slots for the board at 70 rows, a 12 row band,
+                               the pilot, sound and the game's own arithmetic
+  the ask: 4 large, 8 medium    91233 slots = 3.83 frames -> 12.5 Hz
+  2 large, 4 medium, 6 small    71224 slots = 2.99 frames -> 16.7 Hz
+  1 large, 5 medium, 6 small    69883 slots = 2.94 frames -> 16.7 Hz
 
 ALL TESTS PASSED

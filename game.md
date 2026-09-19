@@ -1,10 +1,22 @@
 # Could this be a playable Space Harrier?
 
 **Yes, at 16.7 Hz — three display frames — with the board brought down to
-about 70 scanlines and the horizon band shortened. At 25 Hz you get about
-half the sprite load asked for.** The arithmetic is in
-`tests/mkbudget.py` and `reports/budget.txt`; everything below is measured
-except where it says otherwise.
+about 70 scanlines and the horizon band shortened, and with the sprite load
+at about two thirds of what was asked. The full ask is a 12.5 Hz game.**
+The arithmetic is in `tests/mkbudget.py` and `reports/budget.txt`;
+everything below is measured except where it says otherwise.
+
+**In the currency that binds**, which is memory slots rather than T-states
+— see the last section, which is no longer a list of caveats:
+
+| | slots | frames | |
+|---|---|---|---|
+| the picture without sprites | 33,888 | 1.42 | board at 70 rows, a 12 row band, the pilot, sound, the game's arithmetic |
+| **the ask: 4 large, 8 medium** | **91,233** | **3.83** | **12.5 Hz** |
+| **2 large, 4 medium, 6 small** | **71,224** | **2.99** | **16.7 Hz, with nothing to spare** |
+| 1 large, 5 medium, 6 small | 69,883 | 2.94 | 16.7 Hz |
+
+A display frame is 23,808 slots.
 
 | the ask: 12 sprites, 4 of them 32x135 | T-states | |
 |---|---|---|
@@ -18,8 +30,9 @@ except where it says otherwise.
 | everything else, as above | 128,097 | |
 | **a frame** | **298,167** | **124% of 25 Hz, 83% of 16.7 Hz, 62% of 12.5 Hz** |
 
-And then take 10-25% off for contention, which none of these numbers
-carry — see the end.
+The T-state tables that follow are what the code costs uncontended. On the
+real machine it is **34% more**, consistently, and that is measured rather
+than guessed now — the section at the end says how.
 
 **These sprite figures are the masked form**, at 13 T-states a byte drawn,
 because that is what chequer10's trees are. `mipsprite.md` measures the
@@ -167,25 +180,55 @@ affordable and buys a quarter of the sprite bank.
 If it is still not enough: **page the sprites per level**, which is what
 the arcade's ROM banking did. A level uses four to six object types.
 
-## The honest risk: none of these numbers carry contention
+## Contention: no longer a guess, and it costs a third
 
-Every figure in this repo is raw Z80 T-states. A real SAM's ASIC steals
-cycles from the CPU while the display is being fetched, which is **41% of
-a frame**, and `costs.md` §1b measures what that is charged on: chequer9
-runs at one memory cycle every **3.73 T-states**, against a `PUSH` fill's
-floor of 3.67. **There is no slack in it for contention to come out of** —
-this code is as exposed to it as a Z80 program can be.
+Every T-state figure in this repository is raw Z80 time. The machine does
+not work that way. **The ASIC shares one memory bus between the CPU and the
+display and grants the CPU one access per 8 T-states while the raster is in
+the display window, one per 4 T everywhere else** — 23,808 slots a frame,
+derived in `bubble/tools/budget.py` and set out in
+`docs/BUBBLE_BOBBLE_SAM.md`. Every access costs a slot: an opcode fetch, an
+operand byte, a data read, a data write, each half of a `PUSH`. The cost of
+an instruction is `max(natural_T, accesses x slot_width)`.
 
-What is not measured anywhere here is the stretch factor: what one
-contended access actually costs. At +1 T-state a cycle over 41% of the
-frame it is +11% overall; at +2 it is +22%. **So put 10-25% on top of
-every number above**, which is the difference between "16.7 Hz with room"
-and "16.7 Hz if it goes well".
+**So the question is not how many T-states a frame takes but how many
+accesses**, and `tests/sam.py`'s `traffic()` counts those. Put the two
+together — which no single branch of this repository had done — and the
+answer falls out:
+
+| a chequer10 frame | T-states | accesses | by T | by slots | |
+|---|---|---|---|---|---|
+| the tallest board, three trees | 218,520 | 57,994 | 1.82 | **2.44** | +34% |
+| the tallest board, no trees | 187,261 | 49,903 | 1.56 | **2.10** | +34% |
+| the shortest board, no trees | 92,526 | 24,217 | 0.77 | **1.02** | +32% |
+
+This code is slot-limited — 3.7 T-states an access against a frame that
+averages 5.0 — so the right hand column is the true one. **chequer10 at its
+worst needs three display frames, not two**: 16.7 Hz on the real machine
+where the emulator says 25.
+
+**And a compiled sprite costs far more in slots than in T-states**, because
+the code stream is memory traffic too:
+
+| the tree | T a byte drawn | slots a byte drawn |
+|---|---|---|
+| 32x135 | 14.5 | **3.82** |
+| 20x81 | 17.8 | 4.61 |
+| 8x27 | 27.8 | 6.84 |
+| a `PUSH` fill, which cannot draw a picture | 5.5 | **1.50** |
+
+Compiling the picture into code buys a factor of three or four in T-states
+and less than two in slots, because every instruction of it has to be
+fetched through the same bus as the pixels it writes. It still wins — a
+data-driven blitter reads a source byte, a mask byte and the destination
+before it writes, which is four slots a byte before any loop overhead — but
+not by the margin the T-state tables suggest.
 
 That makes the recommendation:
 
 - **Design to 16.7 Hz**, three display frames, and a sprite budget of
-  **about 10,000 bytes a frame** — two large, four medium, six small.
+  **about 9,500 bytes a frame** — two large, four medium, six small, which
+  is 2.99 frames of slots and therefore has nothing in hand.
 - **A 176 row playfield** under a 16 row status strip, the horizon at
   about 70 rows of it.
 - **A byte-aligned horizon band**, twelve rows.
@@ -194,7 +237,9 @@ That makes the recommendation:
 - **Draw them as opaque boxes off a width chain**, per `mipsprite.md`, not
   as masked silhouettes at eight fixed sizes: 8.8 T-states a byte rather
   than 13 to 18, and the heights come free off a row program.
-- And measure the stretch factor on real hardware before believing any of
-  it, because that is the one number here that is a guess.
+- And **confirm the slot rates on real hardware**. The 1-per-8-T display
+  grant is a model, stated in `docs/BUBBLE_BOBBLE_SAM.md` and not yet
+  checked against a machine; everything above hangs off it, and a rate of
+  1-per-6 or 1-per-12 moves every verdict here by a frame.
 
     python3 tests/mkbudget.py                 # every number above

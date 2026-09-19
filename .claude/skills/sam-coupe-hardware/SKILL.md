@@ -173,9 +173,25 @@ so at the head of the table, and `costs.md` §1b measures the thing
 contention is actually charged on: **memory cycles a frame**, counted by
 `tests/sam.py`'s `traffic()`. chequer9 runs at 3.73 T-states a cycle against
 a `PUSH` fill's floor of 3.67, so these routines are as exposed as a Z80
-program can be. What is not modelled is the stretch factor - how much a
-contended access costs - which wants the manual's rules rather than a
-guess. The manual notes ROM runs slightly faster than
+program can be.
+
+**And the stretch factor is modelled now.** The ASIC grants the CPU one
+memory access per 8 T-states while the raster is in the display window
+(256 of a line's 384 T) and one per 4 T over the rest of the line and the
+120 blanked lines: 192 x (32 + 32) + 120 x 96 = **23,808 memory accesses a
+frame**, against 119,808 T-states. An instruction costs
+`max(natural_T, accesses x slot_width)`, so during the display almost
+everything costs `accesses x 8`. Anything built on `PUSH` wants an access
+every 3.67 T and is therefore slot-limited throughout, which means it takes
+`accesses / 23,808` frames however few T-states it looks like - **a third
+more than the T-state count says**, measured across chequer10 at three
+horizons. `docs/BUBBLE_BOBBLE_SAM.md` derives it, `bubble/tools/budget.py`
+computes it, `tests/sam.py`'s `traffic()` counts what a routine spends and
+`tests/mkbudget.py` works the example. It is a model rather than a hardware
+measurement: confirming the two slot rates on a real machine is the open
+question, and every frame-rate claim in this repository hangs off it.
+
+The manual notes ROM runs slightly faster than
 RAM for the same code, and that `002B` holds a `DJNZ $` for uncontended
 timing loops.
 
