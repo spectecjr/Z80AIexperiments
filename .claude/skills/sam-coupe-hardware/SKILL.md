@@ -105,12 +105,22 @@ wrong. `Base/SAMIO.cpp`'s `UpdatePaging()` tests external *before* ROM 1:
     else if (m_state.lmpr & LMPR_ROM1)    PageIn(Section::D, ROM1);
     else                                  PageIn(Section::D, (hmpr + 1) & 31);
 
-so it gives **external memory** for D where the rule above gives ROM 1.
+so it gives **external memory** for D where the rule above gives ROM 1. Its
+own comment lists the precedence as "External RAM, ROM1, or internal RAM".
 Everything else about the two agrees: section A is ROM0 unless RAM0, C and D
 take `LEPR` (128) and `HEPR` (129) independently when MCNTRL is set, and the
-pair rule holds. **This corner only bites a program that wants ROM 1 and
-external memory at once**, which is unusual - but until it is settled, do not
-rely on either answer.
+pair rule holds.
+
+**The rule to code to, whichever it turns out to be: never set ROM1 and
+MCNTRL at the same time.** Clear `LMPR` bit 6 before enabling external
+memory, and section D is unambiguous under both readings. That is correct
+either way and costs nothing, because a program that wants 64 pages of
+external RAM in the high block is not also running out of ROM 1.
+
+And if the corner cannot be avoided: **SimCoupe's answer is the one that
+will happen in practice**, because that is what the code will be run and
+tested on. The question is out with the SAM developer community; when it
+comes back this note becomes one line either way.
 
 `LMPR = 4` puts page 4 at `0000` and page 5 at `4000`. You cannot choose the
 two halves independently, so there is no way to hold one half still while
