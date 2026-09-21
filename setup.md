@@ -46,12 +46,14 @@ thirty seconds - press keypad `/` to break in, read `B`, `C` and `D`. They
 should be **132, 26 and 90**. `tests/mkcontend.py` holds those as the
 oracle, so if a change to the timing model moves them, it says so.
 
-**And a machine to load a demo on.** `layout.md`'s "What is not here" is
-the loader: an entry stub, the page map starting at page 1, and an image
-built with each chunk at its page offset. The bench already knows every
-chunk's page, so it is bookkeeping rather than new work - and
-`contend.z80s` is a worked example of the whole path, from `.z80s` through
-a `.sbt` that SimCoupe boots.
+**And a machine to load a demo on.**
+
+    python3 tests/mksbt10.py              # builds build/chequer10.sbt
+    simcoupe build/chequer10.sbt          # boots it: chequer10, flying
+
+is the demo itself, loader and all - see `loader.md`. With SimCoupe also
+installed, `SIMCOUPE=... python3 tests/simshot10.py` boots it, grabs the
+screen and compares what the machine drew against the model.
 
 ## Where things are
 

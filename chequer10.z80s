@@ -109,8 +109,10 @@ cq10_frame:
         CALL cq10_tree          ; the tree over the board and the desert,
         CALL cq10_pilot         ; and the pilot over the tree
 
-        IN   A,(CHQ4_HMPR)      ; the flip, which is the hardware's own
-        AND  31                 ; record of which buffer is which
+cq10_flip:                      ; the flip, which is the hardware's own
+        IN   A,(CHQ4_HMPR)      ; record of which buffer is which. A
+        AND  31                 ; loader that would rather flip at the
+                                ; flyback puts a RET here: demo10.z80s
         LD   C,A
         OR   CHQ4_MODE4
         OUT  (CHQ4_VMPR),A

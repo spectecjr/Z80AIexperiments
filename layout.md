@@ -62,15 +62,17 @@ the one thing here that will not build. Porting its sources is a real piece
 of work rather than a rename, so it is written down here rather than done
 quietly.
 
-## What is not here
+## The loader, which used to be what was not here
 
-**A loader.** Everything in `tests/` is driven by Python: the bench sets the
-paging registers itself, puts a stack at `7FF0` and calls a routine. A real
-machine enters a demo at `8000` with ROM 0 in section A, the system page in
-B, pages 1 and 2 in C and D, interrupts on and the stack somewhere in
-`4000-7FFF` (see the hardware skill's **Demo configuration**), and the demo
-has to `DI`, move its stack, set up its own paging and go. Nothing here does
-that.
+**`build/chequer10.sbt` boots.** Everything in `tests/` is driven by Python:
+the bench sets the paging registers itself, puts a stack at `7FF0` and calls
+a routine. A real machine enters a demo at `8000` with ROM 0 in section A,
+the system page in B, pages 1 and 2 in C and D, interrupts on and the stack
+somewhere in `4000-7FFF` (see the hardware skill's **Demo configuration**),
+and the demo has to `DI`, move its stack, set up its own paging and go.
+`tests/sam_chq10_load.asm` does that, `demo10.z80s` runs the demo once it
+has, and **`loader.md`** is the note on both. The rest of this section is
+what the shape of the problem was, and all of it still holds.
 
 The shapes agree, which is the good news: the bench's stack lives in section
 B and its code in the high block, exactly where the machine's entry state
@@ -83,9 +85,15 @@ page `1 + n / 16384`, so the image is the map, and the map starts at page 1
 because page 0 is the system page and sits below the load address.
 **`tests/sam.py` allocates chunk 0 to page 0**, which a linear load cannot
 reach - so a real build either shifts the whole map up a page or copies that
-chunk into page 0 after taking control. That is a small, concrete piece of
-work, and it is the only thing between these *demos* and running on a
-machine.
+chunk into page 0 after taking control.
+
+In the end it does neither, because of a second limit: a `.sbt` is read
+through a chain of sectors that **stops at the end of side 0**, 387,600
+bytes, so the 64K of holes over the buffers does not fit in the file either.
+The image therefore ships the chunks back to back in 23 pages and the loader
+moves all 22 of them into the map at run time, page 0 included. Two seconds
+of `LDIR`, and the map it ends up with is `tests/sam.py`'s chunk for chunk -
+`tests/test_sbt10.py` checks exactly that.
 
 The **timing** question is settled and did not need it: `contend.z80s` is a
 standalone test that measures the contention with nothing but the machine,

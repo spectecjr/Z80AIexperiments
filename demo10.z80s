@@ -1,0 +1,184 @@
+;------------------------------------------------------------------
+; demo10.z80s - the driver that runs chequer10 on a machine
+;
+;   demo_go      where the loader arrives, with the bank at 0x0000,
+;                a screen pair at 0x8000 and the stack at 0x7FF0
+;
+; This is the other half of chequerboot.z80s: the loader gets the map
+; into place and jumps here, and everything from here on is the demo.
+; It lives in the resident block behind each buffer, which is the only
+; code that is mapped whatever else is - and because there are two
+; copies of it, the one thing it may NOT keep here is state that has to
+; outlive a flip. The script pointer lives at DEMO_WS, in the bank's
+; spare, where the stack is.
+;
+; THE FLIP IS TAKEN OFF cq10_frame. On the bench the frame ends with
+; the flip and nothing cares when it happens; on a machine a VMPR write
+; part way down the screen tears it. So demo_go patches a RET over the
+; flip in both copies of the resident block and does it here instead,
+; after waiting for the frame interrupt - which is also the demo's
+; pacing.
+;
+; INTERRUPTS. Nothing here wants one: the pacing polls the status port,
+; which reports the frame interrupt whether or not the CPU is taking
+; interrupts. But the demo's own routines EI after every stretch that
+; puts SP on the screen, so an interrupt WILL be taken between them,
+; and ROM 0 is paged out - 0x0038 is the middle of the bank. So the
+; machine goes to IM 2, with a page of identical vectors and a handler
+; that returns: the interrupt is harmless rather than avoided.
+;
+; Written by Claude (Opus) for the Z80AIexperiments repo.
+;------------------------------------------------------------------
+
+DEMO_WS:        EQU 0x7F00      ; the script pointer, in the bank's spare
+DEMO_SP:        EQU 0x7FF0      ; and the stack, just above it
+DEMO_CLUT:      EQU 0xF8
+DEMO_LINE:      EQU 0xF9        ; write: the scanline to interrupt on
+DEMO_STATUS:    EQU 0xF9        ; read: bit 3 low is the frame interrupt
+DEMO_KEYS:      EQU 0xFE
+DEMO_LINEOFF:   EQU 255         ; a scanline the raster never reaches
+DEMO_IPAGE:     EQU 0xFA        ; IM 2's table, and 0xFBFB is the handler
+                                ; every byte of it points at
+
+;------------------------------------------------------------------
+; demo_go - set the machine up and run
+;------------------------------------------------------------------
+
+demo_go:
+    IFDEF DEMO_TRACE
+        LD   A,1                ; the border says how far it got
+        OUT  (DEMO_KEYS),A
+    ENDIF
+        LD   A,DEMO_LINEOFF
+        OUT  (DEMO_LINE),A      ; the frame interrupt is the only one
+        LD   A,DEMO_IPAGE
+        LD   I,A
+        IM   2
+
+        LD   HL,demo_pal        ; the sixteen the demo draws in
+        LD   BC,DEMO_CLUT
+demo_p1:
+        LD   A,(HL)
+        INC  HL
+        OUT  (C),A
+        INC  B
+        LD   A,B
+        CP   16
+        JR   C,demo_p1
+
+        LD   A,0xC9             ; RET, over the flip at the end of the
+        LD   (cq10_flip),A      ; frame - in this copy of the resident
+        LD   A,CHQ4_SCR1        ; block and in the one behind the other
+        OUT  (CHQ4_HMPR),A      ; buffer, which is the same code at the
+        LD   A,0xC9             ; same address: the OUT changes which of
+        LD   (cq10_flip),A      ; them is running this instruction and
+        LD   A,CHQ4_SCR0        ; nothing else
+        OUT  (CHQ4_HMPR),A
+
+        LD   HL,demo_script     ; the demo's own camera, pilot and trees
+        LD   (DEMO_WS),HL
+    IFDEF DEMO_TRACE
+        LD   A,2
+        OUT  (DEMO_KEYS),A
+    ENDIF
+        CALL cq10_init          ; the sky into both buffers
+    IFDEF DEMO_TRACE
+        LD   A,3
+        OUT  (DEMO_KEYS),A
+    ENDIF
+
+;------------------------------------------------------------------
+; demo_loop - a frame: the script, the picture, the flyback, the flip
+;------------------------------------------------------------------
+
+demo_loop:
+        LD   HL,(DEMO_WS)       ; seventeen bytes a frame, in the order
+        LD   DE,chq4_camx       ; the state sits in: the camera, then
+        LD   BC,4               ; the horizon, then the pilot, then the
+        LDIR                    ; three tree slots
+        LD   A,(HL)
+        INC  HL
+        LD   (cq10_hz),A
+        LD   DE,cq10_px
+        LD   BC,3
+        LDIR
+        LD   DE,cq10_tk
+        LD   BC,9
+        LDIR
+        LD   DE,demo_end        ; and round again at the end of it
+        LD   A,H
+        CP   D
+        JR   NZ,demo_s1
+        LD   A,L
+        CP   E
+        JR   NZ,demo_s1
+        LD   HL,demo_script
+demo_s1:
+        LD   (DEMO_WS),HL
+
+    IFDEF DEMO_TRACE
+        LD   A,4
+        OUT  (DEMO_KEYS),A
+    ENDIF
+        CALL cq10_frame         ; the board, the desert, the trees, him
+    IFDEF DEMO_TRACE
+        LD   A,5
+        OUT  (DEMO_KEYS),A
+    ENDIF
+
+        DI                      ; then the flyback, polled rather than
+        LD   BC,DEMO_STATUS     ; taken - and polled with interrupts OFF,
+demo_w:                         ; because the interrupt is only active for
+        IN   A,(C)              ; 128 T-states and a handler that takes it
+        AND  0x08               ; is still in there when they run out. Poll
+        JR   NZ,demo_w          ; with them on and the bit is never seen low
+
+        IN   A,(CHQ4_HMPR)      ; the flip, which cq10_frame would have
+        AND  31                 ; done at the end of the frame
+        LD   C,A
+        OR   CHQ4_MODE4
+        OUT  (CHQ4_VMPR),A
+        LD   A,C
+        XOR  CHQ4_SCR0 ^ CHQ4_SCR1
+        OUT  (CHQ4_HMPR),A
+    IFDEF DEMO_TRACE
+        LD   A,6
+        OUT  (DEMO_KEYS),A
+    ENDIF
+
+    IFNDEF DEMO_NOKEYS
+        LD   BC,DEMO_KEYS       ; B = 0: every key row at once
+        IN   A,(C)
+        AND  0x1F
+        CP   0x1F
+        JR   Z,demo_loop
+    ELSE
+        JR   demo_loop
+    ENDIF
+
+;------------------------------------------------------------------
+; demo_quit - hand the machine back
+;------------------------------------------------------------------
+
+demo_quit:
+        DI
+        LD   A,DEMO_LINEOFF
+        OUT  (DEMO_LINE),A
+        LD   A,0x01             ; ROM 0 back at 0x0000, page 1 above it
+        OUT  (CHQ4_LMPR),A
+        JP   0
+
+;------------------------------------------------------------------
+; IM 2: 257 bytes of the same byte, so that whatever the bus gives
+; lands on the same handler, and a handler that does nothing. The
+; interrupt clears itself 128 T-states in, so returning inside that
+; re-enters this - which is harmless, and cheaper than waiting it out.
+;------------------------------------------------------------------
+
+                DEFS DEMO_IPAGE * 256 - $
+demo_ivec:
+                DEFS 257, 0xFB
+                DEFS 0xFBFB - $
+demo_int:
+        EI
+        RETI

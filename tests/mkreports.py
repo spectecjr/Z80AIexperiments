@@ -34,7 +34,7 @@ DEMOS = ("chequer", "chequer2", "chequer3", "chequer4", "chequer5",
          "chequer6", "chequer7", "chequer8", "chequer9", "chequer10",
          "harrier", "road", "road2", "zarch", "democube", "renderlit",
          "portal", "wolf3d", "twist", "roto", "vox", "prismpre",
-         "snd", "budget", "contend")
+         "snd", "budget", "contend", "sbt10")
 
 
 def run(name, timeout=900):

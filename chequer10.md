@@ -17,6 +17,12 @@ three trees are at most 31,036.
 | the rows the board gave up | 0 … 3,736 | when the horizon drops |
 | **`cq10_frame`** | **94,465 / 153,882 / 222,452** | **25 Hz**, 4 frames of 250 over 90% |
 
+**And it runs on a machine.** `build/chequer10.sbt` boots on SimCoupe and
+on a 512K SAM: `loader.md` is the note on how the map gets there and what
+the demo costs once the ASIC has taken its memory cycles - 1.5 to 2.9
+display frames a frame, which is 25 Hz where the board is short and 16.7
+where it is tall.
+
 Bit exact against `tests/chequer10.py` over 156 frames: every one of the 78
 horizons twice, walked up the screen and back down, with the camera moving,
 the pilot in a different place and pose every frame, and three trees at a
