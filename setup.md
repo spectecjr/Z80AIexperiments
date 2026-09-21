@@ -52,8 +52,12 @@ oracle, so if a change to the timing model moves them, it says so.
     simcoupe build/chequer10.sbt          # boots it: chequer10, flying
 
 is the demo itself, loader and all - see `loader.md`. With SimCoupe also
-installed, `SIMCOUPE=... python3 tests/simshot10.py` boots it, grabs the
-screen and compares what the machine drew against the model.
+installed, `SIMCOUPE=... python3 tests/simshot10.py` boots it, compares
+what the machine drew against the model pixel for pixel, and times it -
+49.4 ms a frame, which is the contention model confirmed on a demo rather
+than on three instructions. It also measures the host's own emulation
+speed first, so that the number is about a SAM and not about the desk it
+is running on.
 
 ## Where things are
 

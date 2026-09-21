@@ -13,11 +13,15 @@ Each screen is matched against `tests/chequer10.py` - the model the
 bench test compares against - for every frame of the flight, so a match
 identifies which frame it is as well as proving it right.
 
-It also says how far the flight got between two screens. Read that as a
-check on the picture rather than as a frame rate: SimCoupe throttles to
-real time, so on a host that cannot keep up it reads low and says more
-about the host than the SAM. The frame rate is `tests/test_sbt10.py`'s,
-out of the contention model.
+**And it times the demo on the machine.** Not by watching the clock while
+it runs - the flight loops every 200 frames, and a pair of screens far
+enough apart to time reliably is a pair that cannot tell one lap from
+two. Instead it builds two images that draw a known number of frames and
+then halt, runs each under SimCoupe's `-exitonhalt`, and takes the
+difference: the boot and the 377K load cancel, and what is left is
+frames. `tests/sam_tick.asm` does the same trick for the HOST - count
+display frames and halt - so the emulator's own speed is measured rather
+than assumed, and the demo's rate can be corrected by it.
 
 Needs SimCoupe, xdotool, and an X display; it starts an Xvfb if DISPLAY
 is unset.
@@ -54,6 +58,8 @@ SIMCOUPE = os.environ.get("SIMCOUPE", "simcoupe")
 MAXI = 255                      # SimCoupe's maxintensity, its default
 W, H = 256, 192
 LOAD = 14.0                     # seconds the image takes to load and start
+FRAME_T = 119808                # a display frame on a 6 MHz SAM
+PAL_HZ = 50.08                  # and how many of them a second
 
 
 def rgb_of_sam():
@@ -114,20 +120,68 @@ def same(got, w, pal):
     return int(np.count_nonzero(lut[w] != np.where(got < 0, -1, lut[got])))
 
 
-def run(secs, outdir):
+def timed(sbt, env, limit=400):
+    """Run an image that halts, and return the wall seconds it took."""
+    t0 = time.time()
+    r = subprocess.run([SIMCOUPE, sbt, "-autoboot", "yes", "-sound", "no",
+                        "-exitonhalt", "yes", "-visiblearea", "0",
+                        "-filter", "no"],
+                       env=env, timeout=limit,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+    if r.returncode:
+        sys.exit("SimCoupe returned %d on %s" % (r.returncode, sbt))
+    return time.time() - t0
+
+
+def host_speed(env, lo=250, hi=750):
+    """How fast this host runs the emulator, as a fraction of real time.
+
+    Two runs of `sam_tick.asm`, which counts display frames and halts.
+    The difference is `hi - lo` frames of emulated time against however
+    long the host took over them, with the boot and the load cancelling.
+    """
+    out = []
+    for n in (lo, hi):
+        sbt = "/tmp/tick%d.sbt" % n
+        r = subprocess.run(["sjasmplus", "--raw=" + sbt, "-DDEMO_TICKS=%d" % n,
+                            "-I" + ROOT, os.path.join(HERE, "sam_tick.asm")],
+                           capture_output=True, text=True)
+        if r.returncode:
+            sys.exit(r.stdout + r.stderr)
+        out.append(timed(sbt, env))
+    return ((hi - lo) / PAL_HZ) / (out[1] - out[0])
+
+
+def pace(env, n=200):
+    """Seconds a frame, from two builds that stop after a known count."""
+    from mksbt10 import build
+    out = []
+    for k in (1, n):
+        sbt = "/tmp/chequer10_halt%d.sbt" % k
+        build(sbt, quiet=True, defines={"DEMO_HALT": k, "DEMO_NOKEYS": 1})
+        out.append(timed(sbt, env))
+    return (out[1] - out[0]) / (n - 1)
+
+
+def display():
+    """An X display to run SimCoupe on, its own Xvfb if there is none."""
+    env = dict(os.environ)
+    env.setdefault("SDL_AUDIODRIVER", "dummy")
+    if env.get("DISPLAY"):
+        return env, None
+    env["DISPLAY"] = ":99"
+    xvfb = subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1024x768x24"],
+                            stdout=subprocess.DEVNULL,
+                            stderr=subprocess.DEVNULL)
+    time.sleep(2)
+    return env, xvfb
+
+
+def run(secs, outdir, env):
     os.makedirs(outdir, exist_ok=True)
     for f in os.listdir(outdir):
         if f.endswith(".png"):
             os.remove(os.path.join(outdir, f))
-    env = dict(os.environ)
-    env.setdefault("SDL_AUDIODRIVER", "dummy")
-    xvfb = None
-    if not env.get("DISPLAY"):
-        env["DISPLAY"] = ":99"
-        xvfb = subprocess.Popen(["Xvfb", ":99", "-screen", "0", "1024x768x24"],
-                                stdout=subprocess.DEVNULL,
-                                stderr=subprocess.DEVNULL)
-        time.sleep(2)
     sbt = os.path.join(ROOT, "build", "chequer10.sbt")
     sim = subprocess.Popen(
         [SIMCOUPE, sbt, "-autoboot", "yes", "-sound", "no",
@@ -148,8 +202,6 @@ def run(secs, outdir):
     finally:
         sim.terminate()
         sim.wait(timeout=10)
-        if xvfb:
-            xvfb.terminate()
     return shots
 
 
@@ -162,7 +214,14 @@ def main():
 
     from mksbt10 import build
     build(quiet=True)
-    shots = run(secs, "/tmp/simshot10")
+    env, xvfb = display()
+    try:
+        shots = run(secs, "/tmp/simshot10", env)
+        speed = host_speed(env)
+        secs_a_frame = pace(env)
+    finally:
+        if xvfb:
+            xvfb.terminate()
 
     script = flight()
     pal = palette()
@@ -181,24 +240,13 @@ def main():
         print("  %-16s %5.1fs in: frame %3d of the flight, %d pixels wrong"
               % (os.path.basename(png), at, best, bad))
     print()
-    if len(seen) >= 2:
-        (a0, t0, _), (a1, t1, _) = seen[0], seen[-1]
-        n = (t1 - t0) % len(script)
-        hz = n / (a1 - a0)
-        print("  %-40s %d frames in %.1fs, %.1f a second"
-              % ("the flight got through", n, a1 - a0, hz))
-        print("  %-40s %.1f Hz, the path's own rate"
-              % ("which is %d%% of" % round(100 * hz / RATE), RATE))
-        if hz < 0.8 * RATE:
-            print()
-            print("  That is the HOST's speed, not the SAM's: SimCoupe "
-                  "throttles to real")
-            print("  time and reads low on a machine that cannot keep up "
-                  "with it. What a")
-            print("  frame costs on a SAM is tests/test_sbt10.py's "
-                  "contended figure - this")
-            print("  run is here to say the picture is right, which it "
-                  "is to the pixel.")
+    hz = 1.0 / secs_a_frame * (1.0 / speed if speed < 0.98 else 1.0)
+    print("  %-40s %.0f%% of real time"
+          % ("this host ran the emulator at", 100 * speed))
+    print("  %-40s %.1f ms, so %.1f Hz"
+          % ("a frame on the machine", 1000 * secs_a_frame, hz))
+    print("  %-40s %.2f, and the path is stepped for %.1f"
+          % ("display frames a frame", PAL_HZ / hz, RATE / 1))
     bad = sum(b for _, _, b in seen)
     print()
     print("ALL TESTS PASSED" if bad == 0 else "%d pixels differ" % bad)

@@ -200,6 +200,14 @@ have gone wrong somewhere: they are what the machine does. The measured
 values are the oracle in `tests/mkcontend.py` now, and a change to the
 contention model that moves any of them fails it.
 
+**And it now holds over a whole demo, not just three instructions.**
+`build/chequer10.sbt` boots on SimCoupe and draws the flight; timed there
+by running two builds that stop after a known number of frames and taking
+the difference, a frame costs **49.4 ms - 2.48 display frames**, against
+the **2.5** this model prices the same frames at. See `loader.md`. (The
+emulator's own speed was measured the same way rather than assumed, with
+`tests/sam_tick.asm`: 100% of real time on the host that ran it.)
+
 The two slot rates are not this repository's guess: **SimCoupe implements
 exactly them**, `mask = main_screen ? 7 : 3` over a 256 T display window in
 a 384 T line, and its geometry gives 23,808 slots a frame on the nose.

@@ -33,7 +33,9 @@ the map with the buffers as holes in it. Two things stop that here:
   1's first four tracks as directory tracks, so they come back empty and
   the load ends with *"108 End of file"*. The limit is
   76 × 10 × 510 = **387,600 bytes**, measured by bisection, and 64K of
-  holes over the buffers does not fit inside it.
+  holes over the buffers does not fit inside it. It looks like a one-line
+  bug rather than a design limit: `designs/simcoupe-sbt-side0.md` is the
+  report, with the code path and a suggested fix.
 
 So the image ships the chunks **back to back** — 23 pages, 10,768 bytes
 under the limit — and the loader puts them where they belong.
@@ -97,12 +99,29 @@ on the same handler, and a handler at `0xFBFB` that returns.
 | a frame, on the bench | 116,685 … 219,062 | what `costs.md` counts |
 | a frame, contended | **148,856 … 318,856** | ×1.52, `tests/sam.py`'s model |
 | held for | **1.2 … 2.7 display frames** | so **25 Hz down to 16.7** |
+| **measured on SimCoupe** | | **49.4 ms a frame, 20.2 Hz, 2.48 display frames** |
 
 The spread is the horizon: the board is 10% of the screen at its shortest
 and 50% at its tallest, and the tall one costs twice the short one. The
 camera therefore steps **2.5 display frames' worth a frame** — the mean —
 so the ground goes past at the speed the GIF shows it at, with the judder
 that a demo whose cost swings by a factor of two has on a real machine.
+
+**And the machine agrees with the model.** 2.48 display frames measured
+against 2.5 predicted, over a whole lap of the flight — which is the
+contention model priced end to end on a demo rather than on the three
+instructions `contend.z80s` times.
+
+How that is measured matters, because the obvious way is wrong: the flight
+**loops every 200 frames**, so two screenshots far enough apart to time
+reliably cannot tell one lap from two, and the first attempt here read
+3.9 Hz because 240 frames had gone by and 40 were counted. `simshot10.py`
+instead builds two images that draw a known number of frames and then halt
+— 1 and 200 — runs each under SimCoupe's `-exitonhalt` and takes the
+difference, so the boot and the 377K load cancel out. `tests/sam_tick.asm`
+does the same for the host, counting display frames and halting, so the
+emulator's own speed is measured rather than assumed: **100% of real time**
+here, which is what makes the 20.2 Hz a number about a SAM.
 
 ## What checks it
 
@@ -116,7 +135,14 @@ all, and checks the map the loader assembled chunk for chunk against
 against `tests/chequer10.py` — the same model the bench test compares
 against. `simshot10.py` does the last of those on SimCoupe instead: the
 real ROM, the real ASIC, a screenshot through SimCoupe's own key, matched
-against every frame of the flight. Both come out **bit exact**.
+against every frame of the flight — and then times the demo as above. Both
+come out **bit exact**.
+
+Three build options exist for the timing and for getting at what a machine
+with no debugger is doing, and `tests/mksbt10.py`'s `build(defines=...)`
+takes them: `DEMO_HALT=n` stops after n frames and halts, `DEMO_NOKEYS`
+does not quit on a keypress, and `DEMO_TRACE` puts a number on the border
+at each stage of the start-up.
 
 ## Gotchas worth keeping
 
@@ -129,5 +155,7 @@ against every frame of the flight. Both come out **bit exact**.
 - **`-DDEMO_TRACE`** puts a number on the border at each stage of the
   start-up — which is how the interrupt problem above was found, on a
   machine with no debugger attached.
+- **A demo that loops cannot be timed by watching it.** See above: the
+  aliasing reads low and looks exactly like a slow host.
 - The image wants a **512K** SAM: the map claims 26 pages and the loader
   borrows a 27th.

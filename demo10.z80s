@@ -31,6 +31,7 @@
 ;------------------------------------------------------------------
 
 DEMO_WS:        EQU 0x7F00      ; the script pointer, in the bank's spare
+DEMO_LEFT:      EQU 0x7F02      ; and, in a DEMO_HALT build, the frames to go
 DEMO_SP:        EQU 0x7FF0      ; and the stack, just above it
 DEMO_CLUT:      EQU 0xF8
 DEMO_LINE:      EQU 0xF9        ; write: the scanline to interrupt on
@@ -77,6 +78,10 @@ demo_p1:
 
         LD   HL,demo_script     ; the demo's own camera, pilot and trees
         LD   (DEMO_WS),HL
+    IFDEF DEMO_HALT             ; a build that stops after a known number
+        LD   HL,DEMO_HALT       ; of frames, so that a host can be timed
+        LD   (DEMO_LEFT),HL     ; against what the model says they cost
+    ENDIF
     IFDEF DEMO_TRACE
         LD   A,2
         OUT  (DEMO_KEYS),A
@@ -146,6 +151,14 @@ demo_w:                         ; because the interrupt is only active for
         OUT  (DEMO_KEYS),A
     ENDIF
 
+    IFDEF DEMO_HALT
+        LD   HL,(DEMO_LEFT)
+        DEC  HL
+        LD   (DEMO_LEFT),HL
+        LD   A,H
+        OR   L
+        JR   Z,demo_quit        ; which halts, for -exitonhalt
+    ENDIF
     IFNDEF DEMO_NOKEYS
         LD   BC,DEMO_KEYS       ; B = 0: every key row at once
         IN   A,(C)
@@ -164,6 +177,9 @@ demo_quit:
         DI
         LD   A,DEMO_LINEOFF
         OUT  (DEMO_LINE),A
+    IFDEF DEMO_HALT
+        HALT                    ; with interrupts off, which is what
+    ENDIF                       ; SimCoupe's -exitonhalt quits on
         LD   A,0x01             ; ROM 0 back at 0x0000, page 1 above it
         OUT  (CHQ4_LMPR),A
         JP   0

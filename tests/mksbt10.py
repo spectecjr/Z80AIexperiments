@@ -86,8 +86,14 @@ def moves(chunk_pages):
     return [m for m in reversed(up)] + down
 
 
-def build(out_path=None, quiet=False):
-    resident, syms = assemble(RESIDENT)
+def build(out_path=None, quiet=False, defines=None):
+    """Assemble the image. `defines` go to the resident block only:
+
+    DEMO_HALT   stop after n frames and halt, for SimCoupe's -exitonhalt
+    DEMO_NOKEYS do not quit on a keypress, for an unattended run
+    DEMO_TRACE  a number on the border at each stage of the start-up
+    """
+    resident, syms = assemble(RESIDENT, defines=defines)
     defs = {"CHQ4_RET": syms["chq4_ret"], "CHQ4_SCR": syms["CHQ4_SCREEN"],
             "C9_RET": syms["c9_ret"], "CQ9_R": syms["cq10_pret"],
             "CQ10_R": syms["cq10_ret"]}
